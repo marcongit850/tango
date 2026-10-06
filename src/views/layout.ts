@@ -138,6 +138,9 @@ function shell(options: {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
   <title>${esc(options.title)}</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <style>${STYLES}</style>
 </head>
 <body>
@@ -148,9 +151,7 @@ function shell(options: {
     <div class="account">${options.account}</div>
   </header>
   <main id="content" class="wrap stack">${options.body}</main>
-  <footer class="site-footer wrap">
-    <p>${esc(options.brand)}</p>
-  </footer>
+  <footer class="site-footer wrap">${options.brand ? `<p>${esc(options.brand)}</p>` : ""}</footer>
 </body>
 </html>`;
 }
@@ -198,13 +199,10 @@ export async function render(
     );
     if (isStaff(membership.role_id)) items.push({ id: "admin", href: `${base}/admin`, label: "Admin" });
   } else if (association) {
-    items.push(
-      { id: "home", href: base, label: "Neighborhood" },
-      { id: "login", href: `${base}/login`, label: "Log in" },
-    );
+    items.push({ id: "login", href: `${base}/login`, label: "Log in" });
   } else {
+    if (options.active !== "home") items.push({ id: "home", href: "/", label: "Home" });
     items.push(
-      { id: "home", href: "/", label: "Home" },
       { id: "login", href: "/a/tango-mar/login", label: "Resident login" },
       { id: "join", href: "/join", label: "Request to join" },
     );
@@ -222,11 +220,12 @@ export async function render(
   const flash = c.get("flash");
   const tone = c.get("flashTone");
   const flashHtml = flash ? `<div class="flash ${tone === "warn" ? "warn" : ""}">${esc(flash)}</div>` : "";
-  const brand = association?.name || "Tango Mar";
+  const onPublicHome = !association && options.active === "home";
+  const brand = onPublicHome ? "" : association?.name || "Tango Mar";
   const body = shell({
     title: options.title,
     brand,
-    brandHref: association ? `/a/${association.slug}` : "/",
+    brandHref: "/",
     nav,
     account,
     body: `${flashHtml}${options.body}`,

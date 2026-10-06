@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canViewPropertyFinancials, isStaff, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
-import { homePage, joinRequestPage } from "../src/views/public";
+import { checkEmailPage, homePage, joinReceivedPage, joinRequestPage, loginPage } from "../src/views/public";
+import type { Association } from "../src/types";
 import { parseCsv, parseOwnersCsv } from "../src/lib/csv";
 import { isIsoDate, todayIso, zonedLocalToUtc } from "../src/lib/dates";
 import { balanceCents, csvText, formatMoney, invoiceStatus, isDelinquent, parseMoneyToCents } from "../src/lib/money";
@@ -118,11 +119,48 @@ describe("public home", () => {
     expect(html).toContain('href="/a/tango-mar/login"');
     expect(html).toContain("Request to join");
     expect(html).toContain('href="/join"');
+    expect(html).toContain(
+      "Welcome to your neighborhood dashboard. Here you can access association information, community documents, announcements, account details, and other resources for homeowners of the Tango Mar Property Owners Association.",
+    );
+    expect(html).not.toContain("A beach neighborhood in Miramar Beach");
     expect(html).not.toContain("Open portal");
     expect(html).not.toContain("Enter Tango Mar");
     expect(html).not.toContain("Associations");
     expect(html).not.toContain("/legal");
     expect(html).not.toContain("Local demo roster");
+  });
+
+  it("confirms a join request without creating a login", () => {
+    const html = joinReceivedPage();
+    expect(html).toContain("Your message has been sent to the Board. A Board member will follow up with you by email.");
+    expect(html).toContain("Submitting this form does not create a homeowner login or account.");
+    expect(html).not.toContain("The board has your note");
+  });
+
+  it("uses Marc's sign-in and magic-link copy", () => {
+    const association: Association = {
+      id: "assoc_tango_mar",
+      slug: "tango-mar",
+      name: "Tango Mar",
+      legal_name: "Tango Mar Property Owners Association",
+      address_line1: "31 Tang O Mar Drive",
+      city: "Miramar Beach",
+      state: "FL",
+      postal_code: "32550",
+      county: "Walton County",
+      timezone: "America/Chicago",
+    };
+    const login = loginPage(association, "/a/tango-mar/dashboard");
+    expect(login).toContain("Sign in to Tango Mar Dashboard");
+    expect(login).toContain(
+      "Enter the email address associated with your association account. We'll send you a secure, one-time login link. No password required.",
+    );
+    expect(login).not.toContain("There is no password.");
+    const check = checkEmailPage(association.name, null);
+    expect(check).toContain(
+      "If your email is on the Tango Mar roster, your secure sign-in link is on the way. The link expires in 20 minutes and can only be used once. After you sign in, you’ll stay logged in on this device for up to 30 days.",
+    );
+    expect(check).not.toContain("a sign-in link is on its way");
   });
 
   it("shows the fictional roster only for the local demo", () => {

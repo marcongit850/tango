@@ -2,7 +2,7 @@
 
 Neighborhood OS for a small property owners association that still keeps its roster in Excel. This repository is one Cloudflare Worker. The first association is **Tango Mar**, a beach neighborhood in Miramar Beach, Walton County, Florida.
 
-The public home page is the Tango Mar entry: resident login, and a form to request to join. A neighborhood page for a specific association stays at `/a/{slug}`.
+The public home page is the Tango Mar entry: resident login, and a form to request to join. `/a/{slug}` redirects to that home page.
 
 One deployment can host many associations. Each association's lots, balances, documents, and messages stay inside that association. A resident sees only the lots linked to their login. Other residents never see that ledger.
 
@@ -171,7 +171,7 @@ Preview URLs are public unless you put access control in front of them.
 
 | Role | What they can see |
 | --- | --- |
-| Public | Logged-out visitor. Neighborhood page and emergency notices. No documents and no balances. |
+| Public | Logged-out visitor. Public home, resident login, and request to join. No documents and no balances. |
 | Homeowner | Their own lots, invoices, payments, and messages. Current resident documents. |
 | Board member | Homeowner access, plus admin for this association only. |
 | Officer / manager | Same admin tools as the board in this phase. |

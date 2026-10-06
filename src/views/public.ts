@@ -1,8 +1,5 @@
-import { formatAddress } from "../lib/dates";
 import { esc, paragraphs } from "../lib/html";
-import type { AnnouncementRow } from "../db";
 import type { Association } from "../types";
-import { dateTimeCell } from "./bits";
 
 export function homePage(showDemo: boolean): string {
   const demo = showDemo
@@ -19,7 +16,7 @@ export function homePage(showDemo: boolean): string {
   return `<section class="hero">
       <div class="hero-sun" aria-hidden="true"></div>
       <h1>Tango Mar</h1>
-      <p class="lede">A beach neighborhood in Miramar Beach, Walton County, Florida.</p>
+      <p class="lede">Welcome to your neighborhood dashboard. Here you can access association information, community documents, announcements, account details, and other resources for homeowners of the Tango Mar Property Owners Association.</p>
       <p class="actions">
         <a class="button" href="/a/tango-mar/login">Resident login</a>
         <a class="button secondary" href="/join">Request to join</a>
@@ -50,7 +47,8 @@ export function joinRequestPage(
 export function joinReceivedPage(): string {
   return `<section class="panel">
       <h1>Request received</h1>
-      <p>The board has your note and will follow up by email. This does not create a login.</p>
+      <p>Your message has been sent to the Board. A Board member will follow up with you by email.</p>
+      <p>Submitting this form does not create a homeowner login or account.</p>
       <p><a class="button secondary" href="/">Back to home</a></p>
     </section>`;
 }
@@ -66,33 +64,10 @@ Demo covenant text shipped with the first association is a placeholder, not the 
   </section>`;
 }
 
-export function associationHome(association: Association, emergencies: AnnouncementRow[], signedIn: boolean): string {
-  const alerts = emergencies
-    .map(
-      (item) => `<article class="emergency">
-        <h2>${esc(item.title)}</h2>
-        ${paragraphs(item.body)}
-        <p class="muted">Posted ${dateTimeCell(item.published_at, association.timezone)}</p>
-      </article>`,
-    )
-    .join("");
-  return `<section class="panel">
-      <p class="muted">${esc(association.legal_name)}</p>
-      <h1>${esc(association.name)}</h1>
-      <p>A beach neighborhood in Miramar Beach, Walton County, Florida.</p>
-      <p>${esc(formatAddress(association))}</p>
-      <p class="actions">
-        ${signedIn ? `<a class="button" href="/a/${esc(association.slug)}/dashboard">Your dashboard</a>` : `<a class="button" href="/a/${esc(association.slug)}/login">Resident log in</a>`}
-      </p>
-      <p class="muted">News, documents, and dues are available after you sign in. Emergency notices stay on this page.</p>
-    </section>
-    ${alerts}`;
-}
-
 export function loginPage(association: Association, nextPath: string, error = ""): string {
   return `<section class="panel">
-    <h1>Sign in to ${esc(association.name)}</h1>
-    <p>Enter the email on the association roster. We will send a one-time link. There is no password.</p>
+    <h1>Sign in to ${esc(association.name)} Dashboard</h1>
+    <p>Enter the email address associated with your association account. We'll send you a secure, one-time login link. No password required.</p>
     ${error ? `<p class="flash warn">${esc(error)}</p>` : ""}
     <form class="fields" method="post" action="/a/${esc(association.slug)}/login">
       <input type="hidden" name="next" value="${esc(nextPath)}">
@@ -108,7 +83,7 @@ export function checkEmailPage(associationName: string, devLink: string | null):
     : "";
   return `<section class="panel stack">
     <h1>Check your email</h1>
-    <p>If that email is on the ${esc(associationName)} roster, a sign-in link is on its way. It expires in 20 minutes and works once.</p>
+    <p>If your email is on the ${esc(associationName)} roster, your secure sign-in link is on the way. The link expires in 20 minutes and can only be used once. After you sign in, you’ll stay logged in on this device for up to 30 days.</p>
     ${dev}
   </section>`;
 }

@@ -1,12 +1,12 @@
 import type { Hono } from "hono";
-import { findAssociationBySlug, insertJoinRequest, listStaffContacts, notify, visibleAnnouncements, writeAudit } from "../db";
+import { findAssociationBySlug, insertJoinRequest, listStaffContacts, notify, writeAudit } from "../db";
 import { safeNextPath } from "../lib/access";
 import { resendApiKey, sendResendEmail } from "../lib/email";
 import { NotFoundError, isMissingTable } from "../lib/errors";
 import { logError, logInfo } from "../lib/log";
 import type { AppBindings } from "../types";
 import { render } from "../views/layout";
-import { associationHome, homePage, joinReceivedPage, joinRequestPage, legalPage, loginPage } from "../views/public";
+import { homePage, joinReceivedPage, joinRequestPage, legalPage, loginPage } from "../views/public";
 import { readForm, redirectTo, requireAssociation, textValue, type AppContext } from "./common";
 
 const HOME_SLUG = "tango-mar";
@@ -124,15 +124,9 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
     return render(c, { title: "Request received", active: "join", body: joinReceivedPage() });
   });
 
-  app.get("/a/:slug", async (c) => {
-    const association = requireAssociation(c);
-    const emergencies = await visibleAnnouncements(c.env.DB, association.id, new Date().toISOString(), "emergency");
-    const signedIn = Boolean(c.get("user") && c.get("membership") && c.get("membership")?.status !== "inactive");
-    return render(c, {
-      title: association.name,
-      active: "home",
-      body: associationHome(association, emergencies, signedIn),
-    });
+  app.get("/a/:slug", (c) => {
+    requireAssociation(c);
+    return c.redirect("/", 302);
   });
 
   app.get("/a/:slug/login", async (c) => {

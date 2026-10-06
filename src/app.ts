@@ -52,7 +52,6 @@ export function createApp(): Hono<AppBindings> {
     await next();
   });
 
-  app.get("/favicon.ico", () => new Response(null, { status: 204 }));
   app.get("/health", (c) => c.json({ ok: true, service: "tango" }));
 
   registerPublicRoutes(app);

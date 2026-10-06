@@ -611,7 +611,7 @@ function joinRequestActions(slug: string, row: JoinRequestRow): string {
     row.status === "pending"
       ? `<form method="post" action="${base}/reviewed"><button class="secondary" type="submit">Mark reviewed</button></form>`
       : "";
-  const remove = `<form method="post" action="${base}/delete"><label><input type="checkbox" name="confirm" value="yes" required> Confirm</label><button class="secondary" type="submit">Delete</button></form>`;
+  const remove = `<form method="post" action="${base}/delete" onsubmit="return confirm('Delete this join request? This cannot be undone.')"><input type="hidden" name="confirm" value="yes"><button class="secondary" type="submit">Delete</button></form>`;
   return `<div class="actions">${approve}${decline}${review}${remove}</div>`;
 }
 

@@ -72,6 +72,7 @@ input[type="checkbox"] { width: auto; justify-self: start; }
 textarea { min-height: 7rem; }
 form.fields { display: grid; gap: 0.75rem; }
 .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.actions form { display: flex; align-items: center; margin: 0; }
 .badge { display: inline-block; border-radius: 999px; padding: 0.05rem 0.5rem; background: #e7eeed; color: var(--gulf-dark); font-size: 0.82rem; }
 .badge.late { background: var(--emergency); color: var(--late); }
 .devbox { border: 1px dashed var(--gulf); border-radius: 12px; padding: 0.8rem 1rem; background: #f3faf8; }

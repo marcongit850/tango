@@ -353,6 +353,9 @@ describe("join requests admin page", () => {
     expect(html).toContain(">Decline<");
     expect(html).toContain(">Mark reviewed<");
     expect(html).toContain(">Delete<");
+    expect(html).toContain("Delete this join request? This cannot be undone.");
+    expect(html).toContain('name="confirm" value="yes"');
+    expect(html).not.toContain('type="checkbox" name="confirm"');
     expect(html).toContain("/admin/join-requests/reviewed-1/approve");
     expect(html).toContain("/admin/join-requests/reviewed-1/decline");
     expect(html).not.toContain("/admin/join-requests/reviewed-1/reviewed");

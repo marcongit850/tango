@@ -187,7 +187,7 @@ export function documentsPage(association: Association, documents: DocumentRow[]
     .join("");
   return `<section class="panel">
     <h1>Documents</h1>
-    <p class="muted">You see the current version. Older versions stay on file for the board. Budgets marked board-only are hidden here.</p>
+    <p class="muted">Association documents</p>
     ${rows ? `<table><thead><tr><th>Category</th><th>Title</th><th>Version</th><th>File</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No documents published yet.")}
   </section>`;
 }

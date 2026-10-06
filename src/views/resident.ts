@@ -171,7 +171,7 @@ export function noticesPage(association: Association, notices: NoticeRow[]): str
       </article>`,
     )
     .join("");
-  return `<section class="panel"><h1>Notices</h1><p class="muted">Account messages stay in the portal. This is not an email blast.</p></section>
+  return `<section class="panel"><h1>Notices</h1></section>
     ${rows || `<section class="panel">${empty("No notices.")}</section>`}
     ${notices.some((row) => !row.read_at) ? `<form method="post" action="/a/${esc(association.slug)}/notices/read-all"><button type="submit">Mark all read</button></form>` : ""}`;
 }

@@ -5,19 +5,23 @@ import { shouldRevealMagicLink, safeNextPath } from "../lib/access";
 import { formatPlace } from "../lib/dates";
 import { resendApiKey, sendResendEmail } from "../lib/email";
 import { isHttps } from "../lib/html";
+import { NotFoundError } from "../lib/errors";
 import { logInfo } from "../lib/log";
 import { randomToken, sha256Hex } from "../lib/tokens";
 import type { AppBindings } from "../types";
 import { render } from "../views/layout";
 import { checkEmailPage, invalidLinkPage, loginPage } from "../views/public";
-import { readForm, redirectTo, requireAssociation, textValue, type AppContext } from "./common";
+import { readForm, redirectTo, textValue, type AppContext } from "./common";
+
+const HOME_SLUG = "tango-mar";
 
 const LINK_MINUTES = 20;
 const SESSION_SECONDS = 60 * 60 * 24 * 30;
 
 export function registerAuthRoutes(app: Hono<AppBindings>): void {
-  app.post("/a/:slug/login", async (c) => {
-    const association = requireAssociation(c);
+  app.post("/login", async (c) => {
+    const association = await findAssociationBySlug(c.env.DB, HOME_SLUG);
+    if (!association) throw new NotFoundError();
     const fields = await readForm(c);
     const email = textValue(fields, "email", 200).toLowerCase();
     const nextPath = safeNextPath(association.slug, textValue(fields, "next", 300));
@@ -54,7 +58,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>): void {
 
   app.get("/auth/verify", async (c) => {
     const token = c.req.query("token") ?? "";
-    if (!/^[a-f0-9]{64}$/.test(token)) return renderInvalid(c, null);
+    if (!/^[a-f0-9]{64}$/.test(token)) return renderInvalid(c);
     const tokenHash = await sha256Hex(token);
     const now = new Date().toISOString();
     const link = await c.env.DB
@@ -71,16 +75,16 @@ export function registerAuthRoutes(app: Hono<AppBindings>): void {
         expires_at: string;
         used_at: string | null;
       }>();
-    if (!link || link.used_at || link.expires_at <= now) return renderInvalid(c, link?.association_id ?? null);
+    if (!link || link.used_at || link.expires_at <= now) return renderInvalid(c);
 
     const consumed = await c.env.DB
       .prepare("UPDATE magic_links SET used_at = ? WHERE id = ? AND used_at IS NULL")
       .bind(now, link.id)
       .run();
-    if ((consumed.meta.changes ?? 0) === 0) return renderInvalid(c, link.association_id);
+    if ((consumed.meta.changes ?? 0) === 0) return renderInvalid(c);
 
     const user = await findUserByEmail(c.env.DB, link.email);
-    if (!user) return renderInvalid(c, link.association_id);
+    if (!user) return renderInvalid(c);
     await c.env.DB.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").bind(now, user.id).run();
 
     let destination = "/";
@@ -181,18 +185,11 @@ async function issueMagicLink(
   return shouldRevealMagicLink({ appEnv: `${c.env.APP_ENV}`, hostname: url.hostname, emailSent: sent }) ? link : null;
 }
 
-async function renderInvalid(c: AppContext, associationId: string | null): Promise<Response> {
-  let slug = "tango-mar";
-  if (associationId) {
-    const row = await c.env.DB.prepare("SELECT slug FROM associations WHERE id = ?").bind(associationId).first<{ slug: string }>();
-    if (row) slug = row.slug;
-  } else {
-    const fallback = await findAssociationBySlug(c.env.DB, "tango-mar");
-    if (!fallback) slug = "";
-  }
+function renderInvalid(c: AppContext): Promise<Response> {
   return render(c, {
     title: "Link not valid",
+    active: "login",
     status: 400,
-    body: slug ? invalidLinkPage(slug) : "<section class='panel'><h1>That link is not valid</h1></section>",
+    body: invalidLinkPage(),
   });
 }

@@ -143,7 +143,7 @@ Production:
 npx wrangler secret put RESEND_API_KEY
 ```
 
-`EMAIL_FROM` is a normal var. The default `Tango Mar <onboarding@resend.dev>` works with Resend's test sender. For a real domain, change `EMAIL_FROM` in `wrangler.jsonc` to a verified sender, for example `Tango Mar <board@your-domain>`.
+`EMAIL_FROM` is a normal var: `Tango Mar <donotreply@mytangomar.com>`. mytangomar.com must be verified in Resend Domains before those messages can send.
 
 Local secrets, if you want to send real mail from `wrangler dev`, go in `.dev.vars` (gitignored):
 

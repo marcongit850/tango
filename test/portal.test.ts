@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canViewPropertyFinancials, isStaff, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
-import { checkEmailPage, homePage, joinReceivedPage, joinRequestPage, loginPage } from "../src/views/public";
+import { checkEmailPage, homePage, invalidLinkPage, joinReceivedPage, joinRequestPage, loginPage } from "../src/views/public";
+import { loggedOutNav } from "../src/views/layout";
 import type { Association } from "../src/types";
 import { parseCsv, parseOwnersCsv } from "../src/lib/csv";
 import { isIsoDate, todayIso, zonedLocalToUtc } from "../src/lib/dates";
@@ -112,11 +113,28 @@ describe("dates", () => {
   });
 });
 
+describe("logged-out header", () => {
+  it("uses Resident login and Request to join on home, login, and join", () => {
+    for (const active of ["home", "login", "join"]) {
+      expect(loggedOutNav(active)).toEqual([
+        { id: "login", href: "/login", label: "Resident login" },
+        { id: "join", href: "/join", label: "Request to join" },
+      ]);
+    }
+  });
+
+  it("keeps a Home link on other public pages", () => {
+    expect(loggedOutNav("legal").map((item) => item.label)).toEqual(["Home", "Resident login", "Request to join"]);
+    expect(loggedOutNav().some((item) => item.label === "Neighborhood" || item.label === "Log in")).toBe(false);
+  });
+});
+
 describe("public home", () => {
   it("offers resident login and request to join", () => {
     const html = homePage(false);
     expect(html).toContain("Resident login");
-    expect(html).toContain('href="/a/tango-mar/login"');
+    expect(html).toContain('href="/login"');
+    expect(html).not.toContain("/a/tango-mar/login");
     expect(html).toContain("Request to join");
     expect(html).toContain('href="/join"');
     expect(html).toContain(
@@ -156,6 +174,8 @@ describe("public home", () => {
       "Enter the email address associated with your association account. We'll send you a secure, one-time login link. No password required.",
     );
     expect(login).not.toContain("There is no password.");
+    expect(login).toContain('action="/login"');
+    expect(invalidLinkPage()).toContain('href="/login"');
     const check = checkEmailPage(association.name, null);
     expect(check).toContain(
       "If your email is on the Tango Mar roster, your secure sign-in link is on the way. The link expires in 20 minutes and can only be used once. After you sign in, you’ll stay logged in on this device for up to 30 days.",

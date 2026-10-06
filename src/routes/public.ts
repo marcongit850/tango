@@ -129,8 +129,9 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
     return c.redirect("/", 302);
   });
 
-  app.get("/a/:slug/login", async (c) => {
-    const association = requireAssociation(c);
+  app.get("/login", async (c) => {
+    const association = await findAssociationBySlug(c.env.DB, HOME_SLUG);
+    if (!association) throw new NotFoundError();
     const nextPath = safeNextPath(association.slug, c.req.query("next") ?? "");
     return render(c, { title: `Sign in · ${association.name}`, active: "login", body: loginPage(association, nextPath) });
   });

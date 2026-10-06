@@ -168,6 +168,18 @@ export function setupResponse(): Response {
   return htmlResponse(body, 503);
 }
 
+export function loggedOutNav(active?: string): { id: string; href: string; label: string }[] {
+  const items: { id: string; href: string; label: string }[] = [];
+  if (active !== "home" && active !== "join" && active !== "login") {
+    items.push({ id: "home", href: "/", label: "Home" });
+  }
+  items.push(
+    { id: "login", href: "/login", label: "Resident login" },
+    { id: "join", href: "/join", label: "Request to join" },
+  );
+  return items;
+}
+
 export async function render(
   c: AppContext,
   options: { title: string; active?: string; body: string; status?: number },
@@ -198,14 +210,8 @@ export async function render(
       { id: "notices", href: `${base}/notices`, label: unread > 0 ? `Notices (${unread})` : "Notices" },
     );
     if (isStaff(membership.role_id)) items.push({ id: "admin", href: `${base}/admin`, label: "Admin" });
-  } else if (association) {
-    items.push({ id: "login", href: `${base}/login`, label: "Log in" });
   } else {
-    if (options.active !== "home") items.push({ id: "home", href: "/", label: "Home" });
-    items.push(
-      { id: "login", href: "/a/tango-mar/login", label: "Resident login" },
-      { id: "join", href: "/join", label: "Request to join" },
-    );
+    items.push(...loggedOutNav(options.active));
   }
 
   const nav = items

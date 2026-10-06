@@ -249,6 +249,26 @@ function formatMailing(association: Association): string {
   return [association.address_line1, association.city, association.state, association.postal_code].filter(Boolean).join(", ");
 }
 
+export function supportPage(
+  association: Association,
+  sender: { name: string; email: string },
+  message = "",
+  error = "",
+): string {
+  const name = sender.name.trim();
+  const from = name ? `${name} (${sender.email})` : sender.email;
+  return `<section class="panel">
+      <h1>Support</h1>
+      <p>Send a message about the portal. It includes your name and the email on your account.</p>
+      <p class="muted">From ${esc(from)}</p>
+      ${error ? `<p class="flash warn">${esc(error)}</p>` : ""}
+      <form class="fields" method="post" action="/a/${esc(association.slug)}/support">
+        ${areaField("Message", "body", message, true)}
+        <button type="submit">Send message</button>
+      </form>
+    </section>`;
+}
+
 export function messagesPage(
   association: Association,
   threads: MessageRow[],

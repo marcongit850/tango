@@ -1,5 +1,5 @@
 import { isAdmin } from "../lib/access";
-import { unreadCount } from "../db";
+import { findAssociationBySlug, findMembership, unreadCount } from "../db";
 import { esc, htmlResponse, isHttps } from "../lib/html";
 import type { AppBindings } from "../types";
 import type { Context } from "hono";
@@ -186,14 +186,41 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
 }
 `;
 
+const HOME_SLUG = "tango-mar";
+
+export function siteFooter(supportHref: string): string {
+  if (!supportHref) return "";
+  return `<footer class="site-footer wrap"><p><a href="${esc(supportHref)}">Support</a></p></footer>`;
+}
+
+function memberSupportHref(slug: string, membership: { status?: string | null } | null | undefined): string {
+  if (!membership || membership.status === "inactive") return "";
+  return `/a/${slug}/support`;
+}
+
+async function supportHrefFor(c: AppContext): Promise<string> {
+  const user = c.get("user");
+  if (!user) return "";
+  const association = c.get("association");
+  if (association) return memberSupportHref(association.slug, c.get("membership"));
+  try {
+    const home = await findAssociationBySlug(c.env.DB, HOME_SLUG);
+    if (!home) return "";
+    const membership = await findMembership(c.env.DB, home.id, user.id);
+    return memberSupportHref(home.slug, membership);
+  } catch {
+    return "";
+  }
+}
+
 function shell(options: {
   title: string;
-  brand: string;
   brandHref: string;
   nav: string;
   account: string;
   body: string;
   landing?: boolean;
+  supportHref?: string;
 }): string {
   if (options.landing) {
     const topbar = options.account ? `<div class="topbar"><div class="account">${options.account}</div></div>` : "";
@@ -238,7 +265,7 @@ function shell(options: {
     <div class="account">${options.account}</div>
   </header>
   <main id="content" class="wrap stack">${options.body}</main>
-  <footer class="site-footer wrap">${options.brand ? `<p>${esc(options.brand)}</p>` : ""}</footer>
+  ${siteFooter(options.supportHref ?? "")}
 </body>
 </html>`;
 }
@@ -246,7 +273,6 @@ function shell(options: {
 export function setupResponse(): Response {
   const body = shell({
     title: "Set up Tango Mar",
-    brand: "Tango Mar",
     brandHref: "/",
     nav: `<a href="/">Home</a>`,
     account: "",
@@ -328,14 +354,14 @@ export async function render(
       ? landingAccount(user.name || user.email, options.portal ?? null)
       : `${esc(user.name || user.email)} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`
     : "";
-  const brand = onPublicHome ? "" : association?.name || "Tango Mar";
+  const supportHref = onPublicHome ? "" : await supportHrefFor(c);
   const body = shell({
     title: options.title,
-    brand,
     brandHref: "/",
     nav: onPublicHome ? "" : nav,
     account,
     landing: onPublicHome,
+    supportHref,
     body: `${flashHtml}${options.body}`,
   });
   const response = htmlResponse(body, options.status ?? 200);

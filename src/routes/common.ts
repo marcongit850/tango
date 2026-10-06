@@ -19,7 +19,7 @@ export function requireMember(c: AppContext): { association: Association; user: 
   const membership = c.get("membership");
   if (!user || !membership || membership.status === "inactive") {
     const path = new URL(c.req.url).pathname;
-    throw new RedirectError(`/a/${association.slug}/login?next=${encodeURIComponent(path)}`);
+    throw new RedirectError(`/login?next=${encodeURIComponent(path)}`);
   }
   return { association, user, membership };
 }

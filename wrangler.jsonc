@@ -17,12 +17,10 @@
   },
   // APP_ENV=production does not print magic links, except on localhost when email is not sent.
   // `npm run dev` overrides APP_ENV to development.
-  // EMAIL_FROM must be a sender Resend will accept. onboarding@resend.dev is the Resend test sender
-  // and only delivers to the Resend account owner. After tangomar.com is verified in Resend Domains,
-  // switch EMAIL_FROM to `Tango Mar <noreply@tangomar.com>`.
+  // EMAIL_FROM must be a sender Resend will accept. mytangomar.com must be verified in Resend Domains.
   "vars": {
     "APP_ENV": "production",
-    "EMAIL_FROM": "Tango Mar <onboarding@resend.dev>"
+    "EMAIL_FROM": "Tango Mar <donotreply@mytangomar.com>"
   },
   "d1_databases": [
     {

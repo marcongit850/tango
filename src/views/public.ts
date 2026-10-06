@@ -18,7 +18,7 @@ export function homePage(showDemo: boolean): string {
       <h1>Tango Mar</h1>
       <p class="lede">Welcome to your neighborhood dashboard. Here you can access association information, community documents, announcements, account details, and other resources for homeowners of the Tango Mar Property Owners Association.</p>
       <p class="actions">
-        <a class="button" href="/a/tango-mar/login">Resident login</a>
+        <a class="button" href="/login">Resident login</a>
         <a class="button secondary" href="/join">Request to join</a>
       </p>
     </section>
@@ -69,7 +69,7 @@ export function loginPage(association: Association, nextPath: string, error = ""
     <h1>Sign in to ${esc(association.name)} Dashboard</h1>
     <p>Enter the email address associated with your association account. We'll send you a secure, one-time login link. No password required.</p>
     ${error ? `<p class="flash warn">${esc(error)}</p>` : ""}
-    <form class="fields" method="post" action="/a/${esc(association.slug)}/login">
+    <form class="fields" method="post" action="/login">
       <input type="hidden" name="next" value="${esc(nextPath)}">
       <label>Email<input type="email" name="email" autocomplete="email" required></label>
       <button type="submit">Email me a link</button>
@@ -88,10 +88,10 @@ export function checkEmailPage(associationName: string, devLink: string | null):
   </section>`;
 }
 
-export function invalidLinkPage(slug: string): string {
+export function invalidLinkPage(): string {
   return `<section class="panel">
     <h1>That link is not valid</h1>
     <p>It may have expired or already been used. Request a new one.</p>
-    <p><a class="button" href="/a/${esc(slug)}/login">Request a new link</a></p>
+    <p><a class="button" href="/login">Request a new link</a></p>
   </section>`;
 }

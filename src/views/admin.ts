@@ -9,6 +9,7 @@ import type {
   DocumentRow,
   EventRow,
   FaqRow,
+  JoinRequestRow,
   OwnerListRow,
   PropertyRow,
   VersionRow,
@@ -36,10 +37,14 @@ function adminNav(slug: string, current: string): string {
     ["ledger", "Ledger"],
     ["documents", "Documents"],
     ["news", "News"],
+    ["joins", "Join requests"],
     ["audit", "Audit"],
   ];
   return `<p class="actions">${links
-    .map(([id, label]) => `<a class="button ${id === current ? "" : "secondary"}" href="/a/${esc(slug)}/admin${id === "overview" ? "" : `/${id}`}">${label}</a>`)
+    .map(([id, label]) => {
+      const href = id === "overview" ? `/a/${esc(slug)}/admin` : id === "joins" ? `/a/${esc(slug)}/admin/join-requests` : `/a/${esc(slug)}/admin/${id}`;
+      return `<a class="button ${id === current ? "" : "secondary"}" href="${href}">${label}</a>`;
+    })
     .join(" ")}</p>`;
 }
 
@@ -49,8 +54,13 @@ export function adminHome(options: {
   members: number;
   delinquent: number;
   waiting: number;
+  pendingJoins: number | null;
   audit: AuditRow[];
 }): string {
+  const joins =
+    options.pendingJoins === null
+      ? ""
+      : `<article class="card"><h2>${options.pendingJoins}</h2><p><a href="/a/${esc(options.association.slug)}/admin/join-requests">Join requests waiting</a></p></article>`;
   return `${adminNav(options.association.slug, "overview")}
     <section class="panel">
       <h1>Board admin</h1>
@@ -61,6 +71,7 @@ export function adminHome(options: {
       <article class="card"><h2>${options.members}</h2><p>Active logins</p></article>
       <article class="card"><h2>${options.delinquent}</h2><p>Delinquent lots</p></article>
       <article class="card"><h2>${options.waiting}</h2><p>Messages waiting on the board</p></article>
+      ${joins}
     </section>
     <section class="panel">
       <h2>Roles</h2>
@@ -430,6 +441,37 @@ export function newsAdminPage(options: {
         </form>
       </article>
     </section>`;
+}
+
+export function joinRequestsPage(association: Association, rows: JoinRequestRow[]): string {
+  const body = rows
+    .map((row) => {
+      const review =
+        row.status === "pending"
+          ? `<form method="post" action="/a/${esc(association.slug)}/admin/join-requests/${esc(row.id)}/reviewed"><button class="secondary" type="submit">Mark reviewed</button></form>`
+          : "";
+      return `<tr>
+        <td>${dateTimeCell(row.created_at, association.timezone)}</td>
+        <td>${esc(row.name)}<div class="muted">${esc(row.email)}</div></td>
+        <td>${esc(row.address)}</td>
+        <td>${esc(row.note)}</td>
+        <td>${esc(joinStatusLabel(row.status))}</td>
+        <td>${review}</td>
+      </tr>`;
+    })
+    .join("");
+  return `${adminNav(association.slug, "joins")}
+    <section class="panel">
+      <h1>Join requests</h1>
+      <p class="muted">People who asked to join from the public home page. Marking a request reviewed does not create a login. Add them from CSV import or the owner tools when they should have access.</p>
+      ${body ? `<table><thead><tr><th>Received</th><th>Person</th><th>Address or lot</th><th>Note</th><th>Status</th><th></th></tr></thead><tbody>${body}</tbody></table>` : empty("No join requests yet.")}
+    </section>`;
+}
+
+function joinStatusLabel(status: string): string {
+  if (status === "pending") return "Pending";
+  if (status === "reviewed") return "Reviewed";
+  return status;
 }
 
 export function auditPage(association: Association, rows: AuditRow[]): string {

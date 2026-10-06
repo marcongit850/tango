@@ -1,39 +1,58 @@
-import { formatAddress, formatPlace } from "../lib/dates";
+import { formatAddress } from "../lib/dates";
 import { esc, paragraphs } from "../lib/html";
 import type { AnnouncementRow } from "../db";
 import type { Association } from "../types";
 import { dateTimeCell } from "./bits";
 
-export function homePage(associations: Association[], showDemo: boolean): string {
-  const cards = associations
-    .map(
-      (association) => `<article class="card">
-        <h2>${esc(association.name)}</h2>
-        <p>${esc(formatPlace(association))}</p>
-        <p class="muted">${esc(formatAddress(association))}</p>
-        <p><a class="button" href="/a/${esc(association.slug)}">Open portal</a></p>
-      </article>`,
-    )
-    .join("");
+export function homePage(showDemo: boolean): string {
   const demo = showDemo
     ? `<section class="devbox">
         <h2>Local demo roster</h2>
         <p>These people are fictional. Request a magic link, then use the link shown on the next screen when email is not configured.</p>
         <ul>
-          <li><code>jordan.lee@example.com</code> — officer, Lot 3</li>
-          <li><code>sam.rivera@example.com</code> — homeowner, Lot 14, paid</li>
-          <li><code>casey.nguyen@example.com</code> — homeowner, Lot 27, past due</li>
+          <li><code>jordan.lee@example.com</code>, officer, Lot 3</li>
+          <li><code>sam.rivera@example.com</code>, homeowner, Lot 14, paid</li>
+          <li><code>casey.nguyen@example.com</code>, homeowner, Lot 27, past due</li>
         </ul>
       </section>`
     : "";
-  return `<section class="panel">
-      <p class="muted">Neighborhood OS</p>
-      <h1>Owner portal for Tango Mar</h1>
-      <p>Tango Mar is a beach neighborhood in Miramar Beach, Walton County, Florida. This portal is for a small association that still keeps its roster in Excel. One deployment can host many associations. Residents see their own dues. Other residents do not.</p>
-      <p class="actions"><a class="button" href="/a/tango-mar">Enter Tango Mar</a> <a class="button secondary" href="/a/tango-mar/login">Resident log in</a></p>
+  return `<section class="hero">
+      <div class="hero-sun" aria-hidden="true"></div>
+      <h1>Tango Mar</h1>
+      <p class="lede">A beach neighborhood in Miramar Beach, Walton County, Florida.</p>
+      <p class="actions">
+        <a class="button" href="/a/tango-mar/login">Resident login</a>
+        <a class="button secondary" href="/join">Request to join</a>
+      </p>
     </section>
-    ${cards ? `<section class="stack"><h2>Associations</h2><div class="grid">${cards}</div></section>` : ""}
     ${demo}`;
+}
+
+export function joinRequestPage(
+  error = "",
+  values: { name: string; email: string; address: string; note: string } = { name: "", email: "", address: "", note: "" },
+): string {
+  return `<section class="panel">
+      <h1>Request to join</h1>
+      <p>Tell the board who you are. They will follow up by email. Sending this form does not create a login.</p>
+      ${error ? `<p class="flash warn">${esc(error)}</p>` : ""}
+      <form class="fields" method="post" action="/join">
+        <label class="hp">Company<input type="text" name="company" tabindex="-1" autocomplete="off"></label>
+        <label>Name<input type="text" name="name" autocomplete="name" maxlength="120" required value="${esc(values.name)}"></label>
+        <label>Email<input type="email" name="email" autocomplete="email" maxlength="200" required value="${esc(values.email)}"></label>
+        <label>Address or lot, optional<input type="text" name="address" autocomplete="street-address" maxlength="200" value="${esc(values.address)}"></label>
+        <label>Note, optional<textarea name="note" maxlength="2000">${esc(values.note)}</textarea></label>
+        <button type="submit">Send request</button>
+      </form>
+    </section>`;
+}
+
+export function joinReceivedPage(): string {
+  return `<section class="panel">
+      <h1>Request received</h1>
+      <p>The board has your note and will follow up by email. This does not create a login.</p>
+      <p><a class="button secondary" href="/">Back to home</a></p>
+    </section>`;
 }
 
 export function legalPage(): string {

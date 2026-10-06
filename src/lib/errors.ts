@@ -12,6 +12,11 @@ export class ForbiddenError extends Error {
   }
 }
 
+export function isMissingTable(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /no such table/i.test(message);
+}
+
 export class RedirectError extends Error {
   readonly location: string;
 

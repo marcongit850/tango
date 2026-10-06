@@ -640,6 +640,80 @@ export async function countActiveOfficers(db: D1Database, associationId: string)
   return Number(row?.n ?? 0);
 }
 
+export type StaffContact = {
+  user_id: string;
+  email: string;
+  name: string;
+};
+
+export async function listStaffContacts(db: D1Database, associationId: string): Promise<StaffContact[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT m.user_id, u.email, u.name
+       FROM memberships m
+       JOIN users u ON u.id = m.user_id
+       WHERE m.association_id = ? AND m.role_id IN ('board', 'officer') AND m.status != 'inactive'
+       ORDER BY u.name`,
+    )
+    .bind(associationId)
+    .all<StaffContact>();
+  return results;
+}
+
+export type JoinRequestRow = {
+  id: string;
+  name: string;
+  email: string;
+  address: string;
+  note: string;
+  status: string;
+  created_at: string;
+};
+
+export async function insertJoinRequest(
+  db: D1Database,
+  entry: { associationId: string; name: string; email: string; address: string; note: string },
+): Promise<string> {
+  const id = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO join_requests (id, association_id, name, email, address, note, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
+    )
+    .bind(id, entry.associationId, entry.name, entry.email, entry.address, entry.note, new Date().toISOString())
+    .run();
+  return id;
+}
+
+export async function listJoinRequests(db: D1Database, associationId: string): Promise<JoinRequestRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, name, email, address, note, status, created_at
+       FROM join_requests
+       WHERE association_id = ?
+       ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC`,
+    )
+    .bind(associationId)
+    .all<JoinRequestRow>();
+  return results;
+}
+
+export async function countPendingJoinRequests(db: D1Database, associationId: string): Promise<number> {
+  const row = await db
+    .prepare("SELECT COUNT(*) AS n FROM join_requests WHERE association_id = ? AND status = 'pending'")
+    .bind(associationId)
+    .first<{ n: number }>();
+  return Number(row?.n ?? 0);
+}
+
+export async function reviewJoinRequest(db: D1Database, associationId: string, requestId: string): Promise<boolean> {
+  const result = await db
+    .prepare("UPDATE join_requests SET status = 'reviewed' WHERE association_id = ? AND id = ? AND status = 'pending'")
+    .bind(associationId, requestId)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
+}
+
 export async function staffUserIds(db: D1Database, associationId: string): Promise<string[]> {
   const { results } = await db
     .prepare(

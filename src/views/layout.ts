@@ -73,6 +73,42 @@ form.fields { display: grid; gap: 0.75rem; }
 .badge { display: inline-block; border-radius: 999px; padding: 0.05rem 0.5rem; background: #e7eeed; color: var(--gulf-dark); font-size: 0.82rem; }
 .badge.late { background: var(--emergency); color: var(--late); }
 .devbox { border: 1px dashed var(--gulf); border-radius: 12px; padding: 0.8rem 1rem; background: #f3faf8; }
+.hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 20px;
+  padding: 2.6rem 1.5rem 5.2rem;
+  color: var(--paper);
+  background:
+    radial-gradient(90% 80% at 100% 0%, rgba(255, 253, 248, 0.16), transparent 50%),
+    linear-gradient(165deg, var(--gulf-dark) 0%, var(--gulf) 58%, #146e6a 100%);
+}
+.hero h1 { color: var(--paper); font-size: clamp(2.3rem, 6vw, 3.5rem); padding-right: 5.5rem; }
+.hero .lede { position: relative; z-index: 1; max-width: 36rem; font-size: 1.12rem; margin: 0 0 1.25rem; padding-right: 5.5rem; color: rgba(255, 253, 248, 0.94); }
+.hero .actions { position: relative; z-index: 1; }
+.hero .button { background: var(--paper); color: var(--gulf-dark); }
+.hero .button.secondary { background: transparent; color: var(--paper); border-color: rgba(255, 253, 248, 0.75); }
+.hero-sun {
+  position: absolute;
+  top: 1.25rem;
+  right: 8%;
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff6df, #e7c27a 55%, #d7a45a);
+  box-shadow: 0 0 0 0.55rem rgba(255, 246, 223, 0.16);
+}
+.hero::after {
+  content: "";
+  position: absolute;
+  left: -8%;
+  right: -8%;
+  bottom: -1.5rem;
+  height: 3.6rem;
+  background: var(--sand);
+  border-radius: 50% 50% 0 0;
+}
+.hp { position: absolute; left: -999px; width: 1px; height: 1px; overflow: hidden; }
 .site-footer { color: var(--muted); font-size: 0.92rem; padding: 0 0 2rem; }
 .site-footer p { margin: 0.2rem 0; }
 .split { display: grid; grid-template-columns: 1.4fr 0.8fr; gap: 1rem; }
@@ -81,6 +117,9 @@ form.fields { display: grid; gap: 0.75rem; }
   .account { margin-left: 0; }
   .brand img { height: 84px; }
   table { display: block; overflow-x: auto; }
+  .hero { padding: 2rem 1.1rem 4.8rem; }
+  .hero h1, .hero .lede { padding-right: 3.6rem; }
+  .hero-sun { width: 3rem; height: 3rem; top: 1rem; right: 1rem; }
 }
 `;
 
@@ -110,8 +149,7 @@ function shell(options: {
   </header>
   <main id="content" class="wrap stack">${options.body}</main>
   <footer class="site-footer wrap">
-    <p><strong>Not legal advice.</strong> ${esc(options.brand)} Neighborhood OS shows association records for residents and the board. It does not interpret covenants, and it is not a substitute for the board or a qualified attorney.</p>
-    <p><a href="/legal">Read the disclaimer</a></p>
+    <p>${esc(options.brand)}</p>
   </footer>
 </body>
 </html>`;
@@ -167,7 +205,8 @@ export async function render(
   } else {
     items.push(
       { id: "home", href: "/", label: "Home" },
-      { id: "legal", href: "/legal", label: "Not legal advice" },
+      { id: "login", href: "/a/tango-mar/login", label: "Resident login" },
+      { id: "join", href: "/join", label: "Request to join" },
     );
   }
 

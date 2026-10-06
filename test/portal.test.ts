@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { canViewPropertyFinancials, isStaff, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
+import { homePage, joinRequestPage } from "../src/views/public";
 import { parseCsv, parseOwnersCsv } from "../src/lib/csv";
 import { isIsoDate, todayIso, zonedLocalToUtc } from "../src/lib/dates";
 import { balanceCents, csvText, formatMoney, invoiceStatus, isDelinquent, parseMoneyToCents } from "../src/lib/money";
@@ -107,6 +108,34 @@ describe("dates", () => {
     expect(zonedLocalToUtc("2026-11-08T10:00", "America/Chicago")).toBe("2026-11-08T16:00:00.000Z");
     expect(zonedLocalToUtc("2026-10-18T09:00", "America/Chicago")).toBe("2026-10-18T14:00:00.000Z");
     expect(todayIso("America/Chicago", new Date("2026-10-06T15:00:00Z"))).toBe("2026-10-06");
+  });
+});
+
+describe("public home", () => {
+  it("offers resident login and request to join", () => {
+    const html = homePage(false);
+    expect(html).toContain("Resident login");
+    expect(html).toContain('href="/a/tango-mar/login"');
+    expect(html).toContain("Request to join");
+    expect(html).toContain('href="/join"');
+    expect(html).not.toContain("Open portal");
+    expect(html).not.toContain("Enter Tango Mar");
+    expect(html).not.toContain("Associations");
+    expect(html).not.toContain("/legal");
+    expect(html).not.toContain("Local demo roster");
+  });
+
+  it("shows the fictional roster only for the local demo", () => {
+    expect(homePage(true)).toContain("jordan.lee@example.com");
+  });
+
+  it("asks for a name, email, optional address, and optional note", () => {
+    const html = joinRequestPage();
+    expect(html).toContain('name="name"');
+    expect(html).toContain('name="email"');
+    expect(html).toContain('name="address"');
+    expect(html).toContain('name="note"');
+    expect(html).toContain("Send request");
   });
 });
 

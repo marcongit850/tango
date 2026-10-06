@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import {
   allAnnouncements,
   countActiveOfficers,
+  countPendingJoinRequests,
   documentVersions,
   ledgerForAssociation,
   ledgerForUser,
@@ -10,11 +11,13 @@ import {
   listDocuments,
   listEvents,
   listFaqs,
+  listJoinRequests,
   listOwners,
   listProperties,
   notify,
   propertyInAssociation,
   refreshInvoiceStatus,
+  reviewJoinRequest,
   staffUserIds,
   threadsForViewer,
   versionById,
@@ -28,7 +31,7 @@ import { attachmentDisposition, contentTypeForUpload, MAX_CSV_BYTES, MAX_DOCUMEN
 import { importOwners } from "../lib/import-owners";
 import { csvText, formatDollarsPlain, formatMoney, parseMoneyToCents } from "../lib/money";
 import { ensureSeedFiles } from "../lib/seed-files";
-import { NotFoundError } from "../lib/errors";
+import { isMissingTable, NotFoundError } from "../lib/errors";
 import type { AppBindings, DocumentCategory, MembershipRole, MembershipStatus } from "../types";
 import {
   adminHome,
@@ -36,6 +39,7 @@ import {
   documentDetailPage,
   documentsAdminPage,
   importPage,
+  joinRequestsPage,
   ledgerPage,
   lotsPage,
   newsAdminPage,
@@ -62,6 +66,12 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       listAudit(c.env.DB, association.id),
     ]);
     const staff = new Set(staffIds);
+    let pendingJoins: number | null = null;
+    try {
+      pendingJoins = await countPendingJoinRequests(c.env.DB, association.id);
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+    }
     return render(c, {
       title: `Admin · ${association.name}`,
       active: "admin",
@@ -71,6 +81,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         members: owners.filter((owner) => owner.status !== "inactive").length,
         delinquent: ledger.filter((row) => row.delinquent).length,
         waiting: threads.filter((thread) => !staff.has(thread.from_user_id)).length,
+        pendingJoins,
         audit,
       }),
     });
@@ -774,6 +785,39 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       detail: name,
     });
     return redirectTo(c, `/a/${association.slug}/admin/news`, "Contact added.");
+  });
+
+  app.get("/a/:slug/admin/join-requests", async (c) => {
+    const { association } = requireStaff(c);
+    try {
+      const rows = await listJoinRequests(c.env.DB, association.id);
+      return render(c, { title: "Join requests", active: "admin", body: joinRequestsPage(association, rows) });
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      return render(c, {
+        title: "Join requests",
+        active: "admin",
+        status: 503,
+        body: `<section class="panel"><h1>Join requests</h1><p>Apply the join request table in D1, then reload. The steps are in the project README under Request to join.</p></section>`,
+      });
+    }
+  });
+
+  app.post("/a/:slug/admin/join-requests/:requestId/reviewed", async (c) => {
+    const { association, user } = requireStaff(c);
+    await readForm(c);
+    const requestId = c.req.param("requestId");
+    const updated = await reviewJoinRequest(c.env.DB, association.id, requestId);
+    if (!updated) return redirectTo(c, `/a/${association.slug}/admin/join-requests`, "That request is not waiting.", "warn");
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "join_request_review",
+      entityType: "join_request",
+      entityId: requestId,
+      detail: "Marked reviewed.",
+    });
+    return redirectTo(c, `/a/${association.slug}/admin/join-requests`, "Request marked reviewed.");
   });
 
   app.get("/a/:slug/admin/audit", async (c) => {

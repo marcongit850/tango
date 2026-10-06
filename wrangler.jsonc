@@ -26,14 +26,13 @@
     {
       "binding": "DB",
       "database_name": "tango",
-      // Replace database_id after `npx wrangler d1 create tango`.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "d3f6cfd2-cae0-42ef-843f-b5465efebd2b",
       "migrations_dir": "migrations"
     }
   ],
   "r2_buckets": [
     {
-      "binding": "DOCS",
+      "binding": "DOCUMENTS",
       "bucket_name": "tango-documents"
     }
   ],

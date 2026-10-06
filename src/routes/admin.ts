@@ -509,7 +509,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
 
   app.get("/a/:slug/admin/documents", async (c) => {
     const { association } = requireStaff(c);
-    await ensureSeedFiles(c.env.DOCS, c.env.DB);
+    await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
     const documents = await listDocuments(c.env.DB, association.id, true);
     return render(c, { title: "Documents", active: "admin", body: documentsAdminPage(association, documents) });
   });
@@ -540,7 +540,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
 
   app.get("/a/:slug/admin/documents/:documentId", async (c) => {
     const { association } = requireStaff(c);
-    await ensureSeedFiles(c.env.DOCS, c.env.DB);
+    await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
     const document = await loadDocument(c, association.id, c.req.param("documentId"));
     const versions = await documentVersions(c.env.DB, association.id, document.id);
     return render(c, { title: document.title, active: "admin", body: documentDetailPage(association, document, versions) });
@@ -607,8 +607,8 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const document = await loadDocument(c, association.id, c.req.param("documentId"));
     const version = await versionById(c.env.DB, association.id, c.req.param("versionId"));
     if (!version || version.document_id !== document.id) throw new NotFoundError();
-    await ensureSeedFiles(c.env.DOCS, c.env.DB);
-    const object = await c.env.DOCS.get(version.r2_key);
+    await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
+    const object = await c.env.DOCUMENTS.get(version.r2_key);
     if (!object) throw new NotFoundError();
     const headers = new Headers();
     object.writeHttpMetadata(headers);
@@ -820,7 +820,7 @@ async function storeVersion(
   if (input.file.size > MAX_DOCUMENT_BYTES) return { documentId: input.documentId, error: "Files must be 8 MB or smaller." };
   const versionId = crypto.randomUUID();
   const key = `${input.associationId}/${input.documentId}/v${input.versionNumber}-${safeFilename(input.file.name)}`;
-  await c.env.DOCS.put(key, await input.file.arrayBuffer(), { httpMetadata: { contentType } });
+  await c.env.DOCUMENTS.put(key, await input.file.arrayBuffer(), { httpMetadata: { contentType } });
   const now = new Date().toISOString();
   if (input.create) {
     await c.env.DB

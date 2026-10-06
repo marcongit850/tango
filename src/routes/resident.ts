@@ -1,7 +1,9 @@
 import type { Hono } from "hono";
 import { canViewPropertyFinancials, isAdmin, isBoardMember } from "../lib/access";
 import { timeZoneLabel, todayIso } from "../lib/dates";
+import { resendApiKey, sendResendEmail, SUPPORT_INBOX, supportEmailText } from "../lib/email";
 import { ForbiddenError, NotFoundError } from "../lib/errors";
+import { logError, logInfo } from "../lib/log";
 import { ensureSeedFiles } from "../lib/seed-files";
 import { applyDocumentResponseHeaders } from "../lib/files";
 import {
@@ -42,6 +44,7 @@ import {
   noticesPage,
   paymentDetailPage,
   paymentListPage,
+  supportPage,
   threadPage,
 } from "../views/resident";
 import { readForm, redirectTo, requireMember, textValue, type AppContext } from "./common";
@@ -171,6 +174,59 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     const { association } = requireMember(c);
     const contacts = await listContacts(c.env.DB, association.id);
     return render(c, { title: "Board", active: "board", body: boardPage(association, contacts) });
+  });
+
+  app.get("/a/:slug/support", async (c) => {
+    const { association, user } = requireMember(c);
+    return render(c, {
+      title: "Support",
+      active: "support",
+      body: supportPage(association, user),
+    });
+  });
+
+  app.post("/a/:slug/support", async (c) => {
+    const { association, user } = requireMember(c);
+    const fields = await readForm(c);
+    const message = textValue(fields, "body", 5000);
+    if (!message) {
+      return render(c, {
+        title: "Support",
+        active: "support",
+        status: 400,
+        body: supportPage(association, user, "", "Write a message before sending."),
+      });
+    }
+    const name = user.name.replace(/[\r\n]+/g, " ").trim();
+    const email = user.email.replace(/[\r\n]+/g, "").trim();
+    const apiKey = resendApiKey(c.env);
+    let sent = false;
+    if (apiKey) {
+      try {
+        sent = await sendResendEmail({
+          apiKey,
+          from: c.env.EMAIL_FROM,
+          to: SUPPORT_INBOX,
+          replyTo: email,
+          subject: `Support message from ${name || email}`.slice(0, 200),
+          text: supportEmailText({ name, email, message }),
+        });
+      } catch (error) {
+        logError("support_email", { message: error instanceof Error ? error.message : "unknown" });
+      }
+    } else {
+      logError("support_email", { message: "email not configured" });
+    }
+    if (!sent) {
+      return render(c, {
+        title: "Support",
+        active: "support",
+        status: 503,
+        body: supportPage(association, user, message, "Your message could not be sent. Please try again later."),
+      });
+    }
+    logInfo("support_email", { associationId: association.id, userId: user.id });
+    return redirectTo(c, `/a/${association.slug}/support`, "Your message was sent.");
   });
 
   app.get("/a/:slug/messages", async (c) => {

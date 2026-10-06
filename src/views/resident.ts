@@ -248,12 +248,32 @@ export function boardPage(association: Association, contacts: ContactRow[]): str
       (contact) => `<article class="card"><h2>${esc(contact.name)}</h2><p>${esc(contact.role_title)}</p><p>${contact.email ? esc(contact.email) : ""}</p><p>${contact.phone ? esc(contact.phone) : ""}</p></article>`,
     )
     .join("");
-  return `<section class="panel"><h1>Board contacts</h1><p class="muted">${esc(association.legal_name)} · ${esc(formatMailing(association))}</p><p>For a private question, use Messages. That note goes to the board, not the whole neighborhood.</p></section>
+  return `<section class="panel"><h1>Board contacts</h1><p class="muted">${esc(association.legal_name)} · ${esc(formatMailing(association))}</p></section>
     <section class="grid">${cards || empty("No contacts published.")}</section>`;
 }
 
 function formatMailing(association: Association): string {
   return [association.address_line1, association.city, association.state, association.postal_code].filter(Boolean).join(", ");
+}
+
+export function supportPage(
+  association: Association,
+  sender: { name: string; email: string },
+  message = "",
+  error = "",
+): string {
+  const name = sender.name.trim();
+  const from = name ? `${name} (${sender.email})` : sender.email;
+  return `<section class="panel">
+      <h1>Support</h1>
+      <p>Send a message about the portal. It includes your name and the email on your account.</p>
+      <p class="muted">From ${esc(from)}</p>
+      ${error ? `<p class="flash warn">${esc(error)}</p>` : ""}
+      <form class="fields" method="post" action="/a/${esc(association.slug)}/support">
+        ${areaField("Message", "body", message, true)}
+        <button type="submit">Send message</button>
+      </form>
+    </section>`;
 }
 
 export function messagesPage(

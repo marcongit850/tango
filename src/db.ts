@@ -693,6 +693,7 @@ export type DocumentRow = {
   current_version_id: string | null;
   version_number: number | null;
   filename: string | null;
+  content_type: string | null;
   byte_size: number | null;
   created_at: string | null;
 };
@@ -706,7 +707,7 @@ export async function listDocuments(
   const { results } = await db
     .prepare(
       `SELECT d.id, d.category, d.title, d.visibility, d.current_version_id,
-              v.version_number, v.filename, v.byte_size, v.created_at
+              v.version_number, v.filename, v.content_type, v.byte_size, v.created_at
        FROM documents d
        LEFT JOIN document_versions v ON v.id = d.current_version_id AND v.association_id = d.association_id
        WHERE d.association_id = ? ${visibilitySql}

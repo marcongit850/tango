@@ -57,6 +57,18 @@ main { padding-bottom: 2.5rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
 a.card { color: inherit; text-decoration: none; display: block; }
 a.card:hover, a.card:focus { border-color: var(--gulf); }
+details.faq > summary {
+  cursor: pointer;
+  font-family: var(--serif);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  font-size: 1.5rem;
+  line-height: 1.25;
+}
+details.faq > summary:focus-visible { outline: 2px solid var(--gulf); outline-offset: 3px; }
+details.faq .faq-answer { margin-top: 0.75rem; }
+details.faq .faq-answer > :first-child { margin-top: 0; }
+details.faq .faq-answer > :last-child { margin-bottom: 0; }
 h1, h2, h3 { font-family: var(--serif); font-weight: 400; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
 button, .button, nav, label, input, select, textarea, th { font-family: var(--sans); }
 h1 { font-size: 2rem; }

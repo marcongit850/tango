@@ -241,7 +241,7 @@ export function boardPage(association: Association, contacts: ContactRow[]): str
       (contact) => `<article class="card"><h2>${esc(contact.name)}</h2><p>${esc(contact.role_title)}</p><p>${contact.email ? esc(contact.email) : ""}</p><p>${contact.phone ? esc(contact.phone) : ""}</p></article>`,
     )
     .join("");
-  return `<section class="panel"><h1>Board contacts</h1><p class="muted">${esc(association.legal_name)} · ${esc(formatMailing(association))}</p><p>For a private question, use Messages. That note goes to the board, not the whole neighborhood.</p></section>
+  return `<section class="panel"><h1>Board contacts</h1><p class="muted">${esc(association.legal_name)} · ${esc(formatMailing(association))}</p></section>
     <section class="grid">${cards || empty("No contacts published.")}</section>`;
 }
 

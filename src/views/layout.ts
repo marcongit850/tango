@@ -6,6 +6,10 @@ import type { Context } from "hono";
 
 type AppContext = Context<AppBindings>;
 
+const FONTS = `<link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Instrument+Serif:ital@0;1&display=swap">`;
+
 const STYLES = `
 :root {
   --sand: #f4efe6;
@@ -20,7 +24,9 @@ const STYLES = `
   --warn: #8a5a12;
   --emergency: #f8e4e1;
   --shadow: 0 1px 0 rgba(28, 40, 48, 0.04);
-  font-family: "Segoe UI", system-ui, sans-serif;
+  --sans: "DM Sans", "Segoe UI", system-ui, sans-serif;
+  --serif: "Instrument Serif", Georgia, "Iowan Old Style", Palatino, serif;
+  font-family: var(--sans);
   color: var(--ink);
   background: var(--sand);
 }
@@ -51,7 +57,8 @@ main { padding-bottom: 2.5rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
 a.card { color: inherit; text-decoration: none; display: block; }
 a.card:hover, a.card:focus { border-color: var(--gulf); }
-h1, h2, h3 { font-family: Georgia, "Iowan Old Style", Palatino, serif; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h1, h2, h3 { font-family: var(--serif); font-weight: 400; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+button, .button, nav, label, input, select, textarea, th { font-family: var(--sans); }
 h1 { font-size: 2rem; }
 .muted { color: var(--muted); }
 .flash { padding: 0.75rem 1rem; border-radius: 12px; background: #e7f4ee; color: var(--ok); }
@@ -72,11 +79,18 @@ input[type="checkbox"] { width: auto; justify-self: start; }
 textarea { min-height: 7rem; }
 form.fields { display: grid; gap: 0.75rem; }
 .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.actions form { display: flex; align-items: center; margin: 0; }
+.join-actions { flex-wrap: nowrap; }
+.join-actions form { flex: 0 0 auto; }
+.filters { display: flex; flex-wrap: wrap; gap: 0.15rem 0.9rem; margin: 0 0 0.75rem; font-size: 0.88rem; }
+.filters a { color: var(--muted); text-decoration: none; padding-bottom: 0.1rem; }
+.filters a.active { color: var(--gulf); box-shadow: inset 0 -2px 0 var(--gulf); }
 .badge { display: inline-block; border-radius: 999px; padding: 0.05rem 0.5rem; background: #e7eeed; color: var(--gulf-dark); font-size: 0.82rem; }
 .badge.late { background: var(--emergency); color: var(--late); }
 .devbox { border: 1px dashed var(--gulf); border-radius: 12px; padding: 0.8rem 1rem; background: #f3faf8; }
-body.landing { background: #d5e7f2; }
-body.landing main { padding: 0; }
+body.landing { background: var(--sand); }
+body.landing main { padding: 0 0 2.5rem; }
+body.landing .shore + .wrap { padding-top: 1.5rem; }
 .topbar {
   position: absolute;
   z-index: 3;
@@ -103,14 +117,14 @@ body.landing main { padding: 0; }
 .topbar .button.secondary { background: rgba(255, 255, 255, 0.92); color: #1c3558; }
 .shore {
   position: relative;
-  min-height: 100vh;
-  min-height: 100dvh;
-  display: grid;
-  place-items: center;
+  min-height: clamp(32rem, 68vh, 44rem);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
   overflow: hidden;
   text-align: center;
   color: #1a2744;
-  padding: 4.5rem 1.25rem 3rem;
+  padding: 3.4rem 1.25rem 1.5rem;
 }
 .shore-photo {
   position: absolute;
@@ -118,41 +132,33 @@ body.landing main { padding: 0; }
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: center center;
+  object-position: center top;
 }
 .shore-scrim {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0.14) 48%, rgba(255, 255, 255, 0) 72%);
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.08) 28%, rgba(255, 255, 255, 0) 52%);
 }
-.shore-inner { position: relative; z-index: 1; width: min(40rem, 100%); }
-.mark { width: 108px; height: auto; display: block; margin: 0 auto 0.35rem; }
-.wordmark {
-  margin: 0;
-  font-family: Georgia, "Iowan Old Style", Palatino, serif;
-  font-size: clamp(1.7rem, 4vw, 2.55rem);
-  font-weight: 650;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: #1a2744;
+.shore-inner {
+  position: relative;
+  z-index: 1;
+  width: min(40rem, 100%);
+  padding: 1.05rem 1.35rem 1.2rem;
+  border-radius: 18px;
+  background: rgba(255, 252, 246, 0.84);
+  box-shadow: 0 10px 28px rgba(26, 39, 68, 0.1);
 }
-.wordmark-sub {
-  margin: 0.2rem 0 0;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: #1a2744;
-}
-.rule { display: block; width: 3.4rem; height: 2px; margin: 0.75rem auto 0.9rem; background: #c6a15a; }
+.mark { width: min(13.75rem, 70%); height: auto; display: block; margin: 0 auto 0; }
+.rule { display: block; width: 3.4rem; height: 2px; margin: 0.45rem auto 0.55rem; background: #c6a15a; }
 .shore h1 {
   color: #1a2744;
-  font-size: clamp(2.15rem, 5vw, 3.15rem);
-  font-weight: 560;
-  margin: 0 0 0.45rem;
+  font-size: clamp(1.85rem, 4vw, 2.55rem);
+  font-weight: 400;
+  margin: 0 0 0.3rem;
 }
-.shore .place { margin: 0 0 0.75rem; font-size: 1.05rem; }
-.shore .blurb { max-width: 34rem; margin: 0 auto 1.35rem; font-size: 1.02rem; }
+.shore .place { margin: 0 0 0.4rem; font-size: 1rem; }
+.shore .blurb { max-width: 34rem; margin: 0 auto 0.85rem; font-size: 0.98rem; }
 .shore .actions { justify-content: center; }
 .shore .button {
   background: #1c3558;
@@ -175,9 +181,8 @@ body.landing main { padding: 0; }
   .account { margin-left: 0; }
   .brand img { height: 84px; }
   table { display: block; overflow-x: auto; }
-  .mark { width: 84px; }
-  .wordmark { letter-spacing: 0.1em; }
-  .wordmark-sub { letter-spacing: 0.12em; }
+  .mark { width: min(12rem, 74%); }
+  .shore { padding-top: 4.4rem; }
 }
 `;
 
@@ -202,6 +207,7 @@ function shell(options: {
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" href="/favicon.png" type="image/png">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  ${FONTS}
   <style>${STYLES}</style>
 </head>
 <body class="landing">
@@ -221,6 +227,7 @@ function shell(options: {
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" href="/favicon.png" type="image/png">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  ${FONTS}
   <style>${STYLES}</style>
 </head>
 <body>

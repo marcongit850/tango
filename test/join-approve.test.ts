@@ -13,7 +13,7 @@ import {
   type LotCandidate,
 } from "../src/lib/join-approve";
 import type { Association } from "../src/types";
-import { joinRequestsPage } from "../src/views/admin";
+import { joinRequestsPage, ownersPage } from "../src/views/admin";
 
 const ASSOCIATION = "assoc_tango_mar";
 
@@ -324,6 +324,34 @@ describe("approve join request", () => {
   });
 });
 
+describe("owner login filters", () => {
+  const association: Association = {
+    id: ASSOCIATION,
+    slug: "tango-mar",
+    name: "Tango Mar",
+    legal_name: "Tango Mar Property Owners Association",
+    address_line1: "31 Tang O Mar Drive",
+    city: "Miramar Beach",
+    state: "FL",
+    postal_code: "32550",
+    county: "Walton County",
+    timezone: "America/Chicago",
+  };
+
+  it("uses small Everyone and Past due only filters", () => {
+    const everyone = ownersPage(association, [], [], false);
+    const pastDue = ownersPage(association, [], [], true);
+    expect(everyone).toContain(">Everyone<");
+    expect(everyone).toContain(">Past due only<");
+    expect(everyone).toContain('class="filters"');
+    expect(everyone).toContain('class="active" href="/a/tango-mar/admin/owners#logins">Everyone');
+    expect(everyone).not.toContain("All owners");
+    expect(everyone).not.toContain(">Delinquent<");
+    expect(everyone).not.toContain('class="button" href="/a/tango-mar/admin/owners#logins"');
+    expect(pastDue).toContain('class="active" href="/a/tango-mar/admin/owners?delinquent=1#logins">Past due only');
+  });
+});
+
 describe("join requests admin page", () => {
   const association: Association = {
     id: ASSOCIATION,
@@ -353,6 +381,9 @@ describe("join requests admin page", () => {
     expect(html).toContain(">Decline<");
     expect(html).toContain(">Mark reviewed<");
     expect(html).toContain(">Delete<");
+    expect(html).toContain("Delete this join request? This cannot be undone.");
+    expect(html).toContain('name="confirm" value="yes"');
+    expect(html).not.toContain('type="checkbox" name="confirm"');
     expect(html).toContain("/admin/join-requests/reviewed-1/approve");
     expect(html).toContain("/admin/join-requests/reviewed-1/decline");
     expect(html).not.toContain("/admin/join-requests/reviewed-1/reviewed");
@@ -363,7 +394,8 @@ describe("join requests admin page", () => {
     expect(html).not.toContain("/admin/join-requests/declined-1/decline");
     expect(html).toContain("Approved");
     expect(html).toContain("Declined");
-    expect(html).toContain("does not create a login");
+    expect(html).toContain("Approve creates a login and sends a welcome email. Decline does not. Delete removes the request. A lot links only if the address matches one empty lot.");
+    expect(html).toContain('class="actions join-actions"');
     expect(html).not.toContain("\u2014");
   });
 

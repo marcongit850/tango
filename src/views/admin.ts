@@ -172,9 +172,9 @@ export function ownersPage(
     </section>
     <section class="panel" id="logins">
       <h2>${delinquentOnly ? "Delinquent accounts" : "Logins"}</h2>
-      <p class="actions">
-        <a class="button ${delinquentOnly ? "secondary" : ""}" href="/a/${esc(association.slug)}/admin/owners#logins">All owners</a>
-        <a class="button ${delinquentOnly ? "" : "secondary"}" href="/a/${esc(association.slug)}/admin/owners?delinquent=1#logins">Delinquent</a>
+      <p class="filters">
+        <a ${delinquentOnly ? "" : `class="active"`} href="/a/${esc(association.slug)}/admin/owners#logins">Everyone</a>
+        <a ${delinquentOnly ? `class="active"` : ""} href="/a/${esc(association.slug)}/admin/owners?delinquent=1#logins">Past due only</a>
       </p>
       ${rows ? `<table><thead><tr><th>Person</th><th>Role</th><th>Status</th><th>Lot</th><th>Balance</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No matching accounts.")}
     </section>`;
@@ -437,96 +437,143 @@ export function newsAdminPage(options: {
   editing?: NewsEdit | null;
 }): string {
   const { association } = options;
-  const base = `/a/${association.slug}/admin`;
+  const base = `/a/${esc(association.slug)}/admin`;
+  const editing = options.editing ?? null;
+  const editingId = editing ? ("row" in editing ? editing.row.id : "") : "";
+  const announcements = options.announcements
+    .map((item) => {
+      const hidden = item.expires_at && item.expires_at <= new Date().toISOString();
+      return `<tr>
+        <td>${esc(item.kind)}${hidden ? ` <span class="badge">Hidden</span>` : ""}${editingId === item.id ? ` <span class="badge">Editing</span>` : ""}</td>
+        <td>${esc(item.title)}</td>
+        <td>${dateCell(item.published_at, association.timezone)}</td>
+        <td>${newsItemActions(association.slug, "announcements", item.id, `${base}/announcements/${esc(item.id)}/hide`)}</td>
+      </tr>`;
+    })
+    .join("");
   const events = options.events
     .map(
-      (event) => `<li>${esc(event.kind)} · ${esc(event.title)} · ${dateTimeCell(event.starts_at, association.timezone)}
-        ${newsItemActions(association.slug, "events", event.id)}
-      </li>`,
+      (event) => `<tr>
+        <td>${esc(event.kind)}${editingId === event.id ? ` <span class="badge">Editing</span>` : ""}</td>
+        <td>${esc(event.title)}</td>
+        <td>${dateTimeCell(event.starts_at, association.timezone)}</td>
+        <td>${newsItemActions(association.slug, "events", event.id)}</td>
+      </tr>`,
     )
     .join("");
   const faqs = options.faqs
-    .map((faq) => `<li>${esc(faq.question)} ${newsItemActions(association.slug, "faqs", faq.id)}</li>`)
-    .join("");
-  const contacts = options.contacts
-    .map((contact) => `<li>${esc(contact.name)} · ${esc(contact.role_title)} ${newsItemActions(association.slug, "contacts", contact.id)}</li>`)
-    .join("");
-  const announcements = options.announcements
     .map(
-      (item) => `<li>${esc(item.kind)} · ${esc(item.title)} · ${dateCell(item.published_at, association.timezone)}
-        ${item.expires_at && item.expires_at <= new Date().toISOString() ? "(hidden)" : ""}
-        <form method="post" action="${base}/announcements/${esc(item.id)}/hide"><button class="linkish" type="submit">Hide</button></form>
-        ${newsItemActions(association.slug, "announcements", item.id)}
-      </li>`,
+      (faq) => `<tr>
+        <td>${esc(faq.question)}${editingId === faq.id ? ` <span class="badge">Editing</span>` : ""}</td>
+        <td>${newsItemActions(association.slug, "faqs", faq.id)}</td>
+      </tr>`,
     )
     .join("");
-  const editing = options.editing;
-  const announcement = editing?.kind === "announcement" ? editing.row : null;
-  const event = editing?.kind === "event" ? editing : null;
-  const faq = editing?.kind === "faq" ? editing.row : null;
-  const contact = editing?.kind === "contact" ? editing.row : null;
+  const contacts = options.contacts
+    .map(
+      (contact) => `<tr>
+        <td>${esc(contact.name)}${editingId === contact.id ? ` <span class="badge">Editing</span>` : ""}</td>
+        <td>${esc(contact.role_title)}</td>
+        <td>${newsItemActions(association.slug, "contacts", contact.id)}</td>
+      </tr>`,
+    )
+    .join("");
   return `${adminNav(association.slug, "news")}
-    <section class="panel"><h1>News, calendar, FAQ, contacts</h1>
-      <h2>Announcements</h2><ul>${announcements || "<li>No announcements.</li>"}</ul>
-      <h2>Events</h2><ul>${events || "<li>No events.</li>"}</ul>
-      <h2>FAQs</h2><ul>${faqs || "<li>No FAQs.</li>"}</ul>
-      <h2>Contacts</h2><ul>${contacts || "<li>No contacts.</li>"}</ul>
+    ${editing ? `<section class="panel" id="edit">${newsEditForm(association, editing)}</section>` : ""}
+    <section class="panel">
+      <h1>News, calendar, FAQ, contacts</h1>
+      <h2>Announcements</h2>
+      ${
+        announcements
+          ? `<table><thead><tr><th>Kind</th><th>Title</th><th>Published</th><th></th></tr></thead><tbody>${announcements}</tbody></table>`
+          : empty("No announcements.")
+      }
+      <h2>Events</h2>
+      ${
+        events
+          ? `<table><thead><tr><th>Kind</th><th>Title</th><th>Starts</th><th></th></tr></thead><tbody>${events}</tbody></table>`
+          : empty("No events.")
+      }
+      <h2>FAQs</h2>
+      ${faqs ? `<table><thead><tr><th>Question</th><th></th></tr></thead><tbody>${faqs}</tbody></table>` : empty("No FAQs.")}
+      <h2>Contacts</h2>
+      ${
+        contacts
+          ? `<table><thead><tr><th>Name</th><th>Role</th><th></th></tr></thead><tbody>${contacts}</tbody></table>`
+          : empty("No contacts.")
+      }
     </section>
     <section class="grid">
-      <article class="panel">
-        <h2>${announcement ? "Edit announcement" : "Announcement"}</h2>
-        <form class="fields" method="post" action="${base}/announcements${announcement ? `/${esc(announcement.id)}` : ""}">
-          ${selectField("Kind", "kind", [
-            { value: "news", label: "News" },
-            { value: "meeting", label: "Meeting notice" },
-            { value: "emergency", label: "Emergency" },
-          ], announcement?.kind ?? "news")}
-          ${textField("Title", "title", { value: announcement?.title ?? "", required: true })}
-          ${areaField("Body", "body", announcement?.body ?? "", true)}
-          <label><input type="checkbox" name="pinned" value="1" ${announcement?.pinned ? "checked" : ""}> Pin</label>
-          ${textField("Expires", "expires_on", { type: "date", value: announcement?.expires_at ? zonedIsoDate(new Date(announcement.expires_at), association.timezone) : "" })}
-          <button type="submit">${announcement ? "Save announcement" : "Post"}</button>
-        </form>
-        ${announcement ? `<p><a href="${base}/news">Cancel edit</a></p>` : ""}
-      </article>
-      <article class="panel">
-        <h2>${event ? "Edit event" : "Calendar event"}</h2>
-        <form class="fields" method="post" action="${base}/events${event ? `/${esc(event.row.id)}` : ""}">
-          ${selectField("Kind", "kind", [
-            { value: "event", label: "Event" },
-            { value: "meeting", label: "Meeting" },
-            { value: "emergency", label: "Emergency" },
-          ], event?.row.kind ?? "event")}
-          ${textField("Title", "title", { value: event?.row.title ?? "", required: true })}
-          ${areaField("Description", "description", event?.row.description ?? "")}
-          ${textField("Location", "location", { value: event?.row.location ?? "" })}
-          ${textField("Starts", "starts_at", { type: "datetime-local", value: event?.startsLocal ?? "", required: true })}
-          ${textField("Ends", "ends_at", { type: "datetime-local", value: event?.endsLocal ?? "" })}
-          <button type="submit">${event ? "Save event" : "Add event"}</button>
-        </form>
-        ${event ? `<p><a href="${base}/news">Cancel edit</a></p>` : ""}
-      </article>
-      <article class="panel">
-        <h2>${faq ? "Edit FAQ" : "FAQ"}</h2>
-        <form class="fields" method="post" action="${base}/faqs${faq ? `/${esc(faq.id)}` : ""}">
-          ${textField("Question", "question", { value: faq?.question ?? "", required: true })}
-          ${areaField("Answer", "answer", faq?.answer ?? "", true)}
-          <button type="submit">${faq ? "Save FAQ" : "Add FAQ"}</button>
-        </form>
-        ${faq ? `<p><a href="${base}/news">Cancel edit</a></p>` : ""}
-      </article>
-      <article class="panel">
-        <h2>${contact ? "Edit board contact" : "Board contact"}</h2>
-        <form class="fields" method="post" action="${base}/contacts${contact ? `/${esc(contact.id)}` : ""}">
-          ${textField("Name", "name", { value: contact?.name ?? "", required: true })}
-          ${textField("Role", "role_title", { value: contact?.role_title ?? "", required: true })}
-          ${textField("Email", "email", { type: "email", value: contact?.email ?? "" })}
-          ${textField("Phone", "phone", { value: contact?.phone ?? "" })}
-          <button type="submit">${contact ? "Save contact" : "Add contact"}</button>
-        </form>
-        ${contact ? `<p><a href="${base}/news">Cancel edit</a></p>` : ""}
-      </article>
+      <article class="panel"><h2>Add announcement</h2>${announcementForm(base, association, null)}</article>
+      <article class="panel"><h2>Add event</h2>${eventForm(base, null)}</article>
+      <article class="panel"><h2>Add FAQ</h2>${faqForm(base, null)}</article>
+      <article class="panel"><h2>Add contact</h2>${contactForm(base, null)}</article>
     </section>`;
+}
+
+function newsEditForm(association: Association, editing: NewsEdit): string {
+  const base = `/a/${esc(association.slug)}/admin`;
+  const cancel = `<p><a href="${base}/news">Cancel</a></p>`;
+  if (editing.kind === "announcement") {
+    return `<h1>Edit announcement</h1><p class="muted">Change this announcement, then save.</p>${announcementForm(base, association, editing.row)}${cancel}`;
+  }
+  if (editing.kind === "event") {
+    return `<h1>Edit event</h1><p class="muted">Change this event, then save.</p>${eventForm(base, editing)}${cancel}`;
+  }
+  if (editing.kind === "faq") {
+    return `<h1>Edit FAQ</h1><p class="muted">Change this question, then save.</p>${faqForm(base, editing.row)}${cancel}`;
+  }
+  return `<h1>Edit board contact</h1><p class="muted">Change this contact, then save.</p>${contactForm(base, editing.row)}${cancel}`;
+}
+
+function announcementForm(base: string, association: Association, row: AnnouncementRow | null): string {
+  return `<form class="fields" method="post" action="${base}/announcements${row ? `/${esc(row.id)}` : ""}">
+      ${selectField("Kind", "kind", [
+        { value: "news", label: "News" },
+        { value: "meeting", label: "Meeting notice" },
+        { value: "emergency", label: "Emergency" },
+      ], row?.kind ?? "news")}
+      ${textField("Title", "title", { value: row?.title ?? "", required: true })}
+      ${areaField("Body", "body", row?.body ?? "", true)}
+      <label><input type="checkbox" name="pinned" value="1" ${row?.pinned ? "checked" : ""}> Pin</label>
+      ${textField("Expires", "expires_on", { type: "date", value: row?.expires_at ? zonedIsoDate(new Date(row.expires_at), association.timezone) : "" })}
+      <button type="submit">${row ? "Save announcement" : "Post"}</button>
+    </form>`;
+}
+
+function eventForm(base: string, editing: Extract<NewsEdit, { kind: "event" }> | null): string {
+  const row = editing?.row;
+  return `<form class="fields" method="post" action="${base}/events${row ? `/${esc(row.id)}` : ""}">
+      ${selectField("Kind", "kind", [
+        { value: "event", label: "Event" },
+        { value: "meeting", label: "Meeting" },
+        { value: "emergency", label: "Emergency" },
+      ], row?.kind ?? "event")}
+      ${textField("Title", "title", { value: row?.title ?? "", required: true })}
+      ${areaField("Description", "description", row?.description ?? "")}
+      ${textField("Location", "location", { value: row?.location ?? "" })}
+      ${textField("Starts", "starts_at", { type: "datetime-local", value: editing?.startsLocal ?? "", required: true })}
+      ${textField("Ends", "ends_at", { type: "datetime-local", value: editing?.endsLocal ?? "" })}
+      <button type="submit">${row ? "Save event" : "Add event"}</button>
+    </form>`;
+}
+
+function faqForm(base: string, row: FaqRow | null): string {
+  return `<form class="fields" method="post" action="${base}/faqs${row ? `/${esc(row.id)}` : ""}">
+      ${textField("Question", "question", { value: row?.question ?? "", required: true })}
+      ${areaField("Answer", "answer", row?.answer ?? "", true)}
+      <button type="submit">${row ? "Save FAQ" : "Add FAQ"}</button>
+    </form>`;
+}
+
+function contactForm(base: string, row: ContactRow | null): string {
+  return `<form class="fields" method="post" action="${base}/contacts${row ? `/${esc(row.id)}` : ""}">
+      ${textField("Name", "name", { value: row?.name ?? "", required: true })}
+      ${textField("Role", "role_title", { value: row?.role_title ?? "", required: true })}
+      ${textField("Email", "email", { type: "email", value: row?.email ?? "" })}
+      ${textField("Phone", "phone", { value: row?.phone ?? "" })}
+      <button type="submit">${row ? "Save contact" : "Add contact"}</button>
+    </form>`;
 }
 
 export function joinRequestsPage(association: Association, rows: JoinRequestRow[]): string {
@@ -545,7 +592,7 @@ export function joinRequestsPage(association: Association, rows: JoinRequestRow[
   return `${adminNav(association.slug, "joins")}
     <section class="panel">
       <h1>Join requests</h1>
-      <p class="muted">People who asked to join from the public home page. Approve creates or reuses a homeowner login and sends a welcome email. Decline marks the request declined and does not create a login. Delete removes the request. Mark reviewed when you are not ready to decide. A lot is linked only when the address matches one lot that has no owner.</p>
+      <p class="muted">Approve creates a login and sends a welcome email. Decline does not. Delete removes the request. A lot links only if the address matches one empty lot.</p>
       ${body ? `<table><thead><tr><th>Received</th><th>Person</th><th>Address or lot</th><th>Note</th><th>Status</th><th></th></tr></thead><tbody>${body}</tbody></table>` : empty("No join requests yet.")}
     </section>`;
 }
@@ -564,8 +611,8 @@ function joinRequestActions(slug: string, row: JoinRequestRow): string {
     row.status === "pending"
       ? `<form method="post" action="${base}/reviewed"><button class="secondary" type="submit">Mark reviewed</button></form>`
       : "";
-  const remove = `<form method="post" action="${base}/delete"><label><input type="checkbox" name="confirm" value="yes" required> Confirm</label><button class="secondary" type="submit">Delete</button></form>`;
-  return `<div class="actions">${approve}${decline}${review}${remove}</div>`;
+  const remove = `<form method="post" action="${base}/delete" onsubmit="return confirm('Delete this join request? This cannot be undone.')"><input type="hidden" name="confirm" value="yes"><button class="secondary" type="submit">Delete</button></form>`;
+  return `<div class="actions join-actions">${approve}${decline}${review}${remove}</div>`;
 }
 
 function joinStatusLabel(status: string): string {
@@ -665,14 +712,24 @@ function duesSection(options: {
   </section>`;
 }
 
-function newsItemActions(slug: string, resource: "announcements" | "events" | "faqs" | "contacts", id: string): string {
+function newsItemActions(
+  slug: string,
+  resource: "announcements" | "events" | "faqs" | "contacts",
+  id: string,
+  hideAction = "",
+): string {
   const editKind = resource === "announcements" ? "announcement" : resource === "events" ? "event" : resource === "faqs" ? "faq" : "contact";
+  const noun = editKind === "announcement" ? "announcement" : editKind === "event" ? "event" : editKind === "faq" ? "FAQ" : "contact";
   const base = `/a/${esc(slug)}/admin`;
-  return `<a href="${base}/news?edit=${editKind}&amp;id=${esc(id)}">Edit</a>
-    <form method="post" action="${base}/${resource}/${esc(id)}/delete">
-      <label><input type="checkbox" name="confirm" value="yes" required> Confirm</label>
-      <button class="linkish" type="submit">Delete</button>
-    </form>`;
+  const hide = hideAction ? `<form method="post" action="${hideAction}"><button class="secondary" type="submit">Hide</button></form>` : "";
+  return `<div class="actions">
+    <a class="button secondary" href="${base}/news?edit=${editKind}&amp;id=${esc(id)}#edit">Edit</a>
+    ${hide}
+    <form method="post" action="${base}/${resource}/${esc(id)}/delete" onsubmit="return confirm('Delete this ${noun}? This cannot be undone.')">
+      <input type="hidden" name="confirm" value="yes">
+      <button class="secondary" type="submit">Delete</button>
+    </form>
+  </div>`;
 }
 
 function auditTable(association: Association, rows: AuditRow[]): string {

@@ -1415,7 +1415,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 }
 
-function newsEdit(
+export function newsEdit(
   kind: string,
   id: string,
   announcements: Awaited<ReturnType<typeof allAnnouncements>>,

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { canViewPropertyFinancials, isAdmin, keepsAnAdmin, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
 import { annualDues, defaultDuesYear, lotsToInvoice } from "../src/lib/dues";
 import { landingAccount, loggedOutNav } from "../src/views/layout";
-import { ownerDetailPage } from "../src/views/admin";
+import { newsAdminPage, ownerDetailPage } from "../src/views/admin";
+import { newsEdit } from "../src/routes/admin";
+import type { AnnouncementRow, EventRow } from "../src/db";
 import { checkEmailPage, homePage, invalidLinkPage, joinReceivedPage, joinRequestPage, loginPage } from "../src/views/public";
 import type { OwnerListRow } from "../src/db";
 import type { Association } from "../src/types";
@@ -194,7 +196,8 @@ describe("public home", () => {
     expect(html).toContain("A private beach neighborhood in Miramar Beach, Walton County, Florida.");
     expect(html).toContain("Your neighborhood portal for association information, documents, announcements, account details, and community resources.");
     expect(html).toContain('src="/tango-mar-boardwalk.png"');
-    expect(html).toContain('src="/favicon.png"');
+    expect(html).toContain('src="/tango-mar-mark.png"');
+    expect(html).not.toContain('src="/favicon.png"');
     expect(html).toContain("Property Owners Association");
     expect(html).not.toContain("Welcome to your neighborhood dashboard");
     expect(html).not.toContain("\u2014");
@@ -314,6 +317,89 @@ describe("public home", () => {
     expect(html).toContain('name="address"');
     expect(html).toContain('name="note"');
     expect(html).toContain("Send request");
+  });
+});
+
+describe("news admin", () => {
+  const association: Association = {
+    id: "assoc_tango_mar",
+    slug: "tango-mar",
+    name: "Tango Mar",
+    legal_name: "Tango Mar Property Owners Association",
+    address_line1: "31 Tang O Mar Drive",
+    city: "Miramar Beach",
+    state: "FL",
+    postal_code: "32550",
+    county: "Walton County",
+    timezone: "America/Chicago",
+  };
+  const announcement: AnnouncementRow = {
+    id: "ann-1",
+    kind: "news",
+    title: "Beach cleanup",
+    body: "Bring bags.",
+    pinned: 1,
+    published_at: "2026-10-01T15:00:00.000Z",
+    expires_at: null,
+  };
+  const event: EventRow = {
+    id: "ev-1",
+    title: "Board meeting",
+    description: "Agenda",
+    location: "Clubhouse",
+    starts_at: "2026-11-08T16:00:00.000Z",
+    ends_at: null,
+    kind: "meeting",
+  };
+
+  it("links each row to a prefilled edit form and confirms delete", () => {
+    const html = newsAdminPage({
+      association,
+      announcements: [announcement],
+      events: [event],
+      faqs: [{ id: "faq-1", question: "Where is the gate?", answer: "On the north side.", sort_order: 1 }],
+      contacts: [{ id: "c-1", name: "Ada Board", role_title: "President", email: "ada@example.com", phone: "", sort_order: 1 }],
+    });
+    expect(html).toContain('href="/a/tango-mar/admin/news?edit=announcement&amp;id=ann-1#edit"');
+    expect(html).toContain('href="/a/tango-mar/admin/news?edit=event&amp;id=ev-1#edit"');
+    expect(html).toContain('href="/a/tango-mar/admin/news?edit=faq&amp;id=faq-1#edit"');
+    expect(html).toContain('href="/a/tango-mar/admin/news?edit=contact&amp;id=c-1#edit"');
+    expect(html).toContain(">Edit<");
+    expect(html).toContain("Delete this announcement? This cannot be undone.");
+    expect(html).toContain('name="confirm" value="yes"');
+    expect(html).not.toContain('type="checkbox" name="confirm"');
+    expect(html).not.toContain('id="edit"');
+    expect(html.indexOf(">Post<")).toBeGreaterThan(html.indexOf("Beach cleanup"));
+  });
+
+  it("opens the matching edit form at the top with the saved values", () => {
+    const html = newsAdminPage({
+      association,
+      announcements: [announcement],
+      events: [event],
+      faqs: [],
+      contacts: [],
+      editing: { kind: "announcement", row: announcement },
+    });
+    expect(html.indexOf('id="edit"')).toBeGreaterThan(-1);
+    expect(html.indexOf('id="edit"')).toBeLessThan(html.indexOf("<h2>Announcements</h2>"));
+    expect(html).toContain("Edit announcement");
+    expect(html).toContain('value="Beach cleanup"');
+    expect(html).toContain(">Bring bags.</textarea>");
+    expect(html).toContain('action="/a/tango-mar/admin/announcements/ann-1"');
+    expect(html).toContain("Save announcement");
+    expect(html).toContain("Cancel");
+    expect(html).toContain(">Post<");
+  });
+
+  it("matches the edit query to the saved row", () => {
+    expect(newsEdit("announcement", "ann-1", [announcement], [], [], [], association.timezone)?.kind).toBe("announcement");
+    const matched = newsEdit("event", "ev-1", [], [event], [], [], association.timezone);
+    expect(matched?.kind).toBe("event");
+    if (matched?.kind === "event") expect(matched.startsLocal).toBe("2026-11-08T10:00");
+    expect(newsEdit("faq", "missing", [], [], [], [], association.timezone)).toBeNull();
+    expect(newsEdit("", "ann-1", [announcement], [], [], [], association.timezone)).toBeNull();
+    expect(newsEdit("announcement", "", [announcement], [], [], [], association.timezone)).toBeNull();
   });
 });
 

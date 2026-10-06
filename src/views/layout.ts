@@ -125,9 +125,17 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.04) 32%, rgba(255, 255, 255, 0) 56%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.08) 28%, rgba(255, 255, 255, 0) 52%);
 }
-.shore-inner { position: relative; z-index: 1; width: min(40rem, 100%); }
+.shore-inner {
+  position: relative;
+  z-index: 1;
+  width: min(40rem, 100%);
+  padding: 1.05rem 1.35rem 1.2rem;
+  border-radius: 18px;
+  background: rgba(255, 252, 246, 0.84);
+  box-shadow: 0 10px 28px rgba(26, 39, 68, 0.1);
+}
 .mark { width: min(13.75rem, 70%); height: auto; display: block; margin: 0 auto 0; }
 .rule { display: block; width: 3.4rem; height: 2px; margin: 0.45rem auto 0.55rem; background: #c6a15a; }
 .shore h1 {

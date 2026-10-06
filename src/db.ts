@@ -691,7 +691,7 @@ export async function listJoinRequests(db: D1Database, associationId: string): P
       `SELECT id, name, email, address, note, status, created_at
        FROM join_requests
        WHERE association_id = ?
-       ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC`,
+       ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'reviewed' THEN 1 ELSE 2 END, created_at DESC`,
     )
     .bind(associationId)
     .all<JoinRequestRow>();

@@ -27,11 +27,13 @@ import { isDocumentCategory } from "../lib/categories";
 import { parseOwnersCsv } from "../lib/csv";
 import { formatAddress, isIsoDate, todayIso, zonedLocalToUtc } from "../lib/dates";
 import { resendApiKey, sendResendEmail } from "../lib/email";
+import { approvalSummary, approveJoinRequest, welcomeEmail } from "../lib/join-approve";
 import { attachmentDisposition, contentTypeForUpload, MAX_CSV_BYTES, MAX_DOCUMENT_BYTES, safeFilename } from "../lib/files";
 import { importOwners } from "../lib/import-owners";
 import { csvText, formatDollarsPlain, formatMoney, parseMoneyToCents } from "../lib/money";
 import { ensureSeedFiles } from "../lib/seed-files";
-import { isMissingTable, NotFoundError } from "../lib/errors";
+import { isCheckConstraint, isMissingTable, NotFoundError } from "../lib/errors";
+import { logError, logInfo } from "../lib/log";
 import type { AppBindings, DocumentCategory, MembershipRole, MembershipStatus } from "../types";
 import {
   adminHome,
@@ -801,6 +803,70 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         body: `<section class="panel"><h1>Join requests</h1><p>Apply the join request table in D1, then reload. The steps are in the project README under Request to join.</p></section>`,
       });
     }
+  });
+
+  app.post("/a/:slug/admin/join-requests/:requestId/approve", async (c) => {
+    const { association, user } = requireStaff(c);
+    await readForm(c);
+    const requestId = c.req.param("requestId");
+    const back = `/a/${association.slug}/admin/join-requests`;
+    let result;
+    try {
+      result = await approveJoinRequest(c.env.DB, { associationId: association.id, requestId });
+    } catch (error) {
+      if (isMissingTable(error)) {
+        return redirectTo(c, back, "Apply the join request table in D1, then try again. The steps are in the README under Request to join.", "warn");
+      }
+      if (isCheckConstraint(error)) {
+        return redirectTo(
+          c,
+          back,
+          "Apply the join request approval migration in D1, then try again. The steps are in the README under Request to join.",
+          "warn",
+        );
+      }
+      throw error;
+    }
+    if (!result.ok) {
+      const message =
+        result.reason === "invalid_email"
+          ? "That request does not have a valid email, so no login was created."
+          : "That request is not waiting to be approved.";
+      return redirectTo(c, back, message, "warn");
+    }
+
+    const letter = welcomeEmail({ associationName: association.name, email: result.email, name: result.name });
+    const apiKey = resendApiKey(c.env);
+    let emailSent = false;
+    if (apiKey) {
+      try {
+        emailSent = await sendResendEmail({
+          apiKey,
+          from: c.env.EMAIL_FROM,
+          to: result.email,
+          subject: letter.subject,
+          text: letter.text,
+        });
+      } catch (error) {
+        logError("join_approve_email", { message: error instanceof Error ? error.message : "unknown" });
+      }
+    }
+    const summary = approvalSummary({
+      createdUser: result.createdUser,
+      roleId: result.roleId,
+      lot: result.lot,
+      emailSent,
+    });
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "join_request_approve",
+      entityType: "join_request",
+      entityId: requestId,
+      detail: summary,
+    });
+    logInfo("join_request_approve", { associationId: association.id, createdUser: result.createdUser, emailSent });
+    return redirectTo(c, back, summary, emailSent ? "ok" : "warn");
   });
 
   app.post("/a/:slug/admin/join-requests/:requestId/reviewed", async (c) => {

@@ -446,31 +446,38 @@ export function newsAdminPage(options: {
 export function joinRequestsPage(association: Association, rows: JoinRequestRow[]): string {
   const body = rows
     .map((row) => {
-      const review =
-        row.status === "pending"
-          ? `<form method="post" action="/a/${esc(association.slug)}/admin/join-requests/${esc(row.id)}/reviewed"><button class="secondary" type="submit">Mark reviewed</button></form>`
-          : "";
       return `<tr>
         <td>${dateTimeCell(row.created_at, association.timezone)}</td>
         <td>${esc(row.name)}<div class="muted">${esc(row.email)}</div></td>
         <td>${esc(row.address)}</td>
         <td>${esc(row.note)}</td>
         <td>${esc(joinStatusLabel(row.status))}</td>
-        <td>${review}</td>
+        <td>${joinRequestActions(association.slug, row)}</td>
       </tr>`;
     })
     .join("");
   return `${adminNav(association.slug, "joins")}
     <section class="panel">
       <h1>Join requests</h1>
-      <p class="muted">People who asked to join from the public home page. Marking a request reviewed does not create a login. Add them from CSV import or the owner tools when they should have access.</p>
+      <p class="muted">People who asked to join from the public home page. Approve creates or reuses a homeowner login for that email and sends a welcome email. Mark reviewed when you are not ready to give access. That does not create a login. A lot is linked only when the address matches one lot that has no owner.</p>
       ${body ? `<table><thead><tr><th>Received</th><th>Person</th><th>Address or lot</th><th>Note</th><th>Status</th><th></th></tr></thead><tbody>${body}</tbody></table>` : empty("No join requests yet.")}
     </section>`;
+}
+
+function joinRequestActions(slug: string, row: JoinRequestRow): string {
+  if (row.status !== "pending" && row.status !== "reviewed") return "";
+  const approve = `<form method="post" action="/a/${esc(slug)}/admin/join-requests/${esc(row.id)}/approve"><button type="submit">Approve</button></form>`;
+  const review =
+    row.status === "pending"
+      ? `<form method="post" action="/a/${esc(slug)}/admin/join-requests/${esc(row.id)}/reviewed"><button class="secondary" type="submit">Mark reviewed</button></form>`
+      : "";
+  return `<div class="actions">${approve}${review}</div>`;
 }
 
 function joinStatusLabel(status: string): string {
   if (status === "pending") return "Pending";
   if (status === "reviewed") return "Reviewed";
+  if (status === "approved") return "Approved";
   return status;
 }
 

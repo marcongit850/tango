@@ -20,7 +20,7 @@ This is the Phase 0 foundation and Phase 1 scaffold: magic-link sign-in, a D1 da
 
 ## Not in this phase
 
-Moderated forum, online card or ACH payments, ARC requests, SMS, an AI covenant assistant, and email blasts. A board officer can email one owner a balance reminder. That is a single message, not a blast. Request to join stores a note for the board. It does not create a login.
+Moderated forum, online card or ACH payments, ARC requests, SMS, an AI covenant assistant, and email blasts. A board officer can email one owner a balance reminder. That is a single message, not a blast. The request to join form stores a note for the board. It does not create a login until a board member approves it.
 
 ## Stack
 
@@ -107,7 +107,11 @@ That runs `wrangler d1 migrations apply tango --remote`.
 
 ## Request to join
 
-The home page links to `/join`. The form asks for a name, an email, an optional address or lot, and an optional note. A successful submit stores a pending row in `join_requests` for Tango Mar, adds a portal notice for each active board member and officer, and emails those people when `RESEND_API_KEY` is set. It does not create a login. Board members review the list at Admin, Join requests, and can mark a row reviewed.
+The home page links to `/join`. The form asks for a name, an email, an optional address or lot, and an optional note. A successful submit stores a pending row in `join_requests` for Tango Mar, adds a portal notice for each active board member and officer, and emails those people when `RESEND_API_KEY` is set. Sending the form does not create a login.
+
+Board members open Admin, Join requests. **Approve** creates or reuses a user for that email, gives them an active homeowner membership (an active board or officer login keeps that role), and marks the request approved. When the address matches exactly one active lot and that lot has no owner, Approve links the person to it. A blank address, no match, more than one match, or a lot that already has an owner is left for the owner page. **Mark reviewed** only changes the status. It does not create a login. A reviewed request can still be approved later.
+
+Approve then sends a welcome email from `EMAIL_FROM` when `RESEND_API_KEY` is set. The message tells them to sign in at https://mytangomar.com/login with the same email. It does not include a magic-link token. If email is not configured or Resend fails, the login still exists and the admin flash says the welcome email was not sent.
 
 `migrations/0003_join_requests.sql` creates that table. Apply it to the live `tango` database before you deploy this version of the Worker. You can do that in the Cloudflare dashboard:
 
@@ -118,6 +122,18 @@ The home page links to `/join`. The form asks for a name, an email, an optional 
 5. Select **Execute**.
 
 You should see the `join_requests` table under **Tables**. If the Worker is deployed before this SQL runs, the public form tells the visitor to try again later, and Admin, Join requests explains that the table is missing. The rest of the portal keeps working.
+
+`migrations/0004_join_request_approved.sql` lets a request be marked `approved`. Apply it before using Approve. `npm run db:migrate:remote` applies it after `0003`.
+
+Dashboard steps for that file:
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database**.
+2. Select the database named **tango**.
+3. Open **Console**.
+4. Paste the full contents of `migrations/0004_join_request_approved.sql`.
+5. Select **Execute**.
+
+Run that file once. If Approve says the approval migration is missing, this file has not been applied yet. In that case no login is created. If the console says `join_requests_next` already exists, a previous paste stopped halfway: `DROP TABLE join_requests_next;` and execute the file again.
 
 ## Create the R2 bucket
 
@@ -193,7 +209,7 @@ Migrations live in `migrations/`.
 - `notifications` (portal notices)
 - `audit_log`
 - `magic_links`, `sessions`
-- `join_requests` (public request to join, pending until a board member marks it reviewed)
+- `join_requests` (public request to join: pending, reviewed, or approved)
 
 Every tenant-owned row carries `association_id`. Financial queries also require that association id, and homeowner queries join `property_owners` for the signed-in user. Staff queries are rejected unless the membership role is `board` or `officer` for that same association.
 
@@ -205,7 +221,7 @@ Balance = non-void invoice amounts + late fees − recorded payments.
 | --- | --- |
 | `npm run dev` | Local Worker with `APP_ENV=development` |
 | `npm run check` | Typecheck |
-| `npm test` | Unit tests for CSV parsing, money, access rules, and Central Time |
+| `npm test` | Unit tests for CSV parsing, money, access rules, Central Time, and join approval |
 | `npm run db:migrate:local` | Apply D1 migrations locally |
 | `npm run db:migrate:remote` | Apply D1 migrations to the bound remote database |
 | `npm run types` | Regenerate `worker-configuration.d.ts` after binding changes |

@@ -1,17 +1,23 @@
 import type { Hono } from "hono";
 import {
   allAnnouncements,
-  countActiveOfficers,
+  assignAssessmentInvoices,
+  countActiveAdmins,
   countPendingJoinRequests,
+  declineJoinRequest,
+  deleteJoinRequest,
   documentVersions,
+  duesColumnsReady,
   ledgerForAssociation,
   ledgerForUser,
+  listAssessments,
   listAudit,
   listContacts,
   listDocuments,
   listEvents,
   listFaqs,
   listJoinRequests,
+  listLots,
   listOwners,
   listProperties,
   notify,
@@ -19,39 +25,45 @@ import {
   refreshInvoiceStatus,
   reviewJoinRequest,
   staffUserIds,
+  threadMessages,
   threadsForViewer,
   versionById,
   writeAudit,
 } from "../db";
+import { keepsAnAdmin } from "../lib/access";
+import { changeLoginEmail } from "../lib/login-email";
 import { isDocumentCategory } from "../lib/categories";
+import { annualDues, defaultDuesYear, isLotType } from "../lib/dues";
 import { parseOwnersCsv } from "../lib/csv";
-import { formatAddress, isIsoDate, todayIso, zonedLocalToUtc } from "../lib/dates";
+import { formatAddress, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../lib/dates";
 import { resendApiKey, sendResendEmail } from "../lib/email";
 import { approvalSummary, approveJoinRequest, welcomeEmail } from "../lib/join-approve";
 import { attachmentDisposition, contentTypeForUpload, MAX_CSV_BYTES, MAX_DOCUMENT_BYTES, safeFilename } from "../lib/files";
 import { importOwners } from "../lib/import-owners";
 import { csvText, formatDollarsPlain, formatMoney, parseMoneyToCents } from "../lib/money";
 import { ensureSeedFiles } from "../lib/seed-files";
-import { isCheckConstraint, isMissingTable, NotFoundError } from "../lib/errors";
+import { isCheckConstraint, isMissingColumn, isMissingTable, NotFoundError } from "../lib/errors";
 import { logError, logInfo } from "../lib/log";
 import type { AppBindings, DocumentCategory, MembershipRole, MembershipStatus } from "../types";
 import {
   adminHome,
+  adminMessagesPage,
+  adminThreadPage,
   auditPage,
   documentDetailPage,
   documentsAdminPage,
   importPage,
   joinRequestsPage,
   ledgerPage,
-  lotsPage,
   newsAdminPage,
   ownerDetailPage,
   ownersPage,
+  type NewsEdit,
 } from "../views/admin";
 import { render } from "../views/layout";
 import { fileValue, readForm, redirectTo, requireStaff, textValue, type AppContext } from "./common";
 
-const ROLES = new Set<MembershipRole>(["homeowner", "board", "officer"]);
+const ROLES = new Set<MembershipRole>(["homeowner", "board"]);
 const STATUSES = new Set<MembershipStatus>(["invited", "active", "inactive"]);
 const METHODS = new Set(["check", "cash", "ach_recorded", "other"]);
 
@@ -93,9 +105,10 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const { association } = requireStaff(c);
     const delinquentOnly = c.req.query("delinquent") === "1";
     const today = todayIso(association.timezone);
-    const [owners, ledger] = await Promise.all([
+    const [owners, ledger, lots] = await Promise.all([
       listOwners(c.env.DB, association.id),
       ledgerForAssociation(c.env.DB, association.id, today),
+      listLots(c.env.DB, association.id),
     ]);
     const byProperty = new Map(ledger.map((row) => [row.property_id, row]));
     const decorated = owners
@@ -105,9 +118,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       })
       .filter((owner) => !delinquentOnly || owner.delinquent);
     return render(c, {
-      title: delinquentOnly ? "Delinquent accounts" : "Owners",
+      title: delinquentOnly ? "Delinquent accounts" : "Owners & lots",
       active: "admin",
-      body: ownersPage(association, decorated, delinquentOnly),
+      body: ownersPage(association, lots, decorated, delinquentOnly),
     });
   });
 
@@ -144,28 +157,60 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     if (!ROLES.has(role as MembershipRole) || !STATUSES.has(status as MembershipStatus)) {
       return redirectTo(c, ownerPath(association.slug, owner.user_id), "Choose a valid role and status.", "warn");
     }
-    const removingLastOfficer =
-      user.id === owner.user_id &&
-      owner.role_id === "officer" &&
-      owner.status === "active" &&
-      (role !== "officer" || status !== "active") &&
-      (await countActiveOfficers(c.env.DB, association.id)) <= 1;
-    if (removingLastOfficer) {
-      return redirectTo(c, ownerPath(association.slug, owner.user_id), "Keep at least one active officer.", "warn");
+    const nextAdmin = role === "board" && fields.is_admin === "1";
+    const currentlyAdmin = owner.role_id === "board" && owner.is_admin === 1 && owner.status === "active";
+    if (!keepsAnAdmin({ activeAdminCount: await countActiveAdmins(c.env.DB, association.id), currentlyAdmin, nextAdmin: nextAdmin && status === "active" })) {
+      return redirectTo(c, ownerPath(association.slug, owner.user_id), "Keep at least one person with admin access.", "warn");
     }
-    await c.env.DB
-      .prepare("UPDATE memberships SET role_id = ?, status = ? WHERE association_id = ? AND user_id = ?")
-      .bind(role, status, association.id, owner.user_id)
-      .run();
+    try {
+      await c.env.DB
+        .prepare("UPDATE memberships SET role_id = ?, status = ?, is_admin = ? WHERE association_id = ? AND user_id = ?")
+        .bind(role, status, nextAdmin ? 1 : 0, association.id, owner.user_id)
+        .run();
+    } catch (error) {
+      if (isMissingColumn(error)) {
+        return redirectTo(c, ownerPath(association.slug, owner.user_id), "Apply the admin migration in D1, then try again. The steps are in the README under Admin improvements.", "warn");
+      }
+      throw error;
+    }
     await writeAudit(c.env.DB, {
       associationId: association.id,
       actorUserId: user.id,
       action: "role_change",
       entityType: "membership",
       entityId: owner.user_id,
-      detail: `${role} / ${status}`,
+      detail: `${role}${nextAdmin ? " admin" : ""} / ${status}`,
     });
     return redirectTo(c, ownerPath(association.slug, owner.user_id), "Role saved.");
+  });
+
+  app.post("/a/:slug/admin/owners/:userId/email", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const owner = (await listOwners(c.env.DB, association.id)).find((row) => row.user_id === c.req.param("userId"));
+    if (!owner) throw new NotFoundError();
+    const back = ownerPath(association.slug, owner.user_id);
+    const result = await changeLoginEmail(c.env.DB, owner.user_id, textValue(fields, "email", 200));
+    if (!result.ok) {
+      const message =
+        result.reason === "taken"
+          ? "That email is already used by another person."
+          : result.reason === "missing"
+            ? "That person was not found."
+            : "Enter a valid email.";
+      return redirectTo(c, back, message, "warn");
+    }
+    if (result.changed) {
+      await writeAudit(c.env.DB, {
+        associationId: association.id,
+        actorUserId: user.id,
+        action: "email_change",
+        entityType: "user",
+        entityId: owner.user_id,
+        detail: `${owner.email} to ${result.email}`,
+      });
+    }
+    return redirectTo(c, back, "Login email saved.");
   });
 
   app.post("/a/:slug/admin/owners/:userId/lot", async (c) => {
@@ -265,65 +310,124 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     return redirectTo(c, ownerPath(association.slug, owner.user_id), message, sent ? "ok" : "warn");
   });
 
-  app.get("/a/:slug/admin/lots", async (c) => {
+  app.get("/a/:slug/admin/lots", (c) => {
     const { association } = requireStaff(c);
-    const properties = await listProperties(c.env.DB, association.id);
-    return render(c, { title: "Lots", active: "admin", body: lotsPage(association, properties) });
+    return redirectTo(c, `/a/${association.slug}/admin/owners#lots`);
   });
 
   app.post("/a/:slug/admin/lots", async (c) => {
     const { association, user } = requireStaff(c);
     const fields = await readForm(c);
+    const back = `/a/${association.slug}/admin/owners#lots`;
     const lotNumber = textValue(fields, "lot_number", 40);
     const street = textValue(fields, "street_address", 200);
-    if (!lotNumber || !street) return redirectTo(c, `/a/${association.slug}/admin/lots`, "Lot number and street address are required.", "warn");
+    const lotType = textValue(fields, "lot_type", 20) || "improved";
+    if (!lotNumber || !street || !isLotType(lotType)) return redirectTo(c, back, "Lot number, street address, and type are required.", "warn");
     const existing = await c.env.DB
       .prepare("SELECT id FROM properties WHERE association_id = ? AND lot_number = ?")
       .bind(association.id, lotNumber)
       .first();
-    if (existing) return redirectTo(c, `/a/${association.slug}/admin/lots`, "That lot number already exists.", "warn");
+    if (existing) return redirectTo(c, back, "That lot number already exists.", "warn");
     const id = crypto.randomUUID();
-    await c.env.DB
-      .prepare(
-        `INSERT INTO properties (id, association_id, lot_number, street_address, city, state, postal_code, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
-      )
-      .bind(id, association.id, lotNumber, street, association.city, association.state, association.postal_code, new Date().toISOString())
-      .run();
+    try {
+      await c.env.DB
+        .prepare(
+          `INSERT INTO properties (id, association_id, lot_number, street_address, city, state, postal_code, status, lot_type, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+        )
+        .bind(id, association.id, lotNumber, street, association.city, association.state, association.postal_code, lotType, new Date().toISOString())
+        .run();
+    } catch (error) {
+      if (!isMissingColumn(error)) throw error;
+      await c.env.DB
+        .prepare(
+          `INSERT INTO properties (id, association_id, lot_number, street_address, city, state, postal_code, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+        )
+        .bind(id, association.id, lotNumber, street, association.city, association.state, association.postal_code, new Date().toISOString())
+        .run();
+      return redirectTo(c, back, `Lot ${lotNumber} added. Apply the admin migration in D1 before setting lot type.`, "warn");
+    }
     await writeAudit(c.env.DB, {
       associationId: association.id,
       actorUserId: user.id,
       action: "lot_create",
       entityType: "property",
       entityId: id,
-      detail: `Lot ${lotNumber}`,
+      detail: `Lot ${lotNumber} (${lotType})`,
     });
-    return redirectTo(c, `/a/${association.slug}/admin/lots`, `Lot ${lotNumber} added.`);
+    return redirectTo(c, back, `Lot ${lotNumber} added.`);
   });
 
   app.post("/a/:slug/admin/lots/:propertyId", async (c) => {
     const { association, user } = requireStaff(c);
     const fields = await readForm(c);
+    const back = `/a/${association.slug}/admin/owners#lots`;
     const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
     if (!property) throw new NotFoundError();
+    const lotNumber = textValue(fields, "lot_number", 40);
     const street = textValue(fields, "street_address", 200);
     const status = textValue(fields, "status", 20);
-    if (!street || (status !== "active" && status !== "inactive")) {
-      return redirectTo(c, `/a/${association.slug}/admin/lots`, "Check the address and status.", "warn");
+    const lotType = textValue(fields, "lot_type", 20);
+    if (!lotNumber || !street || (status !== "active" && status !== "inactive") || !isLotType(lotType)) {
+      return redirectTo(c, back, "Check the lot number, address, type, and status.", "warn");
     }
-    await c.env.DB
-      .prepare("UPDATE properties SET street_address = ?, status = ? WHERE association_id = ? AND id = ?")
-      .bind(street, status, association.id, property.id)
-      .run();
+    const duplicate = await c.env.DB
+      .prepare("SELECT id FROM properties WHERE association_id = ? AND lot_number = ? AND id != ?")
+      .bind(association.id, lotNumber, property.id)
+      .first();
+    if (duplicate) return redirectTo(c, back, "That lot number already exists.", "warn");
+    try {
+      await c.env.DB
+        .prepare("UPDATE properties SET lot_number = ?, street_address = ?, status = ?, lot_type = ? WHERE association_id = ? AND id = ?")
+        .bind(lotNumber, street, status, lotType, association.id, property.id)
+        .run();
+    } catch (error) {
+      if (!isMissingColumn(error)) throw error;
+      return redirectTo(c, back, "Apply the admin migration in D1, then try again. The steps are in the README under Admin improvements.", "warn");
+    }
     await writeAudit(c.env.DB, {
       associationId: association.id,
       actorUserId: user.id,
       action: "lot_update",
       entityType: "property",
       entityId: property.id,
-      detail: `Lot ${property.lot_number}`,
+      detail: `Lot ${lotNumber} (${lotType})`,
     });
-    return redirectTo(c, `/a/${association.slug}/admin/lots`, `Lot ${property.lot_number} updated.`);
+    return redirectTo(c, back, `Lot ${lotNumber} updated.`);
+  });
+
+  app.post("/a/:slug/admin/lots/:propertyId/owner", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const back = `/a/${association.slug}/admin/owners#lots`;
+    const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
+    if (!property) throw new NotFoundError();
+    const ownerId = textValue(fields, "user_id", 80);
+    const owner = (await listOwners(c.env.DB, association.id)).find((row) => row.user_id === ownerId);
+    if (!owner) return redirectTo(c, back, "Choose a person in this association.", "warn");
+    const now = new Date().toISOString();
+    await c.env.DB
+      .prepare(
+        `INSERT INTO property_owners (id, association_id, property_id, user_id, is_primary, created_at)
+         VALUES (?, ?, ?, ?, 1, ?)
+         ON CONFLICT(property_id, user_id) DO UPDATE SET is_primary = 1`,
+      )
+      .bind(crypto.randomUUID(), association.id, property.id, owner.user_id, now)
+      .run();
+    await c.env.DB
+      .prepare("UPDATE property_owners SET is_primary = 0 WHERE association_id = ? AND property_id = ? AND user_id != ?")
+      .bind(association.id, property.id, owner.user_id)
+      .run();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "owner_assign",
+      entityType: "property",
+      entityId: property.id,
+      detail: `${owner.name} is the primary owner of lot ${property.lot_number}.`,
+    });
+    return redirectTo(c, back, `${owner.name} is now the primary owner of lot ${property.lot_number}.`);
   });
 
   app.get("/a/:slug/admin/import", async (c) => {
@@ -375,6 +479,8 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       )
       .bind(association.id)
       .all<{ id: string; invoice_number: string; description: string; lot_number: string }>();
+    const duesReady = await duesColumnsReady(c.env.DB);
+    const assessments = duesReady ? await listAssessments(c.env.DB, association.id) : [];
     return render(c, {
       title: "Ledger",
       active: "admin",
@@ -387,6 +493,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
           id: invoice.id,
           label: `Lot ${invoice.lot_number} · ${invoice.invoice_number} · ${invoice.description}`,
         })),
+        assessments,
+        duesReady,
+        duesYear: defaultDuesYear(today),
       }),
     });
   });
@@ -424,6 +533,137 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       detail: `${invoiceNumber} for lot ${property.lot_number}`,
     });
     return redirectTo(c, `/a/${association.slug}/admin/ledger`, `Invoice ${invoiceNumber} recorded.`);
+  });
+
+  app.post("/a/:slug/admin/assessments", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const back = `/a/${association.slug}/admin/ledger#dues`;
+    const year = Number(textValue(fields, "year", 4));
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) return redirectTo(c, back, "Enter a year between 2000 and 2100.", "warn");
+    if (!(await duesColumnsReady(c.env.DB))) {
+      return redirectTo(c, back, "Apply the admin migration in D1, then try again. The steps are in the README under Admin improvements.", "warn");
+    }
+    const created: string[] = [];
+    const existing: string[] = [];
+    for (const lotType of ["improved", "unimproved"] as const) {
+      const dues = annualDues(year, lotType);
+      const found = await c.env.DB
+        .prepare("SELECT id FROM assessments WHERE association_id = ? AND due_on = ? AND lot_type = ?")
+        .bind(association.id, dues.dueOn, dues.lotType)
+        .first<{ id: string }>();
+      if (found) {
+        existing.push(dues.name);
+        continue;
+      }
+      const id = crypto.randomUUID();
+      await c.env.DB
+        .prepare(
+          `INSERT INTO assessments (id, association_id, name, description, amount_cents, due_on, opens_on, lot_type, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(id, association.id, dues.name, dues.description, dues.amountCents, dues.dueOn, dues.opensOn, dues.lotType, new Date().toISOString())
+        .run();
+      created.push(dues.name);
+      await writeAudit(c.env.DB, {
+        associationId: association.id,
+        actorUserId: user.id,
+        action: "assessment_create",
+        entityType: "assessment",
+        entityId: id,
+        detail: dues.name,
+      });
+    }
+    const message = [
+      created.length ? `Added ${created.join(" and ")}.` : "",
+      existing.length ? `Already had ${existing.join(" and ")}.` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return redirectTo(c, back, message || "Nothing to add.");
+  });
+
+  app.post("/a/:slug/admin/assessments/:assessmentId", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const back = `/a/${association.slug}/admin/ledger#dues`;
+    const id = c.req.param("assessmentId");
+    const name = textValue(fields, "name", 200);
+    const amount = parseMoneyToCents(textValue(fields, "amount", 40));
+    const opensOn = textValue(fields, "opens_on", 20);
+    const dueOn = textValue(fields, "due_on", 20);
+    const lotTypeRaw = textValue(fields, "lot_type", 20);
+    const lotType = lotTypeRaw === "" ? null : lotTypeRaw;
+    if (!name || amount === null || amount < 0 || !isIsoDate(dueOn) || (opensOn && !isIsoDate(opensOn)) || (lotType !== null && !isLotType(lotType))) {
+      return redirectTo(c, back, "Check the name, amount, lot type, and dates.", "warn");
+    }
+    const result = await c.env.DB
+      .prepare(
+        `UPDATE assessments SET name = ?, amount_cents = ?, due_on = ?, opens_on = ?, lot_type = ?
+         WHERE association_id = ? AND id = ?`,
+      )
+      .bind(name, amount, dueOn, opensOn || null, lotType, association.id, id)
+      .run();
+    if ((result.meta.changes ?? 0) === 0) throw new NotFoundError();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "assessment_update",
+      entityType: "assessment",
+      entityId: id,
+      detail: name,
+    });
+    return redirectTo(c, back, "Assessment saved. Invoices already assigned were not changed.");
+  });
+
+  app.post("/a/:slug/admin/assessments/:assessmentId/assign", async (c) => {
+    const { association, user } = requireStaff(c);
+    await readForm(c);
+    const back = `/a/${association.slug}/admin/ledger#dues`;
+    const result = await assignAssessmentInvoices(c.env.DB, {
+      associationId: association.id,
+      assessmentId: c.req.param("assessmentId"),
+      today: todayIso(association.timezone),
+    });
+    if (!result) throw new NotFoundError();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "assessment_assign",
+      entityType: "assessment",
+      entityId: c.req.param("assessmentId"),
+      detail: `${result.name}: ${result.created} invoices, ${result.already} already assigned.`,
+    });
+    return redirectTo(c, back, `Assigned ${result.name} to ${result.created} lots. ${result.already} already had it.`);
+  });
+
+  app.post("/a/:slug/admin/assessments/:assessmentId/delete", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const back = `/a/${association.slug}/admin/ledger#dues`;
+    const id = c.req.param("assessmentId");
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, back, "Confirm the delete first.", "warn");
+    const result = await c.env.DB
+      .prepare(
+        `DELETE FROM assessments
+         WHERE association_id = ? AND id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM invoices i WHERE i.association_id = assessments.association_id AND i.assessment_id = assessments.id
+           )`,
+      )
+      .bind(association.id, id)
+      .run();
+    if ((result.meta.changes ?? 0) === 0) {
+      return redirectTo(c, back, "That assessment was not deleted. It may already have invoices.", "warn");
+    }
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "assessment_delete",
+      entityType: "assessment",
+      entityId: id,
+    });
+    return redirectTo(c, back, "Assessment deleted.");
   });
 
   app.post("/a/:slug/admin/payments", async (c) => {
@@ -612,7 +852,60 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       entityId: document.id,
       detail: `Current version set to v${version.version_number}.`,
     });
-    return redirectTo(c, documentPath(association.slug, document.id), `Residents now see version ${version.version_number}.`);
+    return redirectTo(c, documentPath(association.slug, document.id), `Owners and residents now see version ${version.version_number}.`);
+  });
+
+  app.post("/a/:slug/admin/documents/:documentId/visibility", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const document = await loadDocument(c, association.id, c.req.param("documentId"));
+    const visibility = textValue(fields, "visibility", 20);
+    if (visibility !== "residents" && visibility !== "board") {
+      return redirectTo(c, documentPath(association.slug, document.id), "Choose owners and residents, or board only.", "warn");
+    }
+    await c.env.DB
+      .prepare("UPDATE documents SET visibility = ? WHERE association_id = ? AND id = ?")
+      .bind(visibility, association.id, document.id)
+      .run();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "document_visibility",
+      entityType: "document",
+      entityId: document.id,
+      detail: visibility === "board" ? "Board only" : "Owners and residents",
+    });
+    return redirectTo(c, documentPath(association.slug, document.id), "Visibility saved.");
+  });
+
+  app.post("/a/:slug/admin/documents/:documentId/delete", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const document = await loadDocument(c, association.id, c.req.param("documentId"));
+    const back = `/a/${association.slug}/admin/documents`;
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, documentPath(association.slug, document.id), "Confirm the delete first.", "warn");
+    const versions = await documentVersions(c.env.DB, association.id, document.id);
+    await c.env.DB
+      .prepare("DELETE FROM document_versions WHERE association_id = ? AND document_id = ?")
+      .bind(association.id, document.id)
+      .run();
+    await c.env.DB.prepare("DELETE FROM documents WHERE association_id = ? AND id = ?").bind(association.id, document.id).run();
+    for (const version of versions) {
+      try {
+        await c.env.DOCUMENTS.delete(version.r2_key);
+      } catch (error) {
+        logError("document_r2_delete", { message: error instanceof Error ? error.message : "unknown" });
+      }
+    }
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "document_delete",
+      entityType: "document",
+      entityId: document.id,
+      detail: document.title,
+    });
+    return redirectTo(c, back, "Document deleted.");
   });
 
   app.get("/a/:slug/admin/documents/:documentId/versions/:versionId/file", async (c) => {
@@ -640,10 +933,11 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       listFaqs(c.env.DB, association.id),
       listContacts(c.env.DB, association.id),
     ]);
+    const editing = newsEdit(c.req.query("edit") ?? "", c.req.query("id") ?? "", announcements, events, faqs, contacts, association.timezone);
     return render(c, {
       title: "News",
       active: "admin",
-      body: newsAdminPage({ association, announcements, events, faqs, contacts }),
+      body: newsAdminPage({ association, announcements, events, faqs, contacts, editing }),
     });
   });
 
@@ -703,6 +997,48 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     return redirectTo(c, `/a/${association.slug}/admin/news`, "Announcement hidden.");
   });
 
+  app.post("/a/:slug/admin/announcements/:announcementId", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const id = c.req.param("announcementId");
+    const parsed = readAnnouncement(fields, association.timezone);
+    if (!parsed.ok) return redirectTo(c, `/a/${association.slug}/admin/news?edit=announcement&id=${id}`, parsed.message, "warn");
+    const result = await c.env.DB
+      .prepare(
+        `UPDATE announcements SET kind = ?, title = ?, body = ?, pinned = ?, expires_at = ?
+         WHERE association_id = ? AND id = ?`,
+      )
+      .bind(parsed.kind, parsed.title, parsed.body, parsed.pinned, parsed.expiresAt, association.id, id)
+      .run();
+    if ((result.meta.changes ?? 0) === 0) throw new NotFoundError();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "announcement_update",
+      entityType: "announcement",
+      entityId: id,
+      detail: parsed.title,
+    });
+    return redirectTo(c, `/a/${association.slug}/admin/news`, "Announcement saved.");
+  });
+
+  app.post("/a/:slug/admin/announcements/:announcementId/delete", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const id = c.req.param("announcementId");
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, `/a/${association.slug}/admin/news`, "Confirm the delete first.", "warn");
+    const result = await c.env.DB.prepare("DELETE FROM announcements WHERE association_id = ? AND id = ?").bind(association.id, id).run();
+    if ((result.meta.changes ?? 0) === 0) throw new NotFoundError();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "announcement_delete",
+      entityType: "announcement",
+      entityId: id,
+    });
+    return redirectTo(c, `/a/${association.slug}/admin/news`, "Announcement deleted.");
+  });
+
   app.post("/a/:slug/admin/events", async (c) => {
     const { association, user } = requireStaff(c);
     const fields = await readForm(c);
@@ -735,6 +1071,48 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     return redirectTo(c, `/a/${association.slug}/admin/news`, "Event added.");
   });
 
+  app.post("/a/:slug/admin/events/:eventId", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const id = c.req.param("eventId");
+    const parsed = readEvent(fields, association.timezone);
+    if (!parsed.ok) return redirectTo(c, `/a/${association.slug}/admin/news?edit=event&id=${id}`, parsed.message, "warn");
+    const result = await c.env.DB
+      .prepare(
+        `UPDATE events SET kind = ?, title = ?, description = ?, location = ?, starts_at = ?, ends_at = ?
+         WHERE association_id = ? AND id = ?`,
+      )
+      .bind(parsed.kind, parsed.title, parsed.description, parsed.location, parsed.startsAt, parsed.endsAt, association.id, id)
+      .run();
+    if ((result.meta.changes ?? 0) === 0) throw new NotFoundError();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "event_update",
+      entityType: "event",
+      entityId: id,
+      detail: parsed.title,
+    });
+    return redirectTo(c, `/a/${association.slug}/admin/news`, "Event saved.");
+  });
+
+  app.post("/a/:slug/admin/events/:eventId/delete", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const id = c.req.param("eventId");
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, `/a/${association.slug}/admin/news`, "Confirm the delete first.", "warn");
+    const result = await c.env.DB.prepare("DELETE FROM events WHERE association_id = ? AND id = ?").bind(association.id, id).run();
+    if ((result.meta.changes ?? 0) === 0) throw new NotFoundError();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "event_delete",
+      entityType: "event",
+      entityId: id,
+    });
+    return redirectTo(c, `/a/${association.slug}/admin/news`, "Event deleted.");
+  });
+
   app.post("/a/:slug/admin/faqs", async (c) => {
     const { association, user } = requireStaff(c);
     const fields = await readForm(c);
@@ -756,6 +1134,46 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       detail: question,
     });
     return redirectTo(c, `/a/${association.slug}/admin/news`, "FAQ added.");
+  });
+
+  app.post("/a/:slug/admin/faqs/:faqId", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const id = c.req.param("faqId");
+    const question = textValue(fields, "question", 300);
+    const answer = textValue(fields, "answer", 5000);
+    if (!question || !answer) return redirectTo(c, `/a/${association.slug}/admin/news?edit=faq&id=${id}`, "Add a question and an answer.", "warn");
+    const result = await c.env.DB
+      .prepare("UPDATE faqs SET question = ?, answer = ? WHERE association_id = ? AND id = ?")
+      .bind(question, answer, association.id, id)
+      .run();
+    if ((result.meta.changes ?? 0) === 0) throw new NotFoundError();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "faq_update",
+      entityType: "faq",
+      entityId: id,
+      detail: question,
+    });
+    return redirectTo(c, `/a/${association.slug}/admin/news`, "FAQ saved.");
+  });
+
+  app.post("/a/:slug/admin/faqs/:faqId/delete", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const id = c.req.param("faqId");
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, `/a/${association.slug}/admin/news`, "Confirm the delete first.", "warn");
+    const result = await c.env.DB.prepare("DELETE FROM faqs WHERE association_id = ? AND id = ?").bind(association.id, id).run();
+    if ((result.meta.changes ?? 0) === 0) throw new NotFoundError();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "faq_delete",
+      entityType: "faq",
+      entityId: id,
+    });
+    return redirectTo(c, `/a/${association.slug}/admin/news`, "FAQ deleted.");
   });
 
   app.post("/a/:slug/admin/contacts", async (c) => {
@@ -787,6 +1205,48 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       detail: name,
     });
     return redirectTo(c, `/a/${association.slug}/admin/news`, "Contact added.");
+  });
+
+  app.post("/a/:slug/admin/contacts/:contactId", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const id = c.req.param("contactId");
+    const name = textValue(fields, "name", 120);
+    const roleTitle = textValue(fields, "role_title", 120);
+    const email = textValue(fields, "email", 200);
+    const phone = textValue(fields, "phone", 40);
+    if (!name || !roleTitle) return redirectTo(c, `/a/${association.slug}/admin/news?edit=contact&id=${id}`, "Name and role are required.", "warn");
+    const result = await c.env.DB
+      .prepare("UPDATE board_contacts SET name = ?, role_title = ?, email = ?, phone = ? WHERE association_id = ? AND id = ?")
+      .bind(name, roleTitle, email, phone, association.id, id)
+      .run();
+    if ((result.meta.changes ?? 0) === 0) throw new NotFoundError();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "contact_update",
+      entityType: "board_contact",
+      entityId: id,
+      detail: name,
+    });
+    return redirectTo(c, `/a/${association.slug}/admin/news`, "Contact saved.");
+  });
+
+  app.post("/a/:slug/admin/contacts/:contactId/delete", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const id = c.req.param("contactId");
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, `/a/${association.slug}/admin/news`, "Confirm the delete first.", "warn");
+    const result = await c.env.DB.prepare("DELETE FROM board_contacts WHERE association_id = ? AND id = ?").bind(association.id, id).run();
+    if ((result.meta.changes ?? 0) === 0) throw new NotFoundError();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "contact_delete",
+      entityType: "board_contact",
+      entityId: id,
+    });
+    return redirectTo(c, `/a/${association.slug}/admin/news`, "Contact deleted.");
   });
 
   app.get("/a/:slug/admin/join-requests", async (c) => {
@@ -886,11 +1346,149 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     return redirectTo(c, `/a/${association.slug}/admin/join-requests`, "Request marked reviewed.");
   });
 
+  app.post("/a/:slug/admin/join-requests/:requestId/decline", async (c) => {
+    const { association, user } = requireStaff(c);
+    await readForm(c);
+    const requestId = c.req.param("requestId");
+    const back = `/a/${association.slug}/admin/join-requests`;
+    let updated = false;
+    try {
+      updated = await declineJoinRequest(c.env.DB, association.id, requestId);
+    } catch (error) {
+      if (isCheckConstraint(error) || isMissingTable(error)) {
+        return redirectTo(c, back, "Apply the admin migration in D1, then try again. The steps are in the README under Admin improvements.", "warn");
+      }
+      throw error;
+    }
+    if (!updated) return redirectTo(c, back, "That request cannot be declined. Approved requests stay approved.", "warn");
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "join_request_decline",
+      entityType: "join_request",
+      entityId: requestId,
+      detail: "Declined. No login was created.",
+    });
+    return redirectTo(c, back, "Request declined. No login was created.");
+  });
+
+  app.post("/a/:slug/admin/join-requests/:requestId/delete", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const requestId = c.req.param("requestId");
+    const back = `/a/${association.slug}/admin/join-requests`;
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, back, "Confirm the delete first.", "warn");
+    const removed = await deleteJoinRequest(c.env.DB, association.id, requestId);
+    if (!removed) return redirectTo(c, back, "That request is already gone.", "warn");
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "join_request_delete",
+      entityType: "join_request",
+      entityId: requestId,
+      detail: "Request removed. Any login already created was left in place.",
+    });
+    return redirectTo(c, back, "Request deleted.");
+  });
+
+  app.get("/a/:slug/admin/messages", async (c) => {
+    const { association } = requireStaff(c);
+    const threads = await threadsForViewer(c.env.DB, association.id, "", true);
+    return render(c, { title: "Messages", active: "admin", body: adminMessagesPage(association, threads) });
+  });
+
+  app.get("/a/:slug/admin/messages/:threadId", async (c) => {
+    const { association } = requireStaff(c);
+    const messages = await threadMessages(c.env.DB, association.id, c.req.param("threadId"));
+    if (messages.length === 0) throw new NotFoundError();
+    return render(c, {
+      title: messages[0].subject,
+      active: "admin",
+      body: adminThreadPage(association, messages[0].subject, messages),
+    });
+  });
+
   app.get("/a/:slug/admin/audit", async (c) => {
     const { association } = requireStaff(c);
     const rows = await listAudit(c.env.DB, association.id);
-    return render(c, { title: "Audit log", active: "admin", body: auditPage(association, rows) });
+    return render(c, { title: "Activity", active: "admin", body: auditPage(association, rows) });
   });
+}
+
+function newsEdit(
+  kind: string,
+  id: string,
+  announcements: Awaited<ReturnType<typeof allAnnouncements>>,
+  events: Awaited<ReturnType<typeof listEvents>>,
+  faqs: Awaited<ReturnType<typeof listFaqs>>,
+  contacts: Awaited<ReturnType<typeof listContacts>>,
+  timeZone: string,
+): NewsEdit | null {
+  if (!id) return null;
+  if (kind === "announcement") {
+    const row = announcements.find((item) => item.id === id);
+    return row ? { kind: "announcement", row } : null;
+  }
+  if (kind === "event") {
+    const row = events.find((item) => item.id === id);
+    if (!row) return null;
+    return {
+      kind: "event",
+      row,
+      startsLocal: utcToDatetimeLocal(row.starts_at, timeZone),
+      endsLocal: row.ends_at ? utcToDatetimeLocal(row.ends_at, timeZone) : "",
+    };
+  }
+  if (kind === "faq") {
+    const row = faqs.find((item) => item.id === id);
+    return row ? { kind: "faq", row } : null;
+  }
+  if (kind === "contact") {
+    const row = contacts.find((item) => item.id === id);
+    return row ? { kind: "contact", row } : null;
+  }
+  return null;
+}
+
+function readAnnouncement(
+  fields: Record<string, string | File>,
+  timeZone: string,
+):
+  | { ok: true; kind: "news" | "meeting" | "emergency"; title: string; body: string; pinned: number; expiresAt: string | null }
+  | { ok: false; message: string } {
+  const kind = textValue(fields, "kind", 20);
+  const title = textValue(fields, "title", 200);
+  const body = textValue(fields, "body", 8000);
+  const pinned = fields.pinned === "1" ? 1 : 0;
+  const expiresOn = textValue(fields, "expires_on", 20);
+  if ((kind !== "news" && kind !== "meeting" && kind !== "emergency") || !title || !body) {
+    return { ok: false, message: "Add a title and body." };
+  }
+  let expiresAt: string | null = null;
+  if (expiresOn) {
+    expiresAt = zonedLocalToUtc(`${expiresOn}T23:59`, timeZone);
+    if (!expiresAt) return { ok: false, message: "Expiration date is not valid." };
+  }
+  return { ok: true, kind, title, body, pinned, expiresAt };
+}
+
+function readEvent(
+  fields: Record<string, string | File>,
+  timeZone: string,
+):
+  | { ok: true; kind: "event" | "meeting" | "emergency"; title: string; description: string; location: string; startsAt: string; endsAt: string | null }
+  | { ok: false; message: string } {
+  const kind = textValue(fields, "kind", 20);
+  const title = textValue(fields, "title", 200);
+  const description = textValue(fields, "description", 4000);
+  const location = textValue(fields, "location", 200);
+  const startsAt = zonedLocalToUtc(textValue(fields, "starts_at", 40), timeZone);
+  const endsRaw = textValue(fields, "ends_at", 40);
+  const endsAt = endsRaw ? zonedLocalToUtc(endsRaw, timeZone) : null;
+  if ((kind !== "event" && kind !== "meeting" && kind !== "emergency") || !title || !startsAt || (endsRaw && !endsAt)) {
+    return { ok: false, message: "Check the event title and times." };
+  }
+  return { ok: true, kind, title, description, location, startsAt, endsAt };
 }
 
 function ownerPath(slug: string, userId: string): string {

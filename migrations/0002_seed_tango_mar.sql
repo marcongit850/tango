@@ -273,7 +273,7 @@ INSERT INTO faqs (id, association_id, question, answer, sort_order) VALUES
     'faq_balance',
     'assoc_tango_mar',
     'Who can see my balance?',
-    'You can see the lots linked to your login. Other residents cannot. Board members and officers can see ledgers for Tango Mar only, not for any other association on this deployment.',
+    'You can see the lots linked to your login. Other residents cannot. People with admin access can see ledgers for this association only, not for any other association on this deployment.',
     3
   );
 

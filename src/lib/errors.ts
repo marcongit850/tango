@@ -22,6 +22,16 @@ export function isCheckConstraint(error: unknown): boolean {
   return /check constraint failed/i.test(message);
 }
 
+export function isMissingColumn(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /no such column/i.test(message);
+}
+
+export function isUniqueConstraint(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /unique constraint failed/i.test(message);
+}
+
 export class RedirectError extends Error {
   readonly location: string;
 

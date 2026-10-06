@@ -9,6 +9,8 @@ export type OwnerCsvRow = {
   lotNumber: string;
   streetAddress: string;
   role: MembershipRole;
+  /** null means the sheet did not say. Import keeps an existing admin flag in that case. */
+  isAdmin: boolean | null;
   startingBalanceCents: number;
   balanceAsOf: string;
   phone: string;
@@ -103,6 +105,7 @@ export function parseOwnersCsv(
     const lotNumber = cell("lot_number");
     const streetAddress = cell("street_address");
     const roleText = (cell("role") || "homeowner").toLowerCase();
+    const adminFlag = parseAdminFlag(indexOf("admin") === -1 ? "" : cell("admin"));
     const balanceText = cell("starting_balance");
     const balanceAsOf = cell("balance_as_of") || defaults.today;
     const phone = cell("phone");
@@ -119,7 +122,15 @@ export function parseOwnersCsv(
       continue;
     }
     if (roleText !== "homeowner" && roleText !== "board" && roleText !== "officer") {
-      errors.push({ line, message: "Role must be homeowner, board, or officer." });
+      errors.push({ line, message: "Role must be homeowner or board." });
+      continue;
+    }
+    if (adminFlag === "invalid") {
+      errors.push({ line, message: "Admin must be yes or no." });
+      continue;
+    }
+    if (roleText === "homeowner" && adminFlag === true) {
+      errors.push({ line, message: "Admin access is only for board members." });
       continue;
     }
     const startingBalanceCents = parseMoneyToCents(balanceText);
@@ -138,7 +149,8 @@ export function parseOwnersCsv(
       name,
       lotNumber,
       streetAddress,
-      role: roleText,
+      role: roleText === "homeowner" ? "homeowner" : "board",
+      isAdmin: roleText === "officer" && adminFlag === null ? true : adminFlag,
       startingBalanceCents,
       balanceAsOf,
       phone,
@@ -149,4 +161,12 @@ export function parseOwnersCsv(
   }
 
   return { rows, errors };
+}
+
+function parseAdminFlag(value: string): boolean | null | "invalid" {
+  const text = value.trim().toLowerCase();
+  if (!text) return null;
+  if (text === "yes" || text === "y" || text === "1" || text === "true") return true;
+  if (text === "no" || text === "n" || text === "0" || text === "false") return false;
+  return "invalid";
 }

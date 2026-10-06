@@ -1,12 +1,12 @@
 import type { Hono } from "hono";
-import { findAssociationBySlug, insertJoinRequest, listStaffContacts, notify, writeAudit } from "../db";
-import { safeNextPath } from "../lib/access";
+import { findAssociationBySlug, findMembership, insertJoinRequest, listStaffContacts, notify, writeAudit } from "../db";
+import { isAdmin, safeNextPath } from "../lib/access";
 import { resendApiKey, sendResendEmail } from "../lib/email";
 import { NotFoundError, isMissingTable } from "../lib/errors";
 import { logError, logInfo } from "../lib/log";
 import type { AppBindings } from "../types";
 import { render } from "../views/layout";
-import { homePage, joinReceivedPage, joinRequestPage, legalPage, loginPage } from "../views/public";
+import { homePage, joinReceivedPage, joinRequestPage, legalPage, loginPage, type HomePortal } from "../views/public";
 import { readForm, redirectTo, requireAssociation, textValue, type AppContext } from "./common";
 
 const HOME_SLUG = "tango-mar";
@@ -20,9 +20,23 @@ function validEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+async function portalForUser(c: AppContext): Promise<HomePortal | null> {
+  const user = c.get("user");
+  if (!user) return null;
+  const association = await findAssociationBySlug(c.env.DB, HOME_SLUG);
+  if (!association) return null;
+  const membership = await findMembership(c.env.DB, association.id, user.id);
+  if (!membership || membership.status === "inactive") return null;
+  return {
+    dashboardHref: `/a/${association.slug}/dashboard`,
+    adminHref: isAdmin(membership) ? `/a/${association.slug}/admin` : null,
+  };
+}
+
 export function registerPublicRoutes(app: Hono<AppBindings>): void {
   app.get("/", async (c) => {
-    return render(c, { title: "Tango Mar", active: "home", body: homePage(showDemo(c)) });
+    const portal = await portalForUser(c);
+    return render(c, { title: "Tango Mar", active: "home", body: homePage(showDemo(c), portal), portal });
   });
 
   app.get("/legal", async (c) => render(c, { title: "Not legal advice", active: "legal", body: legalPage() }));

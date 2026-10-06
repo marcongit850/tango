@@ -1,8 +1,11 @@
 import { DOCUMENT_CATEGORIES } from "../lib/categories";
+import { zonedIsoDate } from "../lib/dates";
+import { lotTypeLabel } from "../lib/dues";
 import { esc } from "../lib/html";
 import type { Association, DocumentCategory } from "../types";
 import type {
   AnnouncementRow,
+  AssessmentAdminRow,
   AuditRow,
   BalanceRow,
   ContactRow,
@@ -10,6 +13,8 @@ import type {
   EventRow,
   FaqRow,
   JoinRequestRow,
+  LotRow,
+  MessageRow,
   OwnerListRow,
   PropertyRow,
   VersionRow,
@@ -26,23 +31,32 @@ import {
   roleLabel,
   selectField,
   textField,
+  visibilityLabel,
 } from "./bits";
+import { threadPage } from "./resident";
 
 function adminNav(slug: string, current: string): string {
   const links = [
     ["overview", "Overview"],
-    ["owners", "Owners"],
-    ["lots", "Lots"],
+    ["owners", "Owners & lots"],
     ["import", "CSV import"],
     ["ledger", "Ledger"],
     ["documents", "Documents"],
     ["news", "News"],
+    ["messages", "Messages"],
     ["joins", "Join requests"],
-    ["audit", "Audit"],
+    ["audit", "Activity"],
   ];
   return `<p class="actions">${links
     .map(([id, label]) => {
-      const href = id === "overview" ? `/a/${esc(slug)}/admin` : id === "joins" ? `/a/${esc(slug)}/admin/join-requests` : `/a/${esc(slug)}/admin/${id}`;
+      const href =
+        id === "overview"
+          ? `/a/${esc(slug)}/admin`
+          : id === "joins"
+            ? `/a/${esc(slug)}/admin/join-requests`
+            : id === "messages"
+              ? `/a/${esc(slug)}/admin/messages`
+              : `/a/${esc(slug)}/admin/${id}`;
       return `<a class="button ${id === current ? "" : "secondary"}" href="${href}">${label}</a>`;
     })
     .join(" ")}</p>`;
@@ -57,32 +71,38 @@ export function adminHome(options: {
   pendingJoins: number | null;
   audit: AuditRow[];
 }): string {
+  const base = `/a/${esc(options.association.slug)}/admin`;
   const joins =
     options.pendingJoins === null
       ? ""
-      : `<article class="card"><h2>${options.pendingJoins}</h2><p><a href="/a/${esc(options.association.slug)}/admin/join-requests">Join requests waiting</a></p></article>`;
+      : statCard(options.pendingJoins, "Join requests waiting", `${base}/join-requests`);
   return `${adminNav(options.association.slug, "overview")}
     <section class="panel">
       <h1>Board admin</h1>
       <p class="muted">${esc(options.association.legal_name)}. Tools on this page stay inside ${esc(options.association.name)}.</p>
     </section>
     <section class="grid">
-      <article class="card"><h2>${options.lots}</h2><p>Lots</p></article>
-      <article class="card"><h2>${options.members}</h2><p>Active logins</p></article>
-      <article class="card"><h2>${options.delinquent}</h2><p>Delinquent lots</p></article>
-      <article class="card"><h2>${options.waiting}</h2><p>Messages waiting on the board</p></article>
+      ${statCard(options.lots, "Lots", `${base}/owners#lots`)}
+      ${statCard(options.members, "Active logins", `${base}/owners#logins`)}
+      ${statCard(options.delinquent, "Delinquent lots", `${base}/owners?delinquent=1#logins`)}
+      ${statCard(options.waiting, "Messages waiting on the board", `${base}/messages`)}
       ${joins}
     </section>
     <section class="panel">
       <h2>Roles</h2>
-      <p>Homeowner sees only their lots. Board member and officer/manager share these admin tools. Public is the logged-out visitor and is not assigned on a roster.</p>
-      <p><a href="/a/${esc(options.association.slug)}/admin/export.csv">Export ledger for the accountant</a></p>
+      <p>Homeowner sees only their lots. Board member is the other role. Admin access is a flag on a board member, and it is what opens these tools. Keep at least one active admin. Public is the logged-out visitor and is not assigned on a roster.</p>
+      <p><a href="${base}/export.csv">Export ledger for the accountant</a></p>
     </section>
     <section class="panel"><h2>Recent activity</h2>${auditTable(options.association, options.audit.slice(0, 8))}</section>`;
 }
 
+function statCard(count: number, label: string, href: string): string {
+  return `<a class="card" href="${href}"><h2>${count}</h2><p>${esc(label)}</p></a>`;
+}
+
 export function ownersPage(
   association: Association,
+  lots: LotRow[],
   owners: (OwnerListRow & { balance_cents?: number; delinquent?: boolean })[],
   delinquentOnly: boolean,
 ): string {
@@ -90,20 +110,71 @@ export function ownersPage(
     .map(
       (owner) => `<tr>
         <td><a href="/a/${esc(association.slug)}/admin/owners/${esc(owner.user_id)}">${esc(owner.name)}</a><div class="muted">${esc(owner.email)}</div></td>
-        <td>${esc(roleLabel(owner.role_id))}</td>
+        <td>${esc(roleLabel(owner.role_id, owner.is_admin === 1))}</td>
         <td>${esc(owner.status)}</td>
-        <td>${owner.lot_number ? `Lot ${esc(owner.lot_number)}` : "—"}</td>
-        <td>${owner.balance_cents === undefined ? "—" : moneySpan(owner.balance_cents)}</td>
+        <td>${owner.lot_number ? `Lot ${esc(owner.lot_number)}` : "None"}</td>
+        <td>${owner.balance_cents === undefined ? "" : moneySpan(owner.balance_cents)}</td>
         <td>${owner.delinquent ? `<span class="badge late">Past due</span>` : ""}</td>
       </tr>`,
     )
     .join("");
+  const ownerChoices = owners.map((owner) => ({ value: owner.user_id, label: `${owner.name} (${owner.email})` }));
+  const lotRows = lots
+    .map((lot) => {
+      const edit = `/a/${esc(association.slug)}/admin/lots/${esc(lot.id)}`;
+      return `<tr>
+        <td>Lot ${esc(lot.lot_number)}</td>
+        <td>${esc(lot.street_address)}</td>
+        <td>${esc(lotTypeLabel(lot.lot_type))}</td>
+        <td>${lot.owner_name ? esc(lot.owner_name) : "No owner"}</td>
+        <td>${lot.owner_email ? esc(lot.owner_email) : ""}</td>
+        <td>${esc(lot.status)}</td>
+        <td>
+          <details>
+            <summary>Edit</summary>
+            <form class="fields" method="post" action="${edit}">
+              ${textField("Lot number", "lot_number", { value: lot.lot_number, required: true })}
+              ${textField("Street", "street_address", { value: lot.street_address, required: true })}
+              ${selectField("Type", "lot_type", [
+                { value: "improved", label: "Improved" },
+                { value: "unimproved", label: "Unimproved" },
+              ], lot.lot_type)}
+              ${selectField("Status", "status", [
+                { value: "active", label: "Active" },
+                { value: "inactive", label: "Inactive" },
+              ], lot.status)}
+              <button class="secondary" type="submit">Save lot</button>
+            </form>
+            <form class="fields" method="post" action="${edit}/owner">
+              ${selectField("Primary owner", "user_id", [{ value: "", label: "Choose a person" }, ...ownerChoices])}
+              <button class="secondary" type="submit">Assign owner</button>
+            </form>
+          </details>
+        </td>
+      </tr>`;
+    })
+    .join("");
   return `${adminNav(association.slug, "owners")}
-    <section class="panel">
-      <h1>${delinquentOnly ? "Delinquent accounts" : "Homeowner accounts"}</h1>
+    <section class="panel" id="lots">
+      <h1>Owners & lots</h1>
+      <p class="muted">Each lot shows its primary owner. CSV import is still the bulk way to add a roster. Set improved or unimproved here before assigning annual dues.</p>
+      ${lotRows ? `<table><thead><tr><th>Lot</th><th>Address</th><th>Type</th><th>Primary owner</th><th>Email</th><th>Status</th><th></th></tr></thead><tbody>${lotRows}</tbody></table>` : empty("No lots yet.")}
+      <h2>Add a lot</h2>
+      <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/lots">
+        ${textField("Lot number", "lot_number", { required: true })}
+        ${textField("Street address", "street_address", { required: true })}
+        ${selectField("Type", "lot_type", [
+          { value: "improved", label: "Improved" },
+          { value: "unimproved", label: "Unimproved" },
+        ], "improved")}
+        <button type="submit">Add lot</button>
+      </form>
+    </section>
+    <section class="panel" id="logins">
+      <h2>${delinquentOnly ? "Delinquent accounts" : "Logins"}</h2>
       <p class="actions">
-        <a class="button ${delinquentOnly ? "secondary" : ""}" href="/a/${esc(association.slug)}/admin/owners">All owners</a>
-        <a class="button ${delinquentOnly ? "" : "secondary"}" href="/a/${esc(association.slug)}/admin/owners?delinquent=1">Delinquent</a>
+        <a class="button ${delinquentOnly ? "secondary" : ""}" href="/a/${esc(association.slug)}/admin/owners#logins">All owners</a>
+        <a class="button ${delinquentOnly ? "" : "secondary"}" href="/a/${esc(association.slug)}/admin/owners?delinquent=1#logins">Delinquent</a>
       </p>
       ${rows ? `<table><thead><tr><th>Person</th><th>Role</th><th>Status</th><th>Lot</th><th>Balance</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No matching accounts.")}
     </section>`;
@@ -119,13 +190,19 @@ export function ownerDetailPage(options: {
   const { association, owner } = options;
   const base = `/a/${association.slug}/admin/owners/${owner.user_id}`;
   const lotChoices = options.properties
-    .map((property) => ({ value: property.id, label: `Lot ${property.lot_number} — ${property.street_address}` }));
+    .map((property) => ({ value: property.id, label: `Lot ${property.lot_number}, ${property.street_address}` }));
   return `${adminNav(association.slug, "owners")}
     <section class="panel">
       <h1>${esc(owner.name)}</h1>
       <p>${esc(owner.email)}${owner.phone ? ` · ${esc(owner.phone)}` : ""}</p>
-      <p>${esc(roleLabel(owner.role_id))} · ${esc(owner.status)}</p>
-      <p>Primary lot balance ${options.balance === null ? "—" : moneySpan(options.balance)}</p>
+      <p>${esc(roleLabel(owner.role_id, owner.is_admin === 1))} · ${esc(owner.status)}</p>
+      <p>Primary lot balance ${options.balance === null ? "" : moneySpan(options.balance)}</p>
+      <h2>Login email</h2>
+      <p class="muted">This is the address they use to sign in. Saving it keeps the same person and the lots already linked to them.</p>
+      <form class="fields" method="post" action="${esc(base)}/email">
+        ${textField("Email", "email", { type: "email", value: owner.email, required: true })}
+        <button type="submit">Save email</button>
+      </form>
     </section>
     <section class="split">
       <article class="panel">
@@ -134,8 +211,9 @@ export function ownerDetailPage(options: {
           ${selectField("Role", "role_id", [
             { value: "homeowner", label: "Homeowner" },
             { value: "board", label: "Board member" },
-            { value: "officer", label: "Officer / manager" },
-          ], owner.role_id)}
+          ], owner.role_id === "board" ? "board" : "homeowner")}
+          <label><input type="checkbox" name="is_admin" value="1" ${owner.role_id === "board" && owner.is_admin === 1 ? "checked" : ""}> Admin access</label>
+          <p class="muted">Admin access applies only to a board member. Keep at least one active admin.</p>
           ${selectField("Status", "status", [
             { value: "active", label: "Active" },
             { value: "invited", label: "Invited" },
@@ -169,44 +247,6 @@ export function ownerDetailPage(options: {
     </section>`;
 }
 
-export function lotsPage(association: Association, properties: PropertyRow[]): string {
-  const rows = properties
-    .map(
-      (property) => `<tr>
-        <td>Lot ${esc(property.lot_number)}</td>
-        <td>${esc(property.street_address)}</td>
-        <td>${esc(property.city)} ${esc(property.state)} ${esc(property.postal_code)}</td>
-        <td>${esc(property.status)}</td>
-        <td>
-          <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/lots/${esc(property.id)}">
-            ${textField("Street", "street_address", { value: property.street_address, required: true })}
-            ${selectField("Status", "status", [
-              { value: "active", label: "Active" },
-              { value: "inactive", label: "Inactive" },
-            ], property.status)}
-            <button class="secondary" type="submit">Update</button>
-          </form>
-        </td>
-      </tr>`,
-    )
-    .join("");
-  return `${adminNav(association.slug, "lots")}
-    <section class="split">
-      <article class="panel">
-        <h1>Lots</h1>
-        ${rows ? `<table><thead><tr><th>Lot</th><th>Address</th><th>Place</th><th>Status</th><th>Edit</th></tr></thead><tbody>${rows}</tbody></table>` : empty("No lots yet.")}
-      </article>
-      <article class="panel">
-        <h2>Add a lot</h2>
-        <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/lots">
-          ${textField("Lot number", "lot_number", { required: true })}
-          ${textField("Street address", "street_address", { required: true })}
-          <button type="submit">Add lot</button>
-        </form>
-      </article>
-    </section>`;
-}
-
 export function importPage(association: Association, result?: { importResult: ImportResult; parseErrors: CsvIssue[] }): string {
   const issues = [
     ...(result?.parseErrors ?? []),
@@ -219,7 +259,7 @@ export function importPage(association: Association, result?: { importResult: Im
   return `${adminNav(association.slug, "import")}
     <section class="panel">
       <h1>Import owners from CSV</h1>
-      <p>Save the Excel roster as CSV UTF-8. Required columns: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code> (homeowner, board, officer), <code>starting_balance</code> (dollars owed; negative is a credit), <code>balance_as_of</code> (YYYY-MM-DD), <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>.</p>
+      <p>Save the Excel roster as CSV UTF-8. Required columns: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code> (homeowner or board; an older sheet may still say officer, which becomes board with admin), <code>admin</code> (yes or no), <code>starting_balance</code> (dollars owed; negative is a credit), <code>balance_as_of</code> (YYYY-MM-DD), <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>.</p>
       <p>A positive starting balance creates one opening invoice per lot. Importing again does not add a second opening balance. Sample file: <code>samples/tango-mar-owners.csv</code>.</p>
       ${summary}
       ${issueList ? `<ul>${issueList}</ul>` : ""}
@@ -236,6 +276,9 @@ export function ledgerPage(options: {
   ownersByProperty: Map<string, string>;
   properties: PropertyRow[];
   invoices: { id: string; label: string }[];
+  assessments: AssessmentAdminRow[];
+  duesReady: boolean;
+  duesYear: number;
 }): string {
   const rows = options.ledger
     .map(
@@ -260,6 +303,7 @@ export function ledgerPage(options: {
       <p><a href="/a/${esc(options.association.slug)}/admin/export.csv">Download CSV for the accountant</a></p>
       ${rows ? `<table><thead><tr><th>Lot</th><th>Primary owner</th><th>Charges</th><th>Late fees</th><th>Payments</th><th>Balance</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No lots.")}
     </section>
+    ${duesSection(options)}
     <section class="split">
       <article class="panel">
         <h2>Record an invoice</h2>
@@ -300,8 +344,8 @@ export function documentsAdminPage(association: Association, documents: Document
       (doc) => `<tr>
         <td>${categoryCell(doc.category)}</td>
         <td><a href="/a/${esc(association.slug)}/admin/documents/${esc(doc.id)}">${esc(doc.title)}</a></td>
-        <td>${esc(doc.visibility)}</td>
-        <td>${doc.version_number ? `v${doc.version_number}` : "—"}</td>
+        <td>${esc(visibilityLabel(doc.visibility))}</td>
+        <td>${doc.version_number ? `v${doc.version_number}` : "None"}</td>
       </tr>`,
     )
     .join("");
@@ -318,7 +362,7 @@ export function documentsAdminPage(association: Association, documents: Document
           ${textField("Title", "title", { required: true })}
           ${selectField("Category", "category", DOCUMENT_CATEGORIES.map((item) => ({ value: item.id, label: item.label })))}
           ${selectField("Who can see it", "visibility", [
-            { value: "residents", label: "Residents" },
+            { value: "residents", label: "Owners and residents" },
             { value: "board", label: "Board only" },
           ])}
           ${areaField("Notes", "notes")}
@@ -349,7 +393,15 @@ export function documentDetailPage(
   return `${adminNav(association.slug, "documents")}
     <section class="panel">
       <h1>${esc(document.title)}</h1>
-      <p>${categoryCell(document.category)} · ${esc(document.visibility)}</p>
+      <p>${categoryCell(document.category)} · ${esc(visibilityLabel(document.visibility))}</p>
+      <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/documents/${esc(document.id)}/visibility">
+        ${selectField("Who can see it", "visibility", [
+          { value: "residents", label: "Owners and residents" },
+          { value: "board", label: "Board only" },
+        ], document.visibility)}
+        <button class="secondary" type="submit">Save visibility</button>
+      </form>
+      <p class="muted">Saving visibility does not upload a new file.</p>
       ${rows ? `<table><thead><tr><th>Version</th><th>File</th><th>Notes</th><th>Uploaded</th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table>` : ""}
     </section>
     <section class="panel">
@@ -359,8 +411,22 @@ export function documentDetailPage(
         <label>File<input type="file" name="file" required></label>
         <button type="submit">Upload and make current</button>
       </form>
+    </section>
+    <section class="panel">
+      <h2>Delete document</h2>
+      <p class="muted">This removes the document, every version, and the stored files.</p>
+      <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/documents/${esc(document.id)}/delete">
+        <label><input type="checkbox" name="confirm" value="yes" required> Delete this document and its files</label>
+        <button class="secondary" type="submit">Delete document</button>
+      </form>
     </section>`;
 }
+
+export type NewsEdit =
+  | { kind: "announcement"; row: AnnouncementRow }
+  | { kind: "event"; row: EventRow; startsLocal: string; endsLocal: string }
+  | { kind: "faq"; row: FaqRow }
+  | { kind: "contact"; row: ContactRow };
 
 export function newsAdminPage(options: {
   association: Association;
@@ -368,21 +434,37 @@ export function newsAdminPage(options: {
   events: EventRow[];
   faqs: FaqRow[];
   contacts: ContactRow[];
+  editing?: NewsEdit | null;
 }): string {
   const { association } = options;
+  const base = `/a/${association.slug}/admin`;
   const events = options.events
-    .map((event) => `<li>${esc(event.kind)} · ${esc(event.title)} · ${dateTimeCell(event.starts_at, association.timezone)}</li>`)
-    .join("");
-  const faqs = options.faqs.map((faq) => `<li>${esc(faq.question)}</li>`).join("");
-  const contacts = options.contacts.map((contact) => `<li>${esc(contact.name)} · ${esc(contact.role_title)}</li>`).join("");
-  const announcements = options.announcements
     .map(
-      (item) => `<li>${esc(item.kind)} · ${esc(item.title)} · ${dateCell(item.published_at, association.timezone)}
-        ${item.expires_at && item.expires_at <= new Date().toISOString() ? "(expired)" : ""}
-        <form method="post" action="/a/${esc(association.slug)}/admin/announcements/${esc(item.id)}/hide"><button class="linkish" type="submit">Hide</button></form>
+      (event) => `<li>${esc(event.kind)} · ${esc(event.title)} · ${dateTimeCell(event.starts_at, association.timezone)}
+        ${newsItemActions(association.slug, "events", event.id)}
       </li>`,
     )
     .join("");
+  const faqs = options.faqs
+    .map((faq) => `<li>${esc(faq.question)} ${newsItemActions(association.slug, "faqs", faq.id)}</li>`)
+    .join("");
+  const contacts = options.contacts
+    .map((contact) => `<li>${esc(contact.name)} · ${esc(contact.role_title)} ${newsItemActions(association.slug, "contacts", contact.id)}</li>`)
+    .join("");
+  const announcements = options.announcements
+    .map(
+      (item) => `<li>${esc(item.kind)} · ${esc(item.title)} · ${dateCell(item.published_at, association.timezone)}
+        ${item.expires_at && item.expires_at <= new Date().toISOString() ? "(hidden)" : ""}
+        <form method="post" action="${base}/announcements/${esc(item.id)}/hide"><button class="linkish" type="submit">Hide</button></form>
+        ${newsItemActions(association.slug, "announcements", item.id)}
+      </li>`,
+    )
+    .join("");
+  const editing = options.editing;
+  const announcement = editing?.kind === "announcement" ? editing.row : null;
+  const event = editing?.kind === "event" ? editing : null;
+  const faq = editing?.kind === "faq" ? editing.row : null;
+  const contact = editing?.kind === "contact" ? editing.row : null;
   return `${adminNav(association.slug, "news")}
     <section class="panel"><h1>News, calendar, FAQ, contacts</h1>
       <h2>Announcements</h2><ul>${announcements || "<li>No announcements.</li>"}</ul>
@@ -392,53 +474,57 @@ export function newsAdminPage(options: {
     </section>
     <section class="grid">
       <article class="panel">
-        <h2>Announcement</h2>
-        <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/announcements">
+        <h2>${announcement ? "Edit announcement" : "Announcement"}</h2>
+        <form class="fields" method="post" action="${base}/announcements${announcement ? `/${esc(announcement.id)}` : ""}">
           ${selectField("Kind", "kind", [
             { value: "news", label: "News" },
             { value: "meeting", label: "Meeting notice" },
             { value: "emergency", label: "Emergency" },
-          ])}
-          ${textField("Title", "title", { required: true })}
-          ${areaField("Body", "body", "", true)}
-          <label><input type="checkbox" name="pinned" value="1"> Pin</label>
-          ${textField("Expires", "expires_on", { type: "date" })}
-          <button type="submit">Post</button>
+          ], announcement?.kind ?? "news")}
+          ${textField("Title", "title", { value: announcement?.title ?? "", required: true })}
+          ${areaField("Body", "body", announcement?.body ?? "", true)}
+          <label><input type="checkbox" name="pinned" value="1" ${announcement?.pinned ? "checked" : ""}> Pin</label>
+          ${textField("Expires", "expires_on", { type: "date", value: announcement?.expires_at ? zonedIsoDate(new Date(announcement.expires_at), association.timezone) : "" })}
+          <button type="submit">${announcement ? "Save announcement" : "Post"}</button>
         </form>
+        ${announcement ? `<p><a href="${base}/news">Cancel edit</a></p>` : ""}
       </article>
       <article class="panel">
-        <h2>Calendar event</h2>
-        <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/events">
+        <h2>${event ? "Edit event" : "Calendar event"}</h2>
+        <form class="fields" method="post" action="${base}/events${event ? `/${esc(event.row.id)}` : ""}">
           ${selectField("Kind", "kind", [
             { value: "event", label: "Event" },
             { value: "meeting", label: "Meeting" },
             { value: "emergency", label: "Emergency" },
-          ])}
-          ${textField("Title", "title", { required: true })}
-          ${areaField("Description", "description")}
-          ${textField("Location", "location")}
-          ${textField("Starts", "starts_at", { type: "datetime-local", required: true })}
-          ${textField("Ends", "ends_at", { type: "datetime-local" })}
-          <button type="submit">Add event</button>
+          ], event?.row.kind ?? "event")}
+          ${textField("Title", "title", { value: event?.row.title ?? "", required: true })}
+          ${areaField("Description", "description", event?.row.description ?? "")}
+          ${textField("Location", "location", { value: event?.row.location ?? "" })}
+          ${textField("Starts", "starts_at", { type: "datetime-local", value: event?.startsLocal ?? "", required: true })}
+          ${textField("Ends", "ends_at", { type: "datetime-local", value: event?.endsLocal ?? "" })}
+          <button type="submit">${event ? "Save event" : "Add event"}</button>
         </form>
+        ${event ? `<p><a href="${base}/news">Cancel edit</a></p>` : ""}
       </article>
       <article class="panel">
-        <h2>FAQ</h2>
-        <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/faqs">
-          ${textField("Question", "question", { required: true })}
-          ${areaField("Answer", "answer", "", true)}
-          <button type="submit">Add FAQ</button>
+        <h2>${faq ? "Edit FAQ" : "FAQ"}</h2>
+        <form class="fields" method="post" action="${base}/faqs${faq ? `/${esc(faq.id)}` : ""}">
+          ${textField("Question", "question", { value: faq?.question ?? "", required: true })}
+          ${areaField("Answer", "answer", faq?.answer ?? "", true)}
+          <button type="submit">${faq ? "Save FAQ" : "Add FAQ"}</button>
         </form>
+        ${faq ? `<p><a href="${base}/news">Cancel edit</a></p>` : ""}
       </article>
       <article class="panel">
-        <h2>Board contact</h2>
-        <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/contacts">
-          ${textField("Name", "name", { required: true })}
-          ${textField("Role", "role_title", { required: true })}
-          ${textField("Email", "email", { type: "email" })}
-          ${textField("Phone", "phone")}
-          <button type="submit">Add contact</button>
+        <h2>${contact ? "Edit board contact" : "Board contact"}</h2>
+        <form class="fields" method="post" action="${base}/contacts${contact ? `/${esc(contact.id)}` : ""}">
+          ${textField("Name", "name", { value: contact?.name ?? "", required: true })}
+          ${textField("Role", "role_title", { value: contact?.role_title ?? "", required: true })}
+          ${textField("Email", "email", { type: "email", value: contact?.email ?? "" })}
+          ${textField("Phone", "phone", { value: contact?.phone ?? "" })}
+          <button type="submit">${contact ? "Save contact" : "Add contact"}</button>
         </form>
+        ${contact ? `<p><a href="${base}/news">Cancel edit</a></p>` : ""}
       </article>
     </section>`;
 }
@@ -459,30 +545,134 @@ export function joinRequestsPage(association: Association, rows: JoinRequestRow[
   return `${adminNav(association.slug, "joins")}
     <section class="panel">
       <h1>Join requests</h1>
-      <p class="muted">People who asked to join from the public home page. Approve creates or reuses a homeowner login for that email and sends a welcome email. Mark reviewed when you are not ready to give access. That does not create a login. A lot is linked only when the address matches one lot that has no owner.</p>
+      <p class="muted">People who asked to join from the public home page. Approve creates or reuses a homeowner login and sends a welcome email. Decline marks the request declined and does not create a login. Delete removes the request. Mark reviewed when you are not ready to decide. A lot is linked only when the address matches one lot that has no owner.</p>
       ${body ? `<table><thead><tr><th>Received</th><th>Person</th><th>Address or lot</th><th>Note</th><th>Status</th><th></th></tr></thead><tbody>${body}</tbody></table>` : empty("No join requests yet.")}
     </section>`;
 }
 
 function joinRequestActions(slug: string, row: JoinRequestRow): string {
-  if (row.status !== "pending" && row.status !== "reviewed") return "";
-  const approve = `<form method="post" action="/a/${esc(slug)}/admin/join-requests/${esc(row.id)}/approve"><button type="submit">Approve</button></form>`;
+  const base = `/a/${esc(slug)}/admin/join-requests/${esc(row.id)}`;
+  const approve =
+    row.status === "pending" || row.status === "reviewed" || row.status === "declined"
+      ? `<form method="post" action="${base}/approve"><button type="submit">Approve</button></form>`
+      : "";
+  const decline =
+    row.status === "pending" || row.status === "reviewed"
+      ? `<form method="post" action="${base}/decline"><button class="secondary" type="submit">Decline</button></form>`
+      : "";
   const review =
     row.status === "pending"
-      ? `<form method="post" action="/a/${esc(slug)}/admin/join-requests/${esc(row.id)}/reviewed"><button class="secondary" type="submit">Mark reviewed</button></form>`
+      ? `<form method="post" action="${base}/reviewed"><button class="secondary" type="submit">Mark reviewed</button></form>`
       : "";
-  return `<div class="actions">${approve}${review}</div>`;
+  const remove = `<form method="post" action="${base}/delete"><label><input type="checkbox" name="confirm" value="yes" required> Confirm</label><button class="secondary" type="submit">Delete</button></form>`;
+  return `<div class="actions">${approve}${decline}${review}${remove}</div>`;
 }
 
 function joinStatusLabel(status: string): string {
   if (status === "pending") return "Pending";
   if (status === "reviewed") return "Reviewed";
   if (status === "approved") return "Approved";
+  if (status === "declined") return "Declined";
   return status;
 }
 
 export function auditPage(association: Association, rows: AuditRow[]): string {
-  return `${adminNav(association.slug, "audit")}<section class="panel"><h1>Audit log</h1>${auditTable(association, rows)}</section>`;
+  return `${adminNav(association.slug, "audit")}<section class="panel"><h1>Activity</h1>${auditTable(association, rows)}</section>`;
+}
+
+export function adminMessagesPage(association: Association, threads: MessageRow[]): string {
+  const rows = threads
+    .map(
+      (thread) => `<tr>
+        <td><a href="/a/${esc(association.slug)}/admin/messages/${esc(thread.thread_id)}">${esc(thread.subject)}</a></td>
+        <td>${esc(thread.from_name)}</td>
+        <td>${thread.lot_number ? `Lot ${esc(thread.lot_number)}` : ""}</td>
+        <td>${dateTimeCell(thread.created_at, association.timezone)}</td>
+      </tr>`,
+    )
+    .join("");
+  return `${adminNav(association.slug, "messages")}
+    <section class="panel">
+      <h1>Messages</h1>
+      <p class="muted">Incoming from owners. These notes are private to the board. Other owners cannot read them.</p>
+      ${rows ? `<table><thead><tr><th>Subject</th><th>Latest from</th><th>Lot</th><th>When</th></tr></thead><tbody>${rows}</tbody></table>` : empty("No incoming messages.")}
+    </section>`;
+}
+
+export function adminThreadPage(association: Association, subject: string, messages: MessageRow[]): string {
+  const threadId = messages[0]?.thread_id ?? "";
+  return `${adminNav(association.slug, "messages")}${threadPage(association, subject, messages, {
+    incoming: true,
+    next: `/a/${association.slug}/admin/messages/${threadId}`,
+  })}`;
+}
+
+function duesSection(options: {
+  association: Association;
+  assessments: AssessmentAdminRow[];
+  duesReady: boolean;
+  duesYear: number;
+}): string {
+  const base = `/a/${esc(options.association.slug)}/admin`;
+  if (!options.duesReady) {
+    return `<section class="panel" id="dues"><h2>Annual dues</h2><p>Apply the admin migration in D1, then reload. The steps are in the README under Admin improvements.</p></section>`;
+  }
+  const rows = options.assessments
+    .map((row) => {
+      const edit = `${base}/assessments/${esc(row.id)}`;
+      const remove =
+        row.invoice_count === 0
+          ? `<form method="post" action="${edit}/delete"><label><input type="checkbox" name="confirm" value="yes" required> Confirm</label><button class="secondary" type="submit">Delete</button></form>`
+          : "";
+      return `<tr>
+        <td>${esc(row.name)}</td>
+        <td>${esc(lotTypeLabel(row.lot_type))}</td>
+        <td>${row.opens_on ? dateCell(row.opens_on, options.association.timezone) : ""}</td>
+        <td>${dateCell(row.due_on, options.association.timezone)}</td>
+        <td>${moneySpan(row.amount_cents)}</td>
+        <td>${row.invoice_count}</td>
+        <td>
+          <form method="post" action="${edit}/assign"><button type="submit">Assign to matching lots</button></form>
+          <details>
+            <summary>Edit</summary>
+            <form class="fields" method="post" action="${edit}">
+              ${textField("Name", "name", { value: row.name, required: true })}
+              ${selectField("Lot type", "lot_type", [
+                { value: "improved", label: "Improved" },
+                { value: "unimproved", label: "Unimproved" },
+                { value: "", label: "All lots" },
+              ], row.lot_type ?? "")}
+              ${textField("Amount", "amount", { value: (row.amount_cents / 100).toFixed(2), required: true })}
+              ${textField("Opens", "opens_on", { type: "date", value: row.opens_on ?? "" })}
+              ${textField("Due", "due_on", { type: "date", value: row.due_on, required: true })}
+              <button class="secondary" type="submit">Save assessment</button>
+            </form>
+            ${remove}
+          </details>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  return `<section class="panel" id="dues">
+    <h2>Annual dues</h2>
+    <p class="muted">The schedule opens January 1 and is due March 1. Improved lots are $625. Unimproved lots are $100. Assigning writes one invoice on each active lot of that type that does not already have this assessment, so Upcoming assessments can show it on those owners' dashboards. Changing the amount later does not rewrite invoices already assigned.</p>
+    ${rows ? `<table><thead><tr><th>Assessment</th><th>Lots</th><th>Opens</th><th>Due</th><th>Amount</th><th>Invoices</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No assessments yet.")}
+    <h3>Add a year</h3>
+    <form class="fields" method="post" action="${base}/assessments">
+      ${textField("Year", "year", { value: String(options.duesYear), required: true })}
+      <button type="submit">Add improved and unimproved dues</button>
+    </form>
+  </section>`;
+}
+
+function newsItemActions(slug: string, resource: "announcements" | "events" | "faqs" | "contacts", id: string): string {
+  const editKind = resource === "announcements" ? "announcement" : resource === "events" ? "event" : resource === "faqs" ? "faq" : "contact";
+  const base = `/a/${esc(slug)}/admin`;
+  return `<a href="${base}/news?edit=${editKind}&amp;id=${esc(id)}">Edit</a>
+    <form method="post" action="${base}/${resource}/${esc(id)}/delete">
+      <label><input type="checkbox" name="confirm" value="yes" required> Confirm</label>
+      <button class="linkish" type="submit">Delete</button>
+    </form>`;
 }
 
 function auditTable(association: Association, rows: AuditRow[]): string {

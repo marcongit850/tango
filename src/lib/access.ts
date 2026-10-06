@@ -1,22 +1,44 @@
-import type { MembershipRole, RoleId } from "../types";
+type AccessMembership = {
+  role_id: string;
+  is_admin?: number | null;
+  status?: string | null;
+} | null | undefined;
 
-export function isStaff(role: RoleId | MembershipRole | null | undefined): boolean {
-  return role === "board" || role === "officer";
+export function isBoardMember(membership: AccessMembership): boolean {
+  if (!membership || membership.status === "inactive") return false;
+  return membership.role_id === "board" || membership.role_id === "officer";
+}
+
+/** Admin tools. Officers are treated as admins until the role migration is applied. */
+export function isAdmin(membership: AccessMembership): boolean {
+  if (!isBoardMember(membership) || !membership) return false;
+  if (membership.role_id === "officer") return true;
+  return Number(membership.is_admin) === 1;
 }
 
 /**
- * Homeowners see ledgers only for lots they own.
- * Board and officers see ledgers inside their own association.
- * Public visitors see none. The caller must already have scoped the lot to that association.
+ * Admins see ledgers inside their own association.
+ * Homeowners and board members without admin see only lots they own.
+ * The caller must already have scoped the lot to that association.
  */
 export function canViewPropertyFinancials(
-  role: RoleId | MembershipRole | null | undefined,
+  membership: AccessMembership,
   viewerUserId: string,
   ownerUserIds: readonly string[],
 ): boolean {
-  if (isStaff(role)) return true;
-  if (role !== "homeowner") return false;
+  if (isAdmin(membership)) return true;
+  if (!membership || membership.status === "inactive") return false;
+  if (membership.role_id !== "homeowner" && membership.role_id !== "board" && membership.role_id !== "officer") return false;
   return ownerUserIds.includes(viewerUserId);
+}
+
+export function keepsAnAdmin(input: {
+  activeAdminCount: number;
+  currentlyAdmin: boolean;
+  nextAdmin: boolean;
+}): boolean {
+  if (!input.currentlyAdmin || input.nextAdmin) return true;
+  return input.activeAdminCount > 1;
 }
 
 export function shouldRevealMagicLink(options: {

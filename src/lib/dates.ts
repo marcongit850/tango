@@ -5,6 +5,18 @@ export function isIsoDate(value: string): boolean {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
+export function zonedIsoDate(instant: Date, timeZone: string): string {
+  return todayIso(timeZone, instant);
+}
+
+export function utcToDatetimeLocal(iso: string, timeZone: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = zonedParts(date, timeZone);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
+}
+
 export function todayIso(timeZone: string, now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,

@@ -22,22 +22,19 @@ export type LotOutcome =
   | { kind: "already"; lotNumber: string }
   | { kind: "skipped"; reason: "blank" | "none" | "ambiguous" | "occupied"; lotNumber?: string };
 
-type MembershipSnapshot = { role_id: string; status: string } | null;
+type MembershipSnapshot = { role_id: string; status: string; is_admin?: number | null } | null;
 
 export function planUserName(existingName: string | null | undefined, requestedName: string): string {
   if (existingName && existingName.trim()) return existingName;
   return requestedName.trim();
 }
 
-export function planMembership(existing: MembershipSnapshot): { roleId: MembershipRole } {
-  if (
-    existing &&
-    existing.status !== "inactive" &&
-    (existing.role_id === "board" || existing.role_id === "officer")
-  ) {
-    return { roleId: existing.role_id };
+export function planMembership(existing: MembershipSnapshot): { roleId: MembershipRole; isAdmin: 0 | 1 } {
+  if (existing && existing.status !== "inactive" && (existing.role_id === "board" || existing.role_id === "officer")) {
+    const isAdmin = existing.role_id === "officer" || Number(existing.is_admin) === 1 ? 1 : 0;
+    return { roleId: "board", isAdmin };
   }
-  return { roleId: "homeowner" };
+  return { roleId: "homeowner", isAdmin: 0 };
 }
 
 function normalizeAddress(value: string): string {
@@ -101,9 +98,7 @@ export function approvalSummary(input: {
     ? "Homeowner login created."
     : input.roleId === "board"
       ? "Existing board login reused."
-      : input.roleId === "officer"
-        ? "Existing officer login reused."
-        : "Existing login reused.";
+      : "Existing login reused.";
   let lot = "No lot matched that address, so no lot was linked.";
   if (input.lot.kind === "linked") lot = `Linked to lot ${input.lot.lotNumber}.`;
   else if (input.lot.kind === "already") lot = `Already linked to lot ${input.lot.lotNumber}.`;
@@ -141,6 +136,7 @@ export type ApproveJoinResult =
       userId: string;
       createdUser: boolean;
       roleId: MembershipRole;
+      isAdmin: 0 | 1;
       lot: LotOutcome;
     }
   | { ok: false; reason: "missing" | "invalid_email" };
@@ -157,7 +153,7 @@ export async function approveJoinRequest(
     .prepare(
       `SELECT id, name, email, address, status
        FROM join_requests
-       WHERE association_id = ? AND id = ? AND status IN ('pending', 'reviewed')`,
+       WHERE association_id = ? AND id = ? AND status IN ('pending', 'reviewed', 'declined')`,
     )
     .bind(input.associationId, input.requestId)
     .first<JoinRequestRecord>();
@@ -237,7 +233,7 @@ export async function approveJoinRequest(
       .prepare(
         `UPDATE join_requests
          SET status = 'approved'
-         WHERE association_id = ? AND id = ? AND status IN ('pending', 'reviewed')
+         WHERE association_id = ? AND id = ? AND status IN ('pending', 'reviewed', 'declined')
            AND EXISTS (
              SELECT 1 FROM users u
              JOIN memberships m ON m.user_id = u.id AND m.association_id = ?
@@ -280,6 +276,7 @@ export async function approveJoinRequest(
     userId: user.id,
     createdUser: !existing,
     roleId: role.roleId,
+    isAdmin: role.isAdmin,
     lot,
   };
 }

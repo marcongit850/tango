@@ -2,6 +2,8 @@
 
 Neighborhood OS for a small property owners association that still keeps its roster in Excel. This repository is one Cloudflare Worker. The first association is **Tango Mar**, a beach neighborhood in Miramar Beach, Walton County, Florida.
 
+The public home page is the Tango Mar entry: resident login, and a form to request to join. A neighborhood page for a specific association stays at `/a/{slug}`.
+
 One deployment can host many associations. Each association's lots, balances, documents, and messages stay inside that association. A resident sees only the lots linked to their login. Other residents never see that ledger.
 
 This is the Phase 0 foundation and Phase 1 scaffold: magic-link sign-in, a D1 data model, CSV import, homeowner balances, versioned documents, neighborhood news, private board messages, and board admin. It is not a property-management suite.
@@ -13,12 +15,12 @@ This is the Phase 0 foundation and Phase 1 scaffold: magic-link sign-in, a D1 da
 - Documents in eight categories, with versions. Residents see the version the board marks current. Budgets can be board-only.
 - News, emergency notices, meetings, calendar, FAQs, and board contacts.
 - Private resident-to-board messages, plus portal notifications.
-- Board tools: roster, delinquents, lots, roles, CSV import, invoices, recorded payments, announcements, documents, an accountant CSV, and an audit log.
-- Footer on every page: not legal advice.
+- Board tools: roster, delinquents, lots, roles, CSV import, invoices, recorded payments, announcements, documents, an accountant CSV, join requests, and an audit log.
+- Public home with resident login and a request to join form.
 
 ## Not in this phase
 
-Moderated forum, online card or ACH payments, ARC or other request workflows, SMS, an AI covenant assistant, and email blasts. A board officer can email one owner a balance reminder. That is a single message, not a blast.
+Moderated forum, online card or ACH payments, ARC requests, SMS, an AI covenant assistant, and email blasts. A board officer can email one owner a balance reminder. That is a single message, not a blast. Request to join stores a note for the board. It does not create a login.
 
 ## Stack
 
@@ -103,6 +105,20 @@ npm run db:migrate:remote
 
 That runs `wrangler d1 migrations apply tango --remote`.
 
+## Request to join
+
+The home page links to `/join`. The form asks for a name, an email, an optional address or lot, and an optional note. A successful submit stores a pending row in `join_requests` for Tango Mar, adds a portal notice for each active board member and officer, and emails those people when `RESEND_API_KEY` is set. It does not create a login. Board members review the list at Admin, Join requests, and can mark a row reviewed.
+
+`migrations/0003_join_requests.sql` creates that table. Apply it to the live `tango` database before you deploy this version of the Worker. You can do that in the Cloudflare dashboard:
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database** (under Storage & databases).
+2. Select the database named **tango**.
+3. Open **Console**.
+4. Paste the full contents of `migrations/0003_join_requests.sql`.
+5. Select **Execute**.
+
+You should see the `join_requests` table under **Tables**. If the Worker is deployed before this SQL runs, the public form tells the visitor to try again later, and Admin, Join requests explains that the table is missing. The rest of the portal keeps working.
+
 ## Create the R2 bucket
 
 Document bytes live in R2. The database stores the version metadata and the object key.
@@ -177,6 +193,7 @@ Migrations live in `migrations/`.
 - `notifications` (portal notices)
 - `audit_log`
 - `magic_links`, `sessions`
+- `join_requests` (public request to join, pending until a board member marks it reviewed)
 
 Every tenant-owned row carries `association_id`. Financial queries also require that association id, and homeowner queries join `property_owners` for the signed-in user. Staff queries are rejected unless the membership role is `board` or `officer` for that same association.
 

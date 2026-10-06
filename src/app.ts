@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { findAssociationBySlug, findMembership, findSessionUser } from "./db";
-import { ForbiddenError, NotFoundError, RedirectError } from "./lib/errors";
+import { ForbiddenError, isMissingTable, NotFoundError, RedirectError } from "./lib/errors";
 import { logError } from "./lib/log";
 import { sha256Hex } from "./lib/tokens";
 import type { AppBindings } from "./types";
@@ -10,11 +10,6 @@ import { registerAdminRoutes } from "./routes/admin";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerPublicRoutes } from "./routes/public";
 import { registerResidentRoutes } from "./routes/resident";
-
-function missingSchema(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /no such table/i.test(message);
-}
 
 export function createApp(): Hono<AppBindings> {
   const app = new Hono<AppBindings>();
@@ -68,7 +63,7 @@ export function createApp(): Hono<AppBindings> {
   app.notFound(async (c) => render(c, { title: "Not found", status: 404, body: "<section class=\"panel\"><h1>Page not found</h1></section>" }));
 
   app.onError(async (error, c) => {
-    if (missingSchema(error)) return setupResponse();
+    if (isMissingTable(error)) return setupResponse();
     if (error instanceof RedirectError) return c.redirect(error.location, 303);
     if (error instanceof NotFoundError) {
       return render(c, { title: "Not found", status: 404, body: "<section class=\"panel\"><h1>Not found</h1></section>" });

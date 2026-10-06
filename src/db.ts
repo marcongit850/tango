@@ -7,10 +7,56 @@ import type {
   InvoiceStatus,
   Membership,
   MembershipRole,
+  MembershipStatus,
   PaymentMethod,
   User,
 } from "./types";
+import type { LotType } from "./lib/dues";
+import { lotsToInvoice } from "./lib/dues";
 import { balanceCents, invoiceStatus, isDelinquent } from "./lib/money";
+
+async function hasColumn(db: D1Database, table: "memberships" | "properties" | "assessments", column: string): Promise<boolean> {
+  const { results } = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+  return results.some((row) => row.name === column);
+}
+
+function asMembership(
+  row: {
+    id: string;
+    association_id: string;
+    user_id: string;
+    role_id: string;
+    status: MembershipStatus;
+    is_admin?: number | null;
+  } | null,
+  legacyStaff: boolean,
+): Membership | null {
+  if (!row) return null;
+  if (row.role_id === "officer" || (legacyStaff && row.role_id === "board")) {
+    return { id: row.id, association_id: row.association_id, user_id: row.user_id, role_id: "board", status: row.status, is_admin: 1 };
+  }
+  if (row.role_id === "board") {
+    return {
+      id: row.id,
+      association_id: row.association_id,
+      user_id: row.user_id,
+      role_id: "board",
+      status: row.status,
+      is_admin: Number(row.is_admin) === 1 ? 1 : 0,
+    };
+  }
+  if (row.role_id === "homeowner") {
+    return {
+      id: row.id,
+      association_id: row.association_id,
+      user_id: row.user_id,
+      role_id: "homeowner",
+      status: row.status,
+      is_admin: 0,
+    };
+  }
+  return null;
+}
 
 export async function findAssociationBySlug(db: D1Database, slug: string): Promise<Association | null> {
   return db
@@ -56,14 +102,27 @@ export async function findMembership(
   associationId: string,
   userId: string,
 ): Promise<Membership | null> {
-  return db
+  const flagged = await hasColumn(db, "memberships", "is_admin");
+  const row = await db
     .prepare(
-      `SELECT id, association_id, user_id, role_id, status
-       FROM memberships
-       WHERE association_id = ? AND user_id = ?`,
+      flagged
+        ? `SELECT id, association_id, user_id, role_id, status, is_admin
+           FROM memberships
+           WHERE association_id = ? AND user_id = ?`
+        : `SELECT id, association_id, user_id, role_id, status
+           FROM memberships
+           WHERE association_id = ? AND user_id = ?`,
     )
     .bind(associationId, userId)
-    .first<Membership>();
+    .first<{
+      id: string;
+      association_id: string;
+      user_id: string;
+      role_id: string;
+      status: MembershipStatus;
+      is_admin?: number | null;
+    }>();
+  return asMembership(row, !flagged);
 }
 
 export async function writeAudit(
@@ -333,23 +392,55 @@ export type AssessmentRow = {
   description: string;
   amount_cents: number;
   due_on: string;
+  opens_on: string | null;
+  lot_type: string | null;
   invoice_count: number;
 };
 
 export async function upcomingAssessments(
   db: D1Database,
   associationId: string,
+  userId: string,
   today: string,
 ): Promise<AssessmentRow[]> {
+  const typed = await hasColumn(db, "assessments", "lot_type");
+  if (!typed) {
+    const { results } = await db
+      .prepare(
+        `SELECT a.id, a.name, a.description, a.amount_cents, a.due_on,
+                NULL AS opens_on, NULL AS lot_type,
+                (SELECT COUNT(*) FROM invoices i
+                 JOIN property_owners po ON po.property_id = i.property_id AND po.association_id = i.association_id
+                 WHERE i.assessment_id = a.id AND i.association_id = a.association_id
+                   AND po.user_id = ? AND i.status != 'void') AS invoice_count
+         FROM assessments a
+         WHERE a.association_id = ? AND a.due_on >= ?
+         ORDER BY a.due_on`,
+      )
+      .bind(userId, associationId, today)
+      .all<AssessmentRow>();
+    return results;
+  }
   const { results } = await db
     .prepare(
-      `SELECT a.id, a.name, a.description, a.amount_cents, a.due_on,
-              (SELECT COUNT(*) FROM invoices i WHERE i.assessment_id = a.id AND i.association_id = a.association_id) AS invoice_count
+      `SELECT a.id, a.name, a.description, a.amount_cents, a.due_on, a.opens_on, a.lot_type,
+              (SELECT COUNT(*) FROM invoices i
+               JOIN property_owners po ON po.property_id = i.property_id AND po.association_id = i.association_id
+               WHERE i.assessment_id = a.id AND i.association_id = a.association_id
+                 AND po.user_id = ? AND i.status != 'void') AS invoice_count
        FROM assessments a
        WHERE a.association_id = ? AND a.due_on >= ?
-       ORDER BY a.due_on`,
+         AND (
+           a.lot_type IS NULL
+           OR a.lot_type IN (
+             SELECT p.lot_type FROM properties p
+             JOIN property_owners po ON po.property_id = p.id AND po.association_id = p.association_id
+             WHERE po.user_id = ? AND p.association_id = ?
+           )
+         )
+       ORDER BY a.due_on, a.lot_type`,
     )
-    .bind(associationId, today)
+    .bind(userId, associationId, today, userId, associationId)
     .all<AssessmentRow>();
   return results;
 }
@@ -572,12 +663,18 @@ export type PropertyRow = {
   state: string;
   postal_code: string;
   status: string;
+  lot_type: LotType;
 };
 
+const PROPERTY_COLUMNS = "id, lot_number, street_address, city, state, postal_code, status, lot_type";
+const PROPERTY_COLUMNS_PLAIN =
+  "id, lot_number, street_address, city, state, postal_code, status, 'improved' AS lot_type";
+
 export async function listProperties(db: D1Database, associationId: string): Promise<PropertyRow[]> {
+  const typed = await hasColumn(db, "properties", "lot_type");
   const { results } = await db
     .prepare(
-      `SELECT id, lot_number, street_address, city, state, postal_code, status
+      `SELECT ${typed ? PROPERTY_COLUMNS : PROPERTY_COLUMNS_PLAIN}
        FROM properties WHERE association_id = ? ORDER BY lot_number`,
     )
     .bind(associationId)
@@ -590,13 +687,44 @@ export async function propertyInAssociation(
   associationId: string,
   propertyId: string,
 ): Promise<PropertyRow | null> {
+  const typed = await hasColumn(db, "properties", "lot_type");
   return db
     .prepare(
-      `SELECT id, lot_number, street_address, city, state, postal_code, status
+      `SELECT ${typed ? PROPERTY_COLUMNS : PROPERTY_COLUMNS_PLAIN}
        FROM properties WHERE association_id = ? AND id = ?`,
     )
     .bind(associationId, propertyId)
     .first<PropertyRow>();
+}
+
+export type LotRow = PropertyRow & {
+  owner_user_id: string | null;
+  owner_name: string | null;
+  owner_email: string | null;
+};
+
+export async function listLots(db: D1Database, associationId: string): Promise<LotRow[]> {
+  const typed = await hasColumn(db, "properties", "lot_type");
+  const lotType = typed ? "p.lot_type" : "'improved' AS lot_type";
+  const { results } = await db
+    .prepare(
+      `SELECT p.id, p.lot_number, p.street_address, p.city, p.state, p.postal_code, p.status, ${lotType},
+              u.id AS owner_user_id, u.name AS owner_name, u.email AS owner_email
+       FROM properties p
+       LEFT JOIN property_owners po
+         ON po.id = (
+           SELECT po2.id FROM property_owners po2
+           WHERE po2.association_id = p.association_id AND po2.property_id = p.id AND po2.is_primary = 1
+           ORDER BY po2.created_at
+           LIMIT 1
+         )
+       LEFT JOIN users u ON u.id = po.user_id
+       WHERE p.association_id = ?
+       ORDER BY p.lot_number`,
+    )
+    .bind(associationId)
+    .all<LotRow>();
+  return results;
 }
 
 export type OwnerListRow = {
@@ -605,6 +733,7 @@ export type OwnerListRow = {
   name: string;
   phone: string;
   role_id: MembershipRole;
+  is_admin: number;
   status: string;
   property_id: string | null;
   lot_number: string | null;
@@ -612,28 +741,48 @@ export type OwnerListRow = {
 };
 
 export async function listOwners(db: D1Database, associationId: string): Promise<OwnerListRow[]> {
+  const flagged = await hasColumn(db, "memberships", "is_admin");
   const { results } = await db
     .prepare(
-      `SELECT u.id AS user_id, u.email, u.name, u.phone, m.role_id, m.status,
-              p.id AS property_id, p.lot_number, p.street_address
-       FROM memberships m
-       JOIN users u ON u.id = m.user_id
-       LEFT JOIN property_owners po
-         ON po.user_id = u.id AND po.association_id = m.association_id AND po.is_primary = 1
-       LEFT JOIN properties p ON p.id = po.property_id AND p.association_id = m.association_id
-       WHERE m.association_id = ?
-       ORDER BY u.name`,
+      flagged
+        ? `SELECT u.id AS user_id, u.email, u.name, u.phone, m.role_id, m.is_admin, m.status,
+                  p.id AS property_id, p.lot_number, p.street_address
+           FROM memberships m
+           JOIN users u ON u.id = m.user_id
+           LEFT JOIN property_owners po
+             ON po.user_id = u.id AND po.association_id = m.association_id AND po.is_primary = 1
+           LEFT JOIN properties p ON p.id = po.property_id AND p.association_id = m.association_id
+           WHERE m.association_id = ?
+           ORDER BY u.name`
+        : `SELECT u.id AS user_id, u.email, u.name, u.phone, m.role_id,
+                  CASE WHEN m.role_id IN ('board', 'officer') THEN 1 ELSE 0 END AS is_admin, m.status,
+                  p.id AS property_id, p.lot_number, p.street_address
+           FROM memberships m
+           JOIN users u ON u.id = m.user_id
+           LEFT JOIN property_owners po
+             ON po.user_id = u.id AND po.association_id = m.association_id AND po.is_primary = 1
+           LEFT JOIN properties p ON p.id = po.property_id AND p.association_id = m.association_id
+           WHERE m.association_id = ?
+           ORDER BY u.name`,
     )
     .bind(associationId)
-    .all<OwnerListRow>();
-  return results;
+    .all<Omit<OwnerListRow, "role_id"> & { role_id: string }>();
+  return results.map((row) => ({
+    ...row,
+    role_id: row.role_id === "officer" ? "board" : row.role_id === "board" ? "board" : "homeowner",
+    is_admin: row.role_id === "officer" || (row.role_id === "board" && Number(row.is_admin) === 1) ? 1 : 0,
+  }));
 }
 
-export async function countActiveOfficers(db: D1Database, associationId: string): Promise<number> {
+export async function countActiveAdmins(db: D1Database, associationId: string): Promise<number> {
+  const flagged = await hasColumn(db, "memberships", "is_admin");
   const row = await db
     .prepare(
-      `SELECT COUNT(*) AS n FROM memberships
-       WHERE association_id = ? AND role_id = 'officer' AND status = 'active'`,
+      flagged
+        ? `SELECT COUNT(*) AS n FROM memberships
+           WHERE association_id = ? AND role_id = 'board' AND is_admin = 1 AND status = 'active'`
+        : `SELECT COUNT(*) AS n FROM memberships
+           WHERE association_id = ? AND role_id IN ('board', 'officer') AND status = 'active'`,
     )
     .bind(associationId)
     .first<{ n: number }>();
@@ -647,13 +796,20 @@ export type StaffContact = {
 };
 
 export async function listStaffContacts(db: D1Database, associationId: string): Promise<StaffContact[]> {
+  const flagged = await hasColumn(db, "memberships", "is_admin");
   const { results } = await db
     .prepare(
-      `SELECT m.user_id, u.email, u.name
-       FROM memberships m
-       JOIN users u ON u.id = m.user_id
-       WHERE m.association_id = ? AND m.role_id IN ('board', 'officer') AND m.status != 'inactive'
-       ORDER BY u.name`,
+      flagged
+        ? `SELECT m.user_id, u.email, u.name
+           FROM memberships m
+           JOIN users u ON u.id = m.user_id
+           WHERE m.association_id = ? AND m.role_id = 'board' AND m.is_admin = 1 AND m.status != 'inactive'
+           ORDER BY u.name`
+        : `SELECT m.user_id, u.email, u.name
+           FROM memberships m
+           JOIN users u ON u.id = m.user_id
+           WHERE m.association_id = ? AND m.role_id IN ('board', 'officer') AND m.status != 'inactive'
+           ORDER BY u.name`,
     )
     .bind(associationId)
     .all<StaffContact>();
@@ -691,7 +847,7 @@ export async function listJoinRequests(db: D1Database, associationId: string): P
       `SELECT id, name, email, address, note, status, created_at
        FROM join_requests
        WHERE association_id = ?
-       ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'reviewed' THEN 1 ELSE 2 END, created_at DESC`,
+       ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'reviewed' THEN 1 WHEN 'declined' THEN 2 ELSE 3 END, created_at DESC`,
     )
     .bind(associationId)
     .all<JoinRequestRow>();
@@ -714,15 +870,128 @@ export async function reviewJoinRequest(db: D1Database, associationId: string, r
   return (result.meta.changes ?? 0) > 0;
 }
 
+export async function declineJoinRequest(db: D1Database, associationId: string, requestId: string): Promise<boolean> {
+  const result = await db
+    .prepare(
+      "UPDATE join_requests SET status = 'declined' WHERE association_id = ? AND id = ? AND status IN ('pending', 'reviewed')",
+    )
+    .bind(associationId, requestId)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
+}
+
+export async function deleteJoinRequest(db: D1Database, associationId: string, requestId: string): Promise<boolean> {
+  const result = await db
+    .prepare("DELETE FROM join_requests WHERE association_id = ? AND id = ?")
+    .bind(associationId, requestId)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
+}
+
 export async function staffUserIds(db: D1Database, associationId: string): Promise<string[]> {
+  const flagged = await hasColumn(db, "memberships", "is_admin");
   const { results } = await db
     .prepare(
-      `SELECT user_id FROM memberships
-       WHERE association_id = ? AND role_id IN ('board', 'officer') AND status != 'inactive'`,
+      flagged
+        ? `SELECT user_id FROM memberships
+           WHERE association_id = ? AND role_id = 'board' AND is_admin = 1 AND status != 'inactive'`
+        : `SELECT user_id FROM memberships
+           WHERE association_id = ? AND role_id IN ('board', 'officer') AND status != 'inactive'`,
     )
     .bind(associationId)
     .all<{ user_id: string }>();
   return results.map((row) => row.user_id);
+}
+
+export type AssessmentAdminRow = {
+  id: string;
+  name: string;
+  description: string;
+  amount_cents: number;
+  due_on: string;
+  opens_on: string | null;
+  lot_type: LotType | null;
+  invoice_count: number;
+};
+
+export async function duesColumnsReady(db: D1Database): Promise<boolean> {
+  return hasColumn(db, "assessments", "lot_type");
+}
+
+export async function listAssessments(db: D1Database, associationId: string): Promise<AssessmentAdminRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT a.id, a.name, a.description, a.amount_cents, a.due_on, a.opens_on, a.lot_type,
+              (SELECT COUNT(*) FROM invoices i
+               WHERE i.assessment_id = a.id AND i.association_id = a.association_id AND i.status != 'void') AS invoice_count
+       FROM assessments a
+       WHERE a.association_id = ?
+       ORDER BY a.due_on DESC, a.lot_type`,
+    )
+    .bind(associationId)
+    .all<AssessmentAdminRow>();
+  return results;
+}
+
+export async function assignAssessmentInvoices(
+  db: D1Database,
+  input: { associationId: string; assessmentId: string; today: string },
+): Promise<{ created: number; already: number; name: string } | null> {
+  const assessment = await db
+    .prepare(
+      `SELECT id, name, amount_cents, due_on, opens_on, lot_type
+       FROM assessments WHERE association_id = ? AND id = ?`,
+    )
+    .bind(input.associationId, input.assessmentId)
+    .first<{ id: string; name: string; amount_cents: number; due_on: string; opens_on: string | null; lot_type: LotType | null }>();
+  if (!assessment) return null;
+  const lots = await listLots(db, input.associationId);
+  const { results: existing } = await db
+    .prepare(
+      `SELECT property_id FROM invoices
+       WHERE association_id = ? AND assessment_id = ? AND status != 'void'`,
+    )
+    .bind(input.associationId, assessment.id)
+    .all<{ property_id: string }>();
+  const plan = lotsToInvoice(
+    lots.map((lot) => ({
+      id: lot.id,
+      lotNumber: lot.lot_number,
+      status: lot.status,
+      lotType: lot.lot_type === "unimproved" ? "unimproved" : "improved",
+    })),
+    assessment.lot_type === "improved" || assessment.lot_type === "unimproved" ? assessment.lot_type : null,
+    new Set(existing.map((row) => row.property_id)),
+  );
+  const issuedOn = assessment.opens_on && /^\d{4}-\d{2}-\d{2}$/.test(assessment.opens_on) ? assessment.opens_on : input.today;
+  const now = new Date().toISOString();
+  let created = 0;
+  for (const lot of plan.create) {
+    const id = crypto.randomUUID();
+    const invoiceNumber = `DUES-${lot.lotNumber}-${assessment.id.slice(0, 8)}`.slice(0, 40);
+    await db
+      .prepare(
+        `INSERT INTO invoices (
+           id, association_id, property_id, assessment_id, invoice_number, description,
+           amount_cents, late_fee_cents, issued_on, due_on, status, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'open', ?)`,
+      )
+      .bind(
+        id,
+        input.associationId,
+        lot.id,
+        assessment.id,
+        invoiceNumber,
+        assessment.name,
+        assessment.amount_cents,
+        issuedOn,
+        assessment.due_on,
+        now,
+      )
+      .run();
+    created += 1;
+  }
+  return { created, already: plan.already, name: assessment.name };
 }
 
 export type MessageRow = {

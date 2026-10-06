@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { canViewPropertyFinancials, isStaff } from "../lib/access";
+import { canViewPropertyFinancials, isAdmin, isBoardMember } from "../lib/access";
 import { timeZoneLabel, todayIso } from "../lib/dates";
 import { ForbiddenError, NotFoundError } from "../lib/errors";
 import { ensureSeedFiles } from "../lib/seed-files";
@@ -25,7 +25,6 @@ import {
   visibleAnnouncements,
   writeAudit,
   notify,
-  listProperties,
 } from "../db";
 import type { AppBindings, Association, Membership } from "../types";
 import { render } from "../views/layout";
@@ -54,7 +53,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     const now = new Date().toISOString();
     const [ledger, upcoming, invoices, payments, notices, emergencies] = await Promise.all([
       ledgerForUser(c.env.DB, association.id, user.id, today),
-      upcomingAssessments(c.env.DB, association.id, today),
+      upcomingAssessments(c.env.DB, association.id, user.id, today),
       invoicesForUser(c.env.DB, association.id, user.id),
       paymentsForUser(c.env.DB, association.id, user.id),
       notificationsForUser(c.env.DB, association.id, user.id),
@@ -124,13 +123,13 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
   app.get("/a/:slug/documents", async (c) => {
     const { association, membership } = requireMember(c);
     await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
-    const documents = await listDocuments(c.env.DB, association.id, isStaff(membership.role_id));
+    const documents = await listDocuments(c.env.DB, association.id, isBoardMember(membership));
     return render(c, { title: "Documents", active: "documents", body: documentsPage(association, documents) });
   });
 
   app.get("/a/:slug/documents/:documentId/file", async (c) => {
     const { association, membership } = requireMember(c);
-    return streamCurrent(c, association, membership.role_id, c.req.param("documentId"));
+    return streamCurrent(c, association, membership, c.req.param("documentId"));
   });
 
   app.get("/a/:slug/news", async (c) => {
@@ -176,15 +175,19 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
 
   app.get("/a/:slug/messages", async (c) => {
     const { association, user, membership } = requireMember(c);
-    const staff = isStaff(membership.role_id);
     const [threads, properties] = await Promise.all([
-      threadsForViewer(c.env.DB, association.id, user.id, staff),
-      staff ? listProperties(c.env.DB, association.id) : ownedProperties(c, association.id, user.id),
+      threadsForViewer(c.env.DB, association.id, user.id, false),
+      ownedProperties(c, association.id, user.id),
     ]);
     return render(c, {
       title: "Messages",
       active: "messages",
-      body: messagesPage(association, threads, properties.map((property) => ({ id: property.id, lot_number: property.lot_number }))),
+      body: messagesPage(
+        association,
+        threads,
+        properties.map((property) => ({ id: property.id, lot_number: property.lot_number })),
+        isAdmin(membership) ? `/a/${association.slug}/admin/messages` : "",
+      ),
     });
   });
 
@@ -198,7 +201,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     if (propertyId) {
       const property = await propertyInAssociation(c.env.DB, association.id, propertyId);
       if (!property) throw new NotFoundError();
-      if (!isStaff(membership.role_id)) await assertPropertyAccess(c, association.id, propertyId);
+      if (!isAdmin(membership)) await assertPropertyAccess(c, association.id, propertyId);
     }
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -218,7 +221,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
         kind: "message",
         title: `New message from ${user.name || user.email}`,
         body: subject,
-        href: `/a/${association.slug}/messages/${id}`,
+        href: `/a/${association.slug}/admin/messages/${id}`,
       });
     }
     await writeAudit(c.env.DB, {
@@ -254,7 +257,8 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
       .bind(id, association.id, threadId, messages.at(-1)?.id ?? threadId, user.id, messages[0].property_id, messages[0].subject, body, now)
       .run();
     const recipients = new Set<string>();
-    if (isStaff(membership.role_id)) {
+    const next = textValue(fields, "next", 200);
+    if (isAdmin(membership)) {
       for (const message of messages) recipients.add(message.from_user_id);
     } else {
       for (const staffId of await staffUserIds(c.env.DB, association.id)) recipients.add(staffId);
@@ -267,7 +271,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
         kind: "message",
         title: `Reply from ${user.name || user.email}`,
         body: messages[0].subject,
-        href: `/a/${association.slug}/messages/${threadId}`,
+        href: isAdmin(membership) ? `/a/${association.slug}/messages/${threadId}` : `/a/${association.slug}/admin/messages/${threadId}`,
       });
     }
     await writeAudit(c.env.DB, {
@@ -277,7 +281,8 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
       entityType: "message",
       entityId: id,
     });
-    return redirectTo(c, `/a/${association.slug}/messages/${threadId}`, "Reply sent.");
+    const back = next.startsWith(`/a/${association.slug}/admin/messages/`) ? next : `/a/${association.slug}/messages/${threadId}`;
+    return redirectTo(c, back, "Reply sent.");
   });
 }
 
@@ -286,7 +291,7 @@ async function assertPropertyAccess(c: AppContext, associationId: string, proper
   const property = await propertyInAssociation(c.env.DB, associationId, propertyId);
   if (!property) throw new NotFoundError();
   const owners = await ownerIdsForProperty(c.env.DB, associationId, propertyId);
-  if (!canViewPropertyFinancials(membership.role_id, user.id, owners)) throw new ForbiddenError();
+  if (!canViewPropertyFinancials(membership, user.id, owners)) throw new ForbiddenError();
 }
 
 async function ownedProperties(c: AppContext, associationId: string, userId: string) {
@@ -307,19 +312,19 @@ async function loadThread(c: AppContext, associationId: string, threadId: string
   const { user, membership } = requireMember(c);
   const messages = await threadMessages(c.env.DB, associationId, threadId);
   if (messages.length === 0) throw new NotFoundError();
-  if (!isStaff(membership.role_id) && !messages.some((message) => message.from_user_id === user.id)) {
+  if (!isAdmin(membership) && !messages.some((message) => message.from_user_id === user.id)) {
     throw new ForbiddenError();
   }
   return messages;
 }
 
-async function streamCurrent(c: AppContext, association: Association, role: Membership["role_id"], documentId: string): Promise<Response> {
+async function streamCurrent(c: AppContext, association: Association, membership: Membership, documentId: string): Promise<Response> {
   const document = await c.env.DB
     .prepare("SELECT id, visibility, current_version_id FROM documents WHERE association_id = ? AND id = ?")
     .bind(association.id, documentId)
     .first<{ id: string; visibility: "residents" | "board"; current_version_id: string | null }>();
   if (!document?.current_version_id) throw new NotFoundError();
-  if (document.visibility === "board" && !isStaff(role)) throw new ForbiddenError();
+  if (document.visibility === "board" && !isBoardMember(membership)) throw new ForbiddenError();
   const version = await versionById(c.env.DB, association.id, document.current_version_id);
   if (!version || version.document_id !== document.id) throw new NotFoundError();
   await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);

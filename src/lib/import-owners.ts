@@ -1,8 +1,16 @@
 import type { Association, User } from "../types";
+import { keepsAnAdmin } from "./access";
 import type { OwnerCsvRow } from "./csv";
-import { writeAudit } from "../db";
+import { countActiveAdmins, writeAudit } from "../db";
 
 const OPENING_DESCRIPTION = "Opening balance (CSV import)";
+
+class LastAdminError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LastAdminError";
+  }
+}
 
 export type ImportResult = {
   createdUsers: number;
@@ -29,6 +37,10 @@ export async function importOwners(
       if (outcome.invoice) result.invoices += 1;
       if (outcome.credit) result.credits += 1;
     } catch (error) {
+      if (error instanceof LastAdminError) {
+        result.errors.push({ line: row.line, message: error.message });
+        continue;
+      }
       console.error(
         JSON.stringify({
           level: "error",
@@ -80,13 +92,29 @@ async function importRow(
     .first<{ id: string }>();
   if (!user) throw new Error("User upsert did not return an id.");
 
+  const existingMembership = await db
+    .prepare("SELECT role_id, is_admin, status FROM memberships WHERE association_id = ? AND user_id = ?")
+    .bind(association.id, user.id)
+    .first<{ role_id: string; is_admin: number; status: string }>();
+  const isAdmin =
+    row.role === "board" ? (row.isAdmin === null ? (Number(existingMembership?.is_admin) === 1 ? 1 : 0) : row.isAdmin ? 1 : 0) : 0;
+  const currentlyAdmin =
+    !!existingMembership &&
+    (existingMembership.role_id === "board" || existingMembership.role_id === "officer") &&
+    (existingMembership.role_id === "officer" || Number(existingMembership.is_admin) === 1) &&
+    existingMembership.status === "active";
+  const activeAdmins = await countActiveAdmins(db, association.id);
+  if (!keepsAnAdmin({ activeAdminCount: activeAdmins, currentlyAdmin, nextAdmin: row.role === "board" && isAdmin === 1 })) {
+    throw new LastAdminError("Keep at least one person with admin access.");
+  }
+
   await db
     .prepare(
-      `INSERT INTO memberships (id, association_id, user_id, role_id, status, created_at)
-       VALUES (?, ?, ?, ?, 'active', ?)
-       ON CONFLICT(association_id, user_id) DO UPDATE SET role_id = excluded.role_id, status = 'active'`,
+      `INSERT INTO memberships (id, association_id, user_id, role_id, is_admin, status, created_at)
+       VALUES (?, ?, ?, ?, ?, 'active', ?)
+       ON CONFLICT(association_id, user_id) DO UPDATE SET role_id = excluded.role_id, is_admin = excluded.is_admin, status = 'active'`,
     )
-    .bind(crypto.randomUUID(), association.id, user.id, row.role, now)
+    .bind(crypto.randomUUID(), association.id, user.id, row.role, isAdmin, now)
     .run();
 
   const property = await db

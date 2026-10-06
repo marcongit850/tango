@@ -21,12 +21,17 @@ export function categoryCell(category: string): string {
   return esc(categoryLabel(category));
 }
 
-export function roleLabel(role: string): string {
-  if (role === "officer") return "Officer / manager";
-  if (role === "board") return "Board member";
+export function roleLabel(role: string, isAdmin = false): string {
+  if (role === "officer") return "Board member, admin";
+  if (role === "board") return isAdmin ? "Board member, admin" : "Board member";
   if (role === "homeowner") return "Homeowner";
   if (role === "public") return "Public";
   return role;
+}
+
+export function visibilityLabel(visibility: string): string {
+  if (visibility === "board") return "Board only";
+  return "Owners and residents";
 }
 
 export function methodLabel(method: string): string {

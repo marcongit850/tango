@@ -1,4 +1,4 @@
-export type RoleId = "homeowner" | "board" | "officer" | "public";
+export type RoleId = "homeowner" | "board" | "public";
 export type MembershipRole = Exclude<RoleId, "public">;
 export type MembershipStatus = "invited" | "active" | "inactive";
 export type DocumentCategory =
@@ -42,6 +42,7 @@ export type Membership = {
   user_id: string;
   role_id: MembershipRole;
   status: MembershipStatus;
+  is_admin: number;
 };
 
 export type AppVariables = {

@@ -1,4 +1,4 @@
-import { isStaff } from "../lib/access";
+import { isAdmin } from "../lib/access";
 import { unreadCount } from "../db";
 import { esc, htmlResponse, isHttps } from "../lib/html";
 import type { AppBindings } from "../types";
@@ -49,6 +49,8 @@ main { padding-bottom: 2.5rem; }
 }
 .stack { display: grid; gap: 1rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+a.card { color: inherit; text-decoration: none; display: block; }
+a.card:hover, a.card:focus { border-color: var(--gulf); }
 h1, h2, h3 { font-family: Georgia, "Iowan Old Style", Palatino, serif; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
 h1 { font-size: 2rem; }
 .muted { color: var(--muted); }
@@ -73,41 +75,97 @@ form.fields { display: grid; gap: 0.75rem; }
 .badge { display: inline-block; border-radius: 999px; padding: 0.05rem 0.5rem; background: #e7eeed; color: var(--gulf-dark); font-size: 0.82rem; }
 .badge.late { background: var(--emergency); color: var(--late); }
 .devbox { border: 1px dashed var(--gulf); border-radius: 12px; padding: 0.8rem 1rem; background: #f3faf8; }
-.hero {
+body.landing { background: #d5e7f2; }
+body.landing main { padding: 0; }
+.topbar {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.75rem 1.1rem;
+}
+.topbar .account { margin-left: 0; color: #1a2744; flex-wrap: wrap; justify-content: flex-end; }
+.topbar button.linkish { color: #1a2744; }
+.topbar .button {
+  background: #1c3558;
+  color: white;
+  border: 2px solid #1c3558;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.35rem 0.7rem;
+}
+.topbar .button.secondary { background: rgba(255, 255, 255, 0.92); color: #1c3558; }
+.shore {
   position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
   overflow: hidden;
-  border-radius: 20px;
-  padding: 2.6rem 1.5rem 5.2rem;
-  color: var(--paper);
-  background:
-    radial-gradient(90% 80% at 100% 0%, rgba(255, 253, 248, 0.16), transparent 50%),
-    linear-gradient(165deg, var(--gulf-dark) 0%, var(--gulf) 58%, #146e6a 100%);
+  text-align: center;
+  color: #1a2744;
+  padding: 4.5rem 1.25rem 3rem;
 }
-.hero h1 { color: var(--paper); font-size: clamp(2.3rem, 6vw, 3.5rem); padding-right: 5.5rem; }
-.hero .lede { position: relative; z-index: 1; max-width: 36rem; font-size: 1.12rem; margin: 0 0 1.25rem; padding-right: 5.5rem; color: rgba(255, 253, 248, 0.94); }
-.hero .actions { position: relative; z-index: 1; }
-.hero .button { background: var(--paper); color: var(--gulf-dark); }
-.hero .button.secondary { background: transparent; color: var(--paper); border-color: rgba(255, 253, 248, 0.75); }
-.hero-sun {
+.shore-photo {
   position: absolute;
-  top: 1.25rem;
-  right: 8%;
-  width: 4.5rem;
-  height: 4.5rem;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #fff6df, #e7c27a 55%, #d7a45a);
-  box-shadow: 0 0 0 0.55rem rgba(255, 246, 223, 0.16);
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center center;
 }
-.hero::after {
-  content: "";
+.shore-scrim {
   position: absolute;
-  left: -8%;
-  right: -8%;
-  bottom: -1.5rem;
-  height: 3.6rem;
-  background: var(--sand);
-  border-radius: 50% 50% 0 0;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0.14) 48%, rgba(255, 255, 255, 0) 72%);
 }
+.shore-inner { position: relative; z-index: 1; width: min(40rem, 100%); }
+.mark { width: 108px; height: auto; display: block; margin: 0 auto 0.35rem; }
+.wordmark {
+  margin: 0;
+  font-family: Georgia, "Iowan Old Style", Palatino, serif;
+  font-size: clamp(1.7rem, 4vw, 2.55rem);
+  font-weight: 650;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #1a2744;
+}
+.wordmark-sub {
+  margin: 0.2rem 0 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #1a2744;
+}
+.rule { display: block; width: 3.4rem; height: 2px; margin: 0.75rem auto 0.9rem; background: #c6a15a; }
+.shore h1 {
+  color: #1a2744;
+  font-size: clamp(2.15rem, 5vw, 3.15rem);
+  font-weight: 560;
+  margin: 0 0 0.45rem;
+}
+.shore .place { margin: 0 0 0.75rem; font-size: 1.05rem; }
+.shore .blurb { max-width: 34rem; margin: 0 auto 1.35rem; font-size: 1.02rem; }
+.shore .actions { justify-content: center; }
+.shore .button {
+  background: #1c3558;
+  color: white;
+  border: 2px solid #1c3558;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.7rem 1.15rem;
+}
+.shore .button.secondary { background: rgba(255, 255, 255, 0.9); color: #1c3558; }
 .hp { position: absolute; left: -999px; width: 1px; height: 1px; overflow: hidden; }
 .site-footer { color: var(--muted); font-size: 0.92rem; padding: 0 0 2rem; }
 .site-footer p { margin: 0.2rem 0; }
@@ -117,9 +175,9 @@ form.fields { display: grid; gap: 0.75rem; }
   .account { margin-left: 0; }
   .brand img { height: 84px; }
   table { display: block; overflow-x: auto; }
-  .hero { padding: 2rem 1.1rem 4.8rem; }
-  .hero h1, .hero .lede { padding-right: 3.6rem; }
-  .hero-sun { width: 3rem; height: 3rem; top: 1rem; right: 1rem; }
+  .mark { width: 84px; }
+  .wordmark { letter-spacing: 0.1em; }
+  .wordmark-sub { letter-spacing: 0.12em; }
 }
 `;
 
@@ -130,7 +188,29 @@ function shell(options: {
   nav: string;
   account: string;
   body: string;
+  landing?: boolean;
 }): string {
+  if (options.landing) {
+    const topbar = options.account ? `<div class="topbar"><div class="account">${options.account}</div></div>` : "";
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>${esc(options.title)}</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <style>${STYLES}</style>
+</head>
+<body class="landing">
+  <a class="skip" href="#content">Skip to content</a>
+  ${topbar}
+  <main id="content">${options.body}</main>
+</body>
+</html>`;
+  }
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -180,9 +260,24 @@ export function loggedOutNav(active?: string): { id: string; href: string; label
   return items;
 }
 
+export function landingAccount(name: string, portal: { dashboardHref: string; adminHref: string | null } | null): string {
+  const enter = portal
+    ? `<a class="button" href="${esc(portal.dashboardHref)}">Open dashboard</a>${
+        portal.adminHref ? `<a class="button secondary" href="${esc(portal.adminHref)}">Admin</a>` : ""
+      }`
+    : "";
+  return `${enter}${esc(name)} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`;
+}
+
 export async function render(
   c: AppContext,
-  options: { title: string; active?: string; body: string; status?: number },
+  options: {
+    title: string;
+    active?: string;
+    body: string;
+    status?: number;
+    portal?: { dashboardHref: string; adminHref: string | null } | null;
+  },
 ): Promise<Response> {
   const association = c.get("association");
   const user = c.get("user");
@@ -209,7 +304,7 @@ export async function render(
       { id: "messages", href: `${base}/messages`, label: "Messages" },
       { id: "notices", href: `${base}/notices`, label: unread > 0 ? `Notices (${unread})` : "Notices" },
     );
-    if (isStaff(membership.role_id)) items.push({ id: "admin", href: `${base}/admin`, label: "Admin" });
+    if (isAdmin(membership)) items.push({ id: "admin", href: `${base}/admin`, label: "Admin" });
   } else {
     items.push(...loggedOutNav(options.active));
   }
@@ -217,23 +312,23 @@ export async function render(
   const nav = items
     .map((item) => `<a class="${item.id === options.active ? "active" : ""}" href="${esc(item.href)}">${esc(item.label)}</a>`)
     .join("");
-  const account =
-    user && association
-      ? `${esc(user.name || user.email)} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`
-      : user
-        ? `${esc(user.name || user.email)} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`
-        : "";
   const flash = c.get("flash");
   const tone = c.get("flashTone");
   const flashHtml = flash ? `<div class="flash ${tone === "warn" ? "warn" : ""}">${esc(flash)}</div>` : "";
   const onPublicHome = !association && options.active === "home";
+  const account = user
+    ? onPublicHome
+      ? landingAccount(user.name || user.email, options.portal ?? null)
+      : `${esc(user.name || user.email)} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`
+    : "";
   const brand = onPublicHome ? "" : association?.name || "Tango Mar";
   const body = shell({
     title: options.title,
     brand,
     brandHref: "/",
-    nav,
+    nav: onPublicHome ? "" : nav,
     account,
+    landing: onPublicHome,
     body: `${flashHtml}${options.body}`,
   });
   const response = htmlResponse(body, options.status ?? 200);

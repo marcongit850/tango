@@ -1,26 +1,45 @@
 import { esc, paragraphs } from "../lib/html";
 import type { Association } from "../types";
 
-export function homePage(showDemo: boolean): string {
+export type HomePortal = {
+  dashboardHref: string;
+  adminHref: string | null;
+};
+
+export function homePage(showDemo: boolean, portal: HomePortal | null = null): string {
   const demo = showDemo
-    ? `<section class="devbox">
+    ? `<div class="wrap"><section class="devbox">
         <h2>Local demo roster</h2>
         <p>These people are fictional. Request a magic link, then use the link shown on the next screen when email is not configured.</p>
         <ul>
-          <li><code>jordan.lee@example.com</code>, officer, Lot 3</li>
+          <li><code>jordan.lee@example.com</code>, board member with admin, Lot 3</li>
           <li><code>sam.rivera@example.com</code>, homeowner, Lot 14, paid</li>
           <li><code>casey.nguyen@example.com</code>, homeowner, Lot 27, past due</li>
         </ul>
-      </section>`
+      </section></div>`
     : "";
-  return `<section class="hero">
-      <div class="hero-sun" aria-hidden="true"></div>
-      <h1>Tango Mar</h1>
-      <p class="lede">Welcome to your neighborhood dashboard. Here you can access association information, community documents, announcements, account details, and other resources for homeowners of the Tango Mar Property Owners Association.</p>
-      <p class="actions">
-        <a class="button" href="/login">Resident login</a>
-        <a class="button secondary" href="/join">Request to join</a>
-      </p>
+  return `<section class="shore">
+      <img class="shore-photo" src="/tango-mar-boardwalk.png" alt="">
+      <div class="shore-scrim" aria-hidden="true"></div>
+      <div class="shore-inner">
+        <img class="mark" src="/favicon.png" alt="" width="512" height="512">
+        <p class="wordmark">Tango Mar</p>
+        <p class="wordmark-sub">Property Owners Association</p>
+        <span class="rule" aria-hidden="true"></span>
+        <h1>Welcome to Tango Mar</h1>
+        <p class="place">A private beach neighborhood in Miramar Beach, Walton County, Florida.</p>
+        <p class="blurb">Your neighborhood portal for association information, documents, announcements, account details, and community resources.</p>
+        <p class="actions">
+          ${
+            portal
+              ? `<a class="button" href="${esc(portal.dashboardHref)}">Open dashboard</a>${
+                  portal.adminHref ? `<a class="button secondary" href="${esc(portal.adminHref)}">Admin</a>` : ""
+                }`
+              : `<a class="button" href="/login">Resident login</a>
+          <a class="button secondary" href="/join">Request access</a>`
+          }
+        </p>
+      </div>
     </section>
     ${demo}`;
 }

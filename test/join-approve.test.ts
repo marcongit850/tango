@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { isCheckConstraint } from "../src/lib/errors";
+import { changeLoginEmail } from "../src/lib/login-email";
 import {
   approvalSummary,
   approveJoinRequest,
@@ -70,7 +71,10 @@ function openPortal(includeApproval = true): { sqlite: DatabaseSync; db: D1Datab
   for (const file of ["migrations/0001_schema.sql", "migrations/0002_seed_tango_mar.sql", "migrations/0003_join_requests.sql"]) {
     sqlite.exec(readFileSync(file, "utf8"));
   }
-  if (includeApproval) sqlite.exec(readFileSync("migrations/0004_join_request_approved.sql", "utf8"));
+  if (includeApproval) {
+    sqlite.exec(readFileSync("migrations/0004_join_request_approved.sql", "utf8"));
+    sqlite.exec(readFileSync("migrations/0005_admin_improvements.sql", "utf8"));
+  }
   return { sqlite, db: new SqliteD1(sqlite) as unknown as D1Database };
 }
 
@@ -124,11 +128,12 @@ describe("join approval planning", () => {
     expect(planUserName("Sam Rivera", "Someone Else")).toBe("Sam Rivera");
     expect(planUserName("  ", "Pat Example")).toBe("Pat Example");
     expect(planUserName(null, "Pat Example")).toBe("Pat Example");
-    expect(planMembership(null)).toEqual({ roleId: "homeowner" });
-    expect(planMembership({ role_id: "homeowner", status: "inactive" })).toEqual({ roleId: "homeowner" });
-    expect(planMembership({ role_id: "officer", status: "active" })).toEqual({ roleId: "officer" });
-    expect(planMembership({ role_id: "board", status: "active" })).toEqual({ roleId: "board" });
-    expect(planMembership({ role_id: "officer", status: "inactive" })).toEqual({ roleId: "homeowner" });
+    expect(planMembership(null)).toEqual({ roleId: "homeowner", isAdmin: 0 });
+    expect(planMembership({ role_id: "homeowner", status: "inactive" })).toEqual({ roleId: "homeowner", isAdmin: 0 });
+    expect(planMembership({ role_id: "officer", status: "active" })).toEqual({ roleId: "board", isAdmin: 1 });
+    expect(planMembership({ role_id: "board", status: "active", is_admin: 1 })).toEqual({ roleId: "board", isAdmin: 1 });
+    expect(planMembership({ role_id: "board", status: "active", is_admin: 0 })).toEqual({ roleId: "board", isAdmin: 0 });
+    expect(planMembership({ role_id: "officer", status: "inactive" })).toEqual({ roleId: "homeowner", isAdmin: 0 });
   });
 
   it("tells the person to use resident login and does not include a magic link", () => {
@@ -252,21 +257,22 @@ describe("approve join request", () => {
     sqlite.close();
   });
 
-  it("keeps an active officer role and can approve a reviewed request without a lot", async () => {
+  it("keeps an active admin board role and can approve a reviewed request without a lot", async () => {
     const { sqlite, db } = openPortal();
     insertRequest(sqlite, { id: "jr-jordan", name: "Jordan Lee", email: "jordan.lee@example.com", status: "reviewed" });
     const result = await approveJoinRequest(db, { associationId: ASSOCIATION, requestId: "jr-jordan" });
     expect(result).toMatchObject({
       ok: true,
       createdUser: false,
-      roleId: "officer",
+      roleId: "board",
+      isAdmin: 1,
       lot: { kind: "skipped", reason: "blank" },
     });
     expect(
       sqlite
-        .prepare("SELECT role_id, status FROM memberships WHERE association_id = ? AND user_id = 'user_jordan'")
+        .prepare("SELECT role_id, status, is_admin FROM memberships WHERE association_id = ? AND user_id = 'user_jordan'")
         .get(ASSOCIATION),
-    ).toEqual({ role_id: "officer", status: "active" });
+    ).toEqual({ role_id: "board", status: "active", is_admin: 1 });
     sqlite.close();
   });
 
@@ -332,20 +338,86 @@ describe("join requests admin page", () => {
     timezone: "America/Chicago",
   };
 
-  it("offers approve and mark reviewed, and hides both after approval", () => {
+  it("offers approve, decline, and delete, and keeps approve off an approved request", () => {
     const html = joinRequestsPage(association, [
       { id: "pending-1", name: "Pat", email: "pat@example.com", address: "99", note: "", status: "pending", created_at: "2026-10-06T12:00:00Z" },
       { id: "reviewed-1", name: "Rae", email: "rae@example.com", address: "", note: "", status: "reviewed", created_at: "2026-10-05T12:00:00Z" },
       { id: "approved-1", name: "Ada", email: "ada@example.com", address: "", note: "", status: "approved", created_at: "2026-10-04T12:00:00Z" },
+      { id: "declined-1", name: "Noe", email: "noe@example.com", address: "", note: "", status: "declined", created_at: "2026-10-03T12:00:00Z" },
     ]);
     expect(html).toContain("/admin/join-requests/pending-1/approve");
     expect(html).toContain("/admin/join-requests/pending-1/reviewed");
+    expect(html).toContain("/admin/join-requests/pending-1/decline");
+    expect(html).toContain("/admin/join-requests/pending-1/delete");
     expect(html).toContain(">Approve<");
+    expect(html).toContain(">Decline<");
     expect(html).toContain(">Mark reviewed<");
+    expect(html).toContain(">Delete<");
     expect(html).toContain("/admin/join-requests/reviewed-1/approve");
+    expect(html).toContain("/admin/join-requests/reviewed-1/decline");
     expect(html).not.toContain("/admin/join-requests/reviewed-1/reviewed");
     expect(html).not.toContain("/admin/join-requests/approved-1/approve");
+    expect(html).not.toContain("/admin/join-requests/approved-1/decline");
+    expect(html).toContain("/admin/join-requests/approved-1/delete");
+    expect(html).toContain("/admin/join-requests/declined-1/approve");
+    expect(html).not.toContain("/admin/join-requests/declined-1/decline");
     expect(html).toContain("Approved");
+    expect(html).toContain("Declined");
+    expect(html).toContain("does not create a login");
     expect(html).not.toContain("\u2014");
+  });
+
+  it("turns officers into board admins and allows a declined request", () => {
+    const { sqlite } = openPortal();
+    expect(sqlite.prepare("SELECT role_id, is_admin FROM memberships WHERE user_id = 'user_jordan'").get()).toEqual({
+      role_id: "board",
+      is_admin: 1,
+    });
+    expect(sqlite.prepare("SELECT id FROM roles WHERE id = 'officer'").get()).toBeUndefined();
+    expect(sqlite.prepare("SELECT lot_type FROM properties WHERE id = 'prop_3'").get()).toEqual({ lot_type: "improved" });
+    insertRequest(sqlite, { id: "jr-no", name: "Noe", email: "noe@example.com", status: "declined" });
+    expect(sqlite.prepare("SELECT status FROM join_requests WHERE id = 'jr-no'").get()).toEqual({ status: "declined" });
+    sqlite.close();
+  });
+});
+
+describe("login email", () => {
+  it("changes the address and keeps the user id and lot link", async () => {
+    const { sqlite, db } = openPortal();
+    const result = await changeLoginEmail(db, "user_sam", "  Sam.New@Example.com ");
+    expect(result).toEqual({ ok: true, email: "sam.new@example.com", changed: true });
+    expect(sqlite.prepare("SELECT id, email FROM users WHERE id = 'user_sam'").get()).toEqual({
+      id: "user_sam",
+      email: "sam.new@example.com",
+    });
+    expect(sqlite.prepare("SELECT user_id FROM property_owners WHERE property_id = 'prop_14'").get()).toEqual({
+      user_id: "user_sam",
+    });
+    expect(sqlite.prepare("SELECT id FROM users WHERE email = 'sam.rivera@example.com'").get()).toBeUndefined();
+    sqlite.close();
+  });
+
+  it("rejects an email another person already uses", async () => {
+    const { sqlite, db } = openPortal();
+    const result = await changeLoginEmail(db, "user_sam", "Jordan.Lee@example.com");
+    expect(result).toEqual({ ok: false, reason: "taken" });
+    expect(sqlite.prepare("SELECT email FROM users WHERE id = 'user_sam'").get()).toEqual({
+      email: "sam.rivera@example.com",
+    });
+    sqlite.close();
+  });
+
+  it("rejects a blank or malformed email and leaves the row alone when unchanged", async () => {
+    const { sqlite, db } = openPortal();
+    expect(await changeLoginEmail(db, "user_sam", "not-an-email")).toEqual({ ok: false, reason: "invalid" });
+    expect(await changeLoginEmail(db, "user_sam", "sam.rivera@example.com")).toEqual({
+      ok: true,
+      email: "sam.rivera@example.com",
+      changed: false,
+    });
+    expect(sqlite.prepare("SELECT email FROM users WHERE id = 'user_sam'").get()).toEqual({
+      email: "sam.rivera@example.com",
+    });
+    sqlite.close();
   });
 });

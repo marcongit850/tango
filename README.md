@@ -2,7 +2,7 @@
 
 Neighborhood OS for a small property owners association that still keeps its roster in Excel. This repository is one Cloudflare Worker. The first association is **Tango Mar**, a beach neighborhood in Miramar Beach, Walton County, Florida.
 
-The public home page is the Tango Mar entry: resident login, and a form to request to join. `/a/{slug}` redirects to that home page.
+The public home page is the Tango Mar entry: a full-bleed boardwalk photo, resident login, and request access. Someone who is already signed in sees Open dashboard, and Admin when they have admin access, plus their name and log out. `/a/{slug}` redirects to that home page.
 
 One deployment can host many associations. Each association's lots, balances, documents, and messages stay inside that association. A resident sees only the lots linked to their login. Other residents never see that ledger.
 
@@ -15,8 +15,8 @@ This is the Phase 0 foundation and Phase 1 scaffold: magic-link sign-in, a D1 da
 - Documents in eight categories, with versions. Residents see the version the board marks current. Budgets can be board-only.
 - News, emergency notices, meetings, calendar, FAQs, and board contacts.
 - Private resident-to-board messages, plus portal notifications.
-- Board tools: roster, delinquents, lots, roles, CSV import, invoices, recorded payments, announcements, documents, an accountant CSV, join requests, and an audit log.
-- Public home with resident login and a request to join form.
+- Board tools: owners and lots, delinquent accounts, homeowner and board roles with an admin flag, login email edits, CSV import, invoices, annual dues, recorded payments, news editing, documents (visibility and delete), an accountant CSV, join requests, incoming messages, and an activity log.
+- Public home with resident login and request access.
 
 ## Not in this phase
 
@@ -51,7 +51,7 @@ These people are fictional. Lot labels are examples, not a statement about who o
 
 | Email | Role | Lot | Ledger |
 | --- | --- | --- | --- |
-| jordan.lee@example.com | Officer / manager | 3 | No balance |
+| jordan.lee@example.com | Board member with admin | 3 | No balance |
 | sam.rivera@example.com | Homeowner | 14 | 2026 dues paid |
 | casey.nguyen@example.com | Homeowner | 27 | Opening balance and 2026 dues, past due |
 
@@ -68,7 +68,7 @@ Edit `migrations/0002_seed_tango_mar.sql` if the mailing address should change, 
 
 ## CSV import
 
-Board members and officers import owners from Excel by saving the sheet as **CSV UTF-8**. The sample file is `samples/tango-mar-owners.csv`. In the portal: Admin → CSV import.
+People with admin access import owners from Excel by saving the sheet as **CSV UTF-8**. The sample file is `samples/tango-mar-owners.csv`. In the portal: Admin, CSV import.
 
 Required columns:
 
@@ -83,7 +83,8 @@ Optional columns:
 
 | Column | Meaning |
 | --- | --- |
-| `role` | `homeowner` (default), `board`, or `officer`. |
+| `role` | `homeowner` (default) or `board`. An older sheet may still say `officer`. That becomes a board member with admin. |
+| `admin` | `yes` or `no`. Blank keeps an existing admin flag for a board member. A new board row with a blank `admin` cell does not get admin. Admin on a homeowner row is rejected. |
 | `starting_balance` | Dollars owed. `375.50` and `$1,200.00` both work. A negative amount is recorded as an opening credit. Blank means zero. |
 | `balance_as_of` | `YYYY-MM-DD`. Blank uses today in the association time zone. |
 | `phone` | Stored on the user. Visible to the board, not to other residents. |
@@ -107,9 +108,9 @@ That runs `wrangler d1 migrations apply tango --remote`.
 
 ## Request to join
 
-The home page links to `/join`. The form asks for a name, an email, an optional address or lot, and an optional note. A successful submit stores a pending row in `join_requests` for Tango Mar, adds a portal notice for each active board member and officer, and emails those people when `RESEND_API_KEY` is set. Sending the form does not create a login.
+The home page links to `/join` (Request access). The form asks for a name, an email, an optional address or lot, and an optional note. A successful submit stores a pending row in `join_requests` for Tango Mar, adds a portal notice for each person with admin access, and emails those people when `RESEND_API_KEY` is set. Sending the form does not create a login.
 
-Board members open Admin, Join requests. **Approve** creates or reuses a user for that email, gives them an active homeowner membership (an active board or officer login keeps that role), and marks the request approved. When the address matches exactly one active lot and that lot has no owner, Approve links the person to it. A blank address, no match, more than one match, or a lot that already has an owner is left for the owner page. **Mark reviewed** only changes the status. It does not create a login. A reviewed request can still be approved later.
+Admins open Admin, Join requests. **Approve** creates or reuses a user for that email, gives them an active homeowner membership (an active board login keeps that role and its admin flag), and marks the request approved. When the address matches exactly one active lot and that lot has no owner, Approve links the person to it. A blank address, no match, more than one match, or a lot that already has an owner is left for Owners and lots. **Decline** marks the request declined and does not create a login. A declined request can still be approved later. **Delete** removes the request. It does not remove a login that Approve already created. **Mark reviewed** only changes the status. It does not create a login. A reviewed request can still be approved or declined later.
 
 Approve then sends a welcome email from `EMAIL_FROM` when `RESEND_API_KEY` is set. The message tells them to sign in at https://mytangomar.com/login with the same email. It does not include a magic-link token. If email is not configured or Resend fails, the login still exists and the admin flash says the welcome email was not sent.
 
@@ -134,6 +135,38 @@ Dashboard steps for that file:
 5. Select **Execute**.
 
 Run that file once. If Approve says the approval migration is missing, this file has not been applied yet. In that case no login is created. If the console says `join_requests_next` already exists, a previous paste stopped halfway: `DROP TABLE join_requests_next;` and execute the file again.
+
+## Admin improvements (paste this before merge)
+
+`migrations/0005_admin_improvements.sql` is the SQL for this batch. Paste it in the Cloudflare dashboard before you merge the pull request. Marc does not need a terminal.
+
+What it does:
+
+- Adds an admin flag on memberships. People who already administer the association (board or officer) keep that access. Officers become board members. The officer role is removed.
+- Adds lot type on each lot. Existing lots start as improved. Change unimproved lots under Admin, Owners and lots.
+- Adds an open date and lot type on assessments, so annual dues can be improved ($625, open January 1, due March 1) or unimproved ($100, same dates).
+- Lets a join request be marked declined. Pending, reviewed, and approved rows stay.
+
+Dashboard steps:
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database**.
+2. Select the database named **tango**.
+3. Open **Console**.
+4. Paste the full contents of `migrations/0005_admin_improvements.sql`.
+5. Select **Execute**.
+
+Run that file once. If the console says a column already exists, or `join_requests_next` already exists, a previous paste stopped halfway. Run `DROP TABLE IF EXISTS join_requests_next;` only if that table is still there and `join_requests` is still the live table, then execute the file again. Do not drop `join_requests` by itself.
+
+After it succeeds, use the portal:
+
+- Admin, Owners and lots: edit a lot, set improved or unimproved, and assign the primary owner. Open a person to change the login email. That keeps the same user and the lots already linked to them, and it is refused when another person already uses that email. CSV import remains the bulk path.
+- Admin, Ledger, Annual dues: add a year (this creates both amounts), then **Assign to matching lots**. That writes the invoices Upcoming assessments uses. Changing an amount later does not rewrite invoices already assigned.
+- Admin, Messages: incoming from owners.
+- The activity page is the old audit log. The database table is still `audit_log`.
+
+If this Worker is deployed before the SQL runs, current board members can still sign in. Saving a role, setting lot type, assigning dues, or declining a request will ask you to apply this file first.
+
+Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0004` is already on the remote database.
 
 ## Create the R2 bucket
 
@@ -187,31 +220,29 @@ Preview URLs are public unless you put access control in front of them.
 
 | Role | What they can see |
 | --- | --- |
-| Public | Logged-out visitor. Public home, resident login, and request to join. No documents and no balances. |
+| Public | Logged-out visitor. Public home, resident login, and request access. No documents and no balances. |
 | Homeowner | Their own lots, invoices, payments, and messages. Current resident documents. |
-| Board member | Homeowner access, plus admin for this association only. |
-| Officer / manager | Same admin tools as the board in this phase. |
+| Board member | Same resident access, plus board-only documents. Admin tools stay off unless the admin flag is on. |
+| Admin flag | A board member who can open Admin. Keep at least one active admin so the portal cannot lock itself out. |
 
-Keep at least one active officer so the association cannot lock itself out of admin.
-
-A board member's dashboard still shows only their own lots. Other residents' balances are on the admin ledger, not on the personal dashboard.
+A board member's dashboard still shows only their own lots, even when the admin flag is on. Other residents' balances are on the admin ledger, not on the personal dashboard.
 
 ## Data model
 
 Migrations live in `migrations/`.
 
-- `associations`, `users`, `roles`, `memberships`
-- `properties` (lots) and `property_owners`
-- `assessments`, `invoices`, `payments` (amounts in cents; payments are recorded, not charged online)
+- `associations`, `users`, `roles`, `memberships` (`is_admin` is the admin flag on a board member)
+- `properties` (lots, with `lot_type` of `improved` or `unimproved`) and `property_owners`
+- `assessments` (`opens_on`, `lot_type`, amount, due date), `invoices`, `payments` (amounts in cents; payments are recorded, not charged online)
 - `documents` and `document_versions` (`current_version_id` is what residents see; `visibility` is `residents` or `board`)
 - `announcements`, `events`, `faqs`, `board_contacts`
 - `messages` (private threads to the board)
 - `notifications` (portal notices)
-- `audit_log`
+- `audit_log` (shown in the portal as Activity)
 - `magic_links`, `sessions`
-- `join_requests` (public request to join: pending, reviewed, or approved)
+- `join_requests` (public request to join: pending, reviewed, approved, or declined)
 
-Every tenant-owned row carries `association_id`. Financial queries also require that association id, and homeowner queries join `property_owners` for the signed-in user. Staff queries are rejected unless the membership role is `board` or `officer` for that same association.
+Every tenant-owned row carries `association_id`. Financial queries also require that association id, and homeowner queries join `property_owners` for the signed-in user. Admin queries are rejected unless the membership is an active board member with the admin flag for that same association.
 
 Balance = non-void invoice amounts + late fees − recorded payments.
 

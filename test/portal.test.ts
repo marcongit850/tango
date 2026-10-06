@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { canViewPropertyFinancials, isStaff, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
+import { canViewPropertyFinancials, isAdmin, keepsAnAdmin, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
+import { annualDues, defaultDuesYear, lotsToInvoice } from "../src/lib/dues";
+import { landingAccount, loggedOutNav } from "../src/views/layout";
+import { ownerDetailPage } from "../src/views/admin";
 import { checkEmailPage, homePage, invalidLinkPage, joinReceivedPage, joinRequestPage, loginPage } from "../src/views/public";
-import { loggedOutNav } from "../src/views/layout";
+import type { OwnerListRow } from "../src/db";
 import type { Association } from "../src/types";
 import { parseCsv, parseOwnersCsv } from "../src/lib/csv";
-import { isIsoDate, todayIso, zonedLocalToUtc } from "../src/lib/dates";
+import { isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../src/lib/dates";
 import { balanceCents, csvText, formatMoney, invoiceStatus, isDelinquent, parseMoneyToCents } from "../src/lib/money";
 import { sha256Hex } from "../src/lib/tokens";
 
@@ -57,7 +60,22 @@ describe("owner csv", () => {
       balanceAsOf: "2026-01-15",
       city: "Miramar Beach",
     });
-    expect(parsed.rows[1]).toMatchObject({ role: "homeowner", startingBalanceCents: 0, balanceAsOf: "2026-10-06" });
+    expect(parsed.rows[1]).toMatchObject({ role: "homeowner", isAdmin: null, startingBalanceCents: 0, balanceAsOf: "2026-10-06" });
+  });
+
+  it("maps officer to board with admin and rejects admin on a homeowner", () => {
+    const csv = [
+      "email,name,lot_number,street_address,role,admin",
+      "a@example.com,Jordan,3,Street,officer,",
+      "b@example.com,Quinn,4,Street,board,no",
+      "c@example.com,Sam,5,Street,homeowner,yes",
+    ].join("\n");
+    const parsed = parseOwnersCsv(csv, { city: "Miramar Beach", state: "FL", postalCode: "32550", today: "2026-10-06" });
+    expect(parsed.rows.map((row) => ({ email: row.email, role: row.role, isAdmin: row.isAdmin }))).toEqual([
+      { email: "a@example.com", role: "board", isAdmin: true },
+      { email: "b@example.com", role: "board", isAdmin: false },
+    ]);
+    expect(parsed.errors[0].message).toMatch(/Admin access is only for board members/);
   });
 
   it("reports a missing column and a bad role", () => {
@@ -79,14 +97,22 @@ describe("owner csv", () => {
 });
 
 describe("access", () => {
-  it("hides another resident's ledger and shows it to the board", () => {
-    expect(canViewPropertyFinancials("homeowner", "user_sam", ["user_casey"])).toBe(false);
-    expect(canViewPropertyFinancials("homeowner", "user_sam", ["user_sam"])).toBe(true);
-    expect(canViewPropertyFinancials("board", "user_quinn", ["user_sam"])).toBe(true);
-    expect(canViewPropertyFinancials("officer", "user_jordan", [])).toBe(true);
-    expect(canViewPropertyFinancials("public", "visitor", ["user_sam"])).toBe(false);
-    expect(isStaff("homeowner")).toBe(false);
-    expect(isStaff("officer")).toBe(true);
+  it("hides another resident's ledger and shows it to an admin", () => {
+    expect(canViewPropertyFinancials({ role_id: "homeowner", is_admin: 0 }, "user_sam", ["user_casey"])).toBe(false);
+    expect(canViewPropertyFinancials({ role_id: "homeowner", is_admin: 0 }, "user_sam", ["user_sam"])).toBe(true);
+    expect(canViewPropertyFinancials({ role_id: "board", is_admin: 1 }, "user_quinn", ["user_sam"])).toBe(true);
+    expect(canViewPropertyFinancials({ role_id: "board", is_admin: 0 }, "user_quinn", [])).toBe(false);
+    expect(canViewPropertyFinancials({ role_id: "board", is_admin: 0 }, "user_quinn", ["user_quinn"])).toBe(true);
+    expect(canViewPropertyFinancials({ role_id: "officer" }, "user_jordan", [])).toBe(true);
+    expect(canViewPropertyFinancials(null, "visitor", ["user_sam"])).toBe(false);
+    expect(isAdmin({ role_id: "homeowner", is_admin: 0 })).toBe(false);
+    expect(isAdmin({ role_id: "board", is_admin: 1 })).toBe(true);
+    expect(isAdmin({ role_id: "board", is_admin: 0 })).toBe(false);
+    expect(isAdmin({ role_id: "officer" })).toBe(true);
+    expect(isAdmin({ role_id: "board", is_admin: 1, status: "inactive" })).toBe(false);
+    expect(keepsAnAdmin({ activeAdminCount: 1, currentlyAdmin: true, nextAdmin: false })).toBe(false);
+    expect(keepsAnAdmin({ activeAdminCount: 2, currentlyAdmin: true, nextAdmin: false })).toBe(true);
+    expect(keepsAnAdmin({ activeAdminCount: 1, currentlyAdmin: true, nextAdmin: true })).toBe(true);
   });
 
   it("shows magic links only for local development when email was not sent", () => {
@@ -110,6 +136,33 @@ describe("dates", () => {
     expect(zonedLocalToUtc("2026-11-08T10:00", "America/Chicago")).toBe("2026-11-08T16:00:00.000Z");
     expect(zonedLocalToUtc("2026-10-18T09:00", "America/Chicago")).toBe("2026-10-18T14:00:00.000Z");
     expect(todayIso("America/Chicago", new Date("2026-10-06T15:00:00Z"))).toBe("2026-10-06");
+    expect(utcToDatetimeLocal("2026-11-08T16:00:00.000Z", "America/Chicago")).toBe("2026-11-08T10:00");
+  });
+});
+
+describe("annual dues", () => {
+  it("opens January 1, is due March 1, and prices lots by type", () => {
+    expect(annualDues(2027, "improved")).toMatchObject({
+      amountCents: 62500,
+      opensOn: "2027-01-01",
+      dueOn: "2027-03-01",
+      lotType: "improved",
+    });
+    expect(annualDues(2027, "unimproved").amountCents).toBe(10000);
+    expect(defaultDuesYear("2026-10-06")).toBe(2027);
+    expect(defaultDuesYear("2027-02-01")).toBe(2027);
+    const plan = lotsToInvoice(
+      [
+        { id: "a", lotNumber: "3", status: "active", lotType: "improved" },
+        { id: "b", lotNumber: "4", status: "active", lotType: "unimproved" },
+        { id: "c", lotNumber: "5", status: "inactive", lotType: "improved" },
+        { id: "d", lotNumber: "6", status: "active", lotType: "improved" },
+      ],
+      "improved",
+      new Set(["d"]),
+    );
+    expect(plan.create.map((lot) => lot.lotNumber)).toEqual(["3"]);
+    expect(plan.already).toBe(1);
   });
 });
 
@@ -135,12 +188,16 @@ describe("public home", () => {
     expect(html).toContain("Resident login");
     expect(html).toContain('href="/login"');
     expect(html).not.toContain("/a/tango-mar/login");
-    expect(html).toContain("Request to join");
+    expect(html).toContain("Request access");
     expect(html).toContain('href="/join"');
-    expect(html).toContain(
-      "Welcome to your neighborhood dashboard. Here you can access association information, community documents, announcements, account details, and other resources for homeowners of the Tango Mar Property Owners Association.",
-    );
-    expect(html).not.toContain("A beach neighborhood in Miramar Beach");
+    expect(html).toContain("Welcome to Tango Mar");
+    expect(html).toContain("A private beach neighborhood in Miramar Beach, Walton County, Florida.");
+    expect(html).toContain("Your neighborhood portal for association information, documents, announcements, account details, and community resources.");
+    expect(html).toContain('src="/tango-mar-boardwalk.png"');
+    expect(html).toContain('src="/favicon.png"');
+    expect(html).toContain("Property Owners Association");
+    expect(html).not.toContain("Welcome to your neighborhood dashboard");
+    expect(html).not.toContain("\u2014");
     expect(html).not.toContain("Open portal");
     expect(html).not.toContain("Enter Tango Mar");
     expect(html).not.toContain("Associations");
@@ -185,6 +242,69 @@ describe("public home", () => {
 
   it("shows the fictional roster only for the local demo", () => {
     expect(homePage(true)).toContain("jordan.lee@example.com");
+  });
+
+  it("sends a signed-in homeowner into the dashboard", () => {
+    const html = homePage(false, { dashboardHref: "/a/tango-mar/dashboard", adminHref: null });
+    expect(html).toContain("Open dashboard");
+    expect(html).toContain('href="/a/tango-mar/dashboard"');
+    expect(html).not.toContain(">Admin<");
+    expect(html).not.toContain('href="/login"');
+    expect(html).not.toContain('href="/join"');
+    expect(html).not.toContain("\u2014");
+  });
+
+  it("offers Admin as well when the signed-in person has admin access", () => {
+    const html = homePage(false, { dashboardHref: "/a/tango-mar/dashboard", adminHref: "/a/tango-mar/admin" });
+    expect(html).toContain('href="/a/tango-mar/dashboard"');
+    expect(html).toContain('href="/a/tango-mar/admin"');
+    expect(html).toContain("Open dashboard");
+    expect(html).toContain(">Admin<");
+  });
+
+  it("keeps the name and log out beside the portal buttons", () => {
+    const homeowner = landingAccount("Sam Rivera", { dashboardHref: "/a/tango-mar/dashboard", adminHref: null });
+    expect(homeowner).toContain("Sam Rivera");
+    expect(homeowner).toContain("Log out");
+    expect(homeowner).toContain('href="/a/tango-mar/dashboard"');
+    expect(homeowner).not.toContain('href="/a/tango-mar/admin"');
+    const admin = landingAccount("Jordan Lee", { dashboardHref: "/a/tango-mar/dashboard", adminHref: "/a/tango-mar/admin" });
+    expect(admin).toContain("Jordan Lee");
+    expect(admin).toContain('href="/a/tango-mar/admin"');
+    expect(admin).toContain("Log out");
+  });
+
+  it("lets an admin edit the login email on the owner page", () => {
+    const owner: OwnerListRow = {
+      user_id: "user_sam",
+      email: "sam.rivera@example.com",
+      name: "Sam Rivera",
+      phone: "",
+      role_id: "homeowner",
+      is_admin: 0,
+      status: "active",
+      property_id: "prop_14",
+      lot_number: "14",
+      street_address: "Lot 14",
+    };
+    const association: Association = {
+      id: "assoc_tango_mar",
+      slug: "tango-mar",
+      name: "Tango Mar",
+      legal_name: "Tango Mar Property Owners Association",
+      address_line1: "31 Tang O Mar Drive",
+      city: "Miramar Beach",
+      state: "FL",
+      postal_code: "32550",
+      county: "Walton County",
+      timezone: "America/Chicago",
+    };
+    const html = ownerDetailPage({ association, owner, balance: 0, lots: [], properties: [] });
+    expect(html).toContain('action="/a/tango-mar/admin/owners/user_sam/email"');
+    expect(html).toContain('value="sam.rivera@example.com"');
+    expect(html).toContain("Save email");
+    expect(html).toContain("keeps the same person");
+    expect(html).not.toContain("\u2014");
   });
 
   it("asks for a name, email, optional address, and optional note", () => {

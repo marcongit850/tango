@@ -41,7 +41,7 @@ export function dashboardPage(options: {
     .join("");
   const upcoming = options.upcoming
     .map(
-      (row) => `<tr><td>${esc(row.name)}</td><td>${dateCell(row.due_on, association.timezone)}</td><td>${moneySpan(row.amount_cents)}</td><td>${row.invoice_count > 0 ? "Invoiced" : "Scheduled"}</td></tr>`,
+      (row) => `<tr><td>${esc(row.name)}</td><td>${row.opens_on ? dateCell(row.opens_on, association.timezone) : ""}</td><td>${dateCell(row.due_on, association.timezone)}</td><td>${moneySpan(row.amount_cents)}</td><td>${row.invoice_count > 0 ? "Invoiced" : "Scheduled"}</td></tr>`,
     )
     .join("");
   const invoices = options.invoices
@@ -75,7 +75,7 @@ export function dashboardPage(options: {
     ${lots ? `<section class="grid">${lots}</section>` : ""}
     <section class="panel">
       <h2>Upcoming assessments</h2>
-      ${upcoming ? `<table><thead><tr><th>Assessment</th><th>Due</th><th>Amount</th><th></th></tr></thead><tbody>${upcoming}</tbody></table>` : empty("No upcoming assessments.")}
+      ${upcoming ? `<table><thead><tr><th>Assessment</th><th>Opens</th><th>Due</th><th>Amount</th><th></th></tr></thead><tbody>${upcoming}</tbody></table>` : empty("No upcoming assessments.")}
     </section>
     <section class="split">
       <article class="panel">
@@ -249,7 +249,12 @@ function formatMailing(association: Association): string {
   return [association.address_line1, association.city, association.state, association.postal_code].filter(Boolean).join(", ");
 }
 
-export function messagesPage(association: Association, threads: MessageRow[], properties: { id: string; lot_number: string }[]): string {
+export function messagesPage(
+  association: Association,
+  threads: MessageRow[],
+  properties: { id: string; lot_number: string }[],
+  adminInboxHref = "",
+): string {
   const rows = threads
     .map(
       (thread) => `<tr><td><a href="/a/${esc(association.slug)}/messages/${esc(thread.thread_id)}">${esc(thread.subject)}</a></td><td>${esc(thread.from_name)}</td><td>${dateTimeCell(thread.created_at, association.timezone)}</td></tr>`,
@@ -262,6 +267,7 @@ export function messagesPage(association: Association, threads: MessageRow[], pr
     <article class="panel">
       <h1>Messages</h1>
       <p class="muted">Private notes to the board. Other residents cannot read them.</p>
+      ${adminInboxHref ? `<p class="muted">Incoming from owners is listed under <a href="${esc(adminInboxHref)}">Admin, Messages</a>.</p>` : ""}
       ${rows ? `<table><thead><tr><th>Subject</th><th>Latest from</th><th>When</th></tr></thead><tbody>${rows}</tbody></table>` : empty("No messages yet.")}
     </article>
     <article class="panel">
@@ -276,16 +282,26 @@ export function messagesPage(association: Association, threads: MessageRow[], pr
   </section>`;
 }
 
-export function threadPage(association: Association, subject: string, messages: MessageRow[]): string {
+export function threadPage(
+  association: Association,
+  subject: string,
+  messages: MessageRow[],
+  options: { incoming?: boolean; next?: string } = {},
+): string {
   const threadId = messages[0]?.thread_id ?? "";
   const items = messages
     .map(
       (message) => `<article class="card"><p><strong>${esc(message.from_name)}</strong> <span class="muted">${dateTimeCell(message.created_at, association.timezone)}</span></p>${paragraphs(message.body)}</article>`,
     )
     .join("");
-  return `<section class="panel"><h1>${esc(subject)}</h1></section>
+  const intro = options.incoming
+    ? `<p class="muted">Incoming from owners. Only people with admin access can read the board side of this thread.</p>`
+    : "";
+  const next = options.next ? `<input type="hidden" name="next" value="${esc(options.next)}">` : "";
+  return `<section class="panel"><h1>${esc(subject)}</h1>${intro}</section>
     <section class="stack">${items}</section>
     <form class="panel fields" method="post" action="/a/${esc(association.slug)}/messages/${esc(threadId)}/reply">
+      ${next}
       ${areaField("Reply", "body", "", true)}
       <button type="submit">Send reply</button>
     </form>`;

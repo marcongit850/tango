@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { setCookie } from "hono/cookie";
-import { isStaff } from "../lib/access";
+import { isAdmin } from "../lib/access";
 import { ForbiddenError, NotFoundError, RedirectError } from "../lib/errors";
 import { assertSameOrigin, clip, isHttps } from "../lib/html";
 import type { AppBindings, Association, Membership, User } from "../types";
@@ -26,7 +26,7 @@ export function requireMember(c: AppContext): { association: Association; user: 
 
 export function requireStaff(c: AppContext): { association: Association; user: User; membership: Membership } {
   const context = requireMember(c);
-  if (!isStaff(context.membership.role_id)) throw new ForbiddenError();
+  if (!isAdmin(context.membership)) throw new ForbiddenError();
   return context;
 }
 

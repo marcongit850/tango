@@ -1,0 +1,119 @@
+import { describe, expect, it } from "vitest";
+import { canViewPropertyFinancials, isStaff, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
+import { parseCsv, parseOwnersCsv } from "../src/lib/csv";
+import { isIsoDate, todayIso, zonedLocalToUtc } from "../src/lib/dates";
+import { balanceCents, csvText, formatMoney, invoiceStatus, isDelinquent, parseMoneyToCents } from "../src/lib/money";
+import { sha256Hex } from "../src/lib/tokens";
+
+describe("money", () => {
+  it("parses dollar amounts from a spreadsheet", () => {
+    expect(parseMoneyToCents("375.50")).toBe(37550);
+    expect(parseMoneyToCents("$1,200.00")).toBe(120000);
+    expect(parseMoneyToCents("(40.00)")).toBe(-4000);
+    expect(parseMoneyToCents("-15")).toBe(-1500);
+    expect(parseMoneyToCents("")).toBe(0);
+    expect(parseMoneyToCents("12.345")).toBeNull();
+    expect(parseMoneyToCents("abc")).toBeNull();
+  });
+
+  it("formats cents and computes a balance", () => {
+    expect(formatMoney(160050)).toBe("$1,600.50");
+    expect(formatMoney(-250)).toBe("-$2.50");
+    expect(balanceCents(160050, 0)).toBe(160050);
+    expect(isDelinquent(160050, true)).toBe(true);
+    expect(isDelinquent(0, true)).toBe(false);
+    expect(isDelinquent(100, false)).toBe(false);
+  });
+
+  it("derives invoice status from payments on that invoice", () => {
+    expect(invoiceStatus(120000, 0, 0)).toBe("open");
+    expect(invoiceStatus(120000, 0, 1000)).toBe("partial");
+    expect(invoiceStatus(120000, 2500, 122500)).toBe("paid");
+  });
+
+  it("keeps spreadsheet formulas from running in exported text", () => {
+    expect(csvText("=cmd")).toBe("'=cmd");
+    expect(csvText('Lot "14"')).toBe('"Lot ""14"""');
+  });
+});
+
+describe("owner csv", () => {
+  it("reads quoted commas and defaults the role", () => {
+    const csv = [
+      "email,name,lot_number,street_address,role,starting_balance,balance_as_of,phone",
+      'a@example.com,"Rivera, Sam",14,"Lot 14, Tang O Mar Drive",homeowner,$375.50,2026-01-15,850-555-0142',
+      "b@example.com,Jordan Lee,3,Lot 3 Tang O Mar Drive,,,,",
+    ].join("\n");
+    const parsed = parseOwnersCsv(csv, { city: "Miramar Beach", state: "FL", postalCode: "32550", today: "2026-10-06" });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.rows[0]).toMatchObject({
+      email: "a@example.com",
+      name: "Rivera, Sam",
+      streetAddress: "Lot 14, Tang O Mar Drive",
+      startingBalanceCents: 37550,
+      balanceAsOf: "2026-01-15",
+      city: "Miramar Beach",
+    });
+    expect(parsed.rows[1]).toMatchObject({ role: "homeowner", startingBalanceCents: 0, balanceAsOf: "2026-10-06" });
+  });
+
+  it("reports a missing column and a bad role", () => {
+    expect(parseOwnersCsv("email,name\n", { city: "", state: "", postalCode: "", today: "2026-10-06" }).errors[0].message).toMatch(/lot_number/);
+    const bad = parseOwnersCsv("email,name,lot_number,street_address,role\na@example.com,A,1,Street,mayor\n", {
+      city: "Miramar Beach",
+      state: "FL",
+      postalCode: "32550",
+      today: "2026-10-06",
+    });
+    expect(bad.rows).toHaveLength(0);
+    expect(bad.errors[0].message).toMatch(/Role/);
+  });
+
+  it("keeps quoted line breaks inside a cell", () => {
+    const rows = parseCsv('email,name\n"a@example.com","Line one\nLine two"\n');
+    expect(rows[1][1]).toBe("Line one\nLine two");
+  });
+});
+
+describe("access", () => {
+  it("hides another resident's ledger and shows it to the board", () => {
+    expect(canViewPropertyFinancials("homeowner", "user_sam", ["user_casey"])).toBe(false);
+    expect(canViewPropertyFinancials("homeowner", "user_sam", ["user_sam"])).toBe(true);
+    expect(canViewPropertyFinancials("board", "user_quinn", ["user_sam"])).toBe(true);
+    expect(canViewPropertyFinancials("officer", "user_jordan", [])).toBe(true);
+    expect(canViewPropertyFinancials("public", "visitor", ["user_sam"])).toBe(false);
+    expect(isStaff("homeowner")).toBe(false);
+    expect(isStaff("officer")).toBe(true);
+  });
+
+  it("shows magic links only for local development when email was not sent", () => {
+    expect(shouldRevealMagicLink({ appEnv: "production", hostname: "tango.example", emailSent: false })).toBe(false);
+    expect(shouldRevealMagicLink({ appEnv: "production", hostname: "localhost", emailSent: false })).toBe(true);
+    expect(shouldRevealMagicLink({ appEnv: "development", hostname: "tango.example", emailSent: false })).toBe(true);
+    expect(shouldRevealMagicLink({ appEnv: "development", hostname: "localhost", emailSent: true })).toBe(false);
+  });
+
+  it("rejects open redirects", () => {
+    expect(safeNextPath("tango-mar", "/a/tango-mar/documents")).toBe("/a/tango-mar/documents");
+    expect(safeNextPath("tango-mar", "https://evil.example")).toBe("/a/tango-mar/dashboard");
+    expect(safeNextPath("tango-mar", "/a/other/dashboard")).toBe("/a/tango-mar/dashboard");
+  });
+});
+
+describe("dates", () => {
+  it("converts Miramar Beach local time to UTC", () => {
+    expect(isIsoDate("2026-02-31")).toBe(false);
+    expect(isIsoDate("2026-11-08")).toBe(true);
+    expect(zonedLocalToUtc("2026-11-08T10:00", "America/Chicago")).toBe("2026-11-08T16:00:00.000Z");
+    expect(zonedLocalToUtc("2026-10-18T09:00", "America/Chicago")).toBe("2026-10-18T14:00:00.000Z");
+    expect(todayIso("America/Chicago", new Date("2026-10-06T15:00:00Z"))).toBe("2026-10-06");
+  });
+});
+
+describe("tokens", () => {
+  it("hashes a magic link token with sha-256", async () => {
+    const hash = await sha256Hex("abc");
+    expect(hash).toHaveLength(64);
+    expect(hash).not.toBe("abc");
+  });
+});

@@ -1,1 +1,229 @@
-# tango
+# Tango Mar owner portal
+
+Neighborhood OS for a small property owners association that still keeps its roster in Excel. This repository is one Cloudflare Worker. The first association is **Tango Mar**, a beach neighborhood in Miramar Beach, Walton County, Florida.
+
+One deployment can host many associations. Each association's lots, balances, documents, and messages stay inside that association. A resident sees only the lots linked to their login. Other residents never see that ledger.
+
+This is the Phase 0 foundation and Phase 1 scaffold: magic-link sign-in, a D1 data model, CSV import, homeowner balances, versioned documents, neighborhood news, private board messages, and board admin. It is not a property-management suite.
+
+## Phase 1 includes
+
+- Magic-link email login. No passwords.
+- Homeowner dashboard: balance, upcoming assessments, invoices, recorded payments, late fees, and personal notices.
+- Documents in eight categories, with versions. Residents see the version the board marks current. Budgets can be board-only.
+- News, emergency notices, meetings, calendar, FAQs, and board contacts.
+- Private resident-to-board messages, plus portal notifications.
+- Board tools: roster, delinquents, lots, roles, CSV import, invoices, recorded payments, announcements, documents, an accountant CSV, and an audit log.
+- Footer on every page: not legal advice.
+
+## Not in this phase
+
+Moderated forum, online card or ACH payments, ARC or other request workflows, SMS, an AI covenant assistant, and email blasts. A board officer can email one owner a balance reminder. That is a single message, not a blast.
+
+## Stack
+
+- Cloudflare Workers
+- D1 for the database (`DB` binding, database name `tango`)
+- R2 for document files (`DOCS` binding, bucket name `tango-documents`)
+- [Resend](https://resend.com) for magic-link email when `RESEND_API_KEY` is set
+
+Local development works without Resend. On `localhost`, or when `APP_ENV` is `development`, a sign-in link that could not be emailed is shown on the next page.
+
+## Local setup
+
+```bash
+npm install
+npm run db:migrate:local
+npm run dev
+```
+
+Open http://localhost:8787.
+
+`npm run dev` sets `APP_ENV=development`. The committed Wrangler config leaves `APP_ENV` as `production`, so a deployed Worker does not print magic links.
+
+Apply the migrations before the first request. If the database is missing, the home page explains that step.
+
+### Demo roster
+
+These people are fictional. Lot labels are examples, not a statement about who owns a house.
+
+| Email | Role | Lot | Ledger |
+| --- | --- | --- | --- |
+| jordan.lee@example.com | Officer / manager | 3 | No balance |
+| sam.rivera@example.com | Homeowner | 14 | 2026 dues paid |
+| casey.nguyen@example.com | Homeowner | 27 | Opening balance and 2026 dues, past due |
+
+Request a magic link with one of those addresses. On localhost, the confirmation page includes the link when email is not configured.
+
+The seed association is Tango Mar, slug `tango-mar`.
+
+- Legal name: Tango Mar Property Owners Association
+- Mailing address in the seed: 31 Tang O Mar Drive, Miramar Beach, FL 32550
+- Place: Miramar Beach, Walton County, Florida
+- Time zone: `America/Chicago` (Walton County is Central Time)
+
+Edit `migrations/0002_seed_tango_mar.sql` if the mailing address should change, then apply migrations to a fresh database.
+
+## CSV import
+
+Board members and officers import owners from Excel by saving the sheet as **CSV UTF-8**. The sample file is `samples/tango-mar-owners.csv`. In the portal: Admin → CSV import.
+
+Required columns:
+
+| Column | Meaning |
+| --- | --- |
+| `email` | Login address. Matched case-insensitively. |
+| `name` | Person's name. |
+| `lot_number` | Unique within the association. |
+| `street_address` | Lot address. |
+
+Optional columns:
+
+| Column | Meaning |
+| --- | --- |
+| `role` | `homeowner` (default), `board`, or `officer`. |
+| `starting_balance` | Dollars owed. `375.50` and `$1,200.00` both work. A negative amount is recorded as an opening credit. Blank means zero. |
+| `balance_as_of` | `YYYY-MM-DD`. Blank uses today in the association time zone. |
+| `phone` | Stored on the user. Visible to the board, not to other residents. |
+| `city`, `state`, `postal_code` | Default to the association's city, state, and postal code. |
+
+A positive starting balance creates one invoice named `Opening balance (CSV import)`. Importing the same lot again updates the person and lot and does not add a second opening invoice. Change a balance later from Admin → Ledger.
+
+Importing the sample file onto the seed data adds Quinn Harper (board, Lot 41, $1,200 opening balance) and refreshes the three demo rows.
+
+## Create D1 and bind it
+
+From the Cloudflare account that should own the Worker:
+
+```bash
+npx wrangler login
+npx wrangler d1 create tango
+```
+
+Copy the `database_id` from that command into `wrangler.jsonc`:
+
+```jsonc
+"d1_databases": [
+  {
+    "binding": "DB",
+    "database_name": "tango",
+    "database_id": "<database_id from wrangler d1 create>",
+    "migrations_dir": "migrations"
+  }
+]
+```
+
+The placeholder `00000000-0000-0000-0000-000000000000` is only for local migrations. Replace it before a remote deploy.
+
+Apply the schema and the Tango Mar seed to the remote database:
+
+```bash
+npm run db:migrate:remote
+```
+
+That runs `wrangler d1 migrations apply tango --remote`.
+
+## Create the R2 bucket
+
+Document bytes live in R2. The database stores the version metadata and the object key.
+
+```bash
+npx wrangler r2 bucket create tango-documents
+```
+
+The binding name in `wrangler.jsonc` is `DOCS`, and the bucket name is `tango-documents`. Local `wrangler dev` uses a simulated bucket, so this command is only required before deploy.
+
+The seed covenants and budget are placeholder text, not the recorded documents. The Worker writes those sample files into R2 the first time someone opens Documents. Replace them by uploading a new version and marking it current. Residents then see the new file. Older versions stay available to the board.
+
+Allowed uploads: PDF, plain text, JPEG, PNG, WebP, and Word (`.doc`, `.docx`), up to 8 MB.
+
+## Secrets and email
+
+Do not put API keys in `wrangler.jsonc`.
+
+Production:
+
+```bash
+npx wrangler secret put RESEND_API_KEY
+```
+
+`EMAIL_FROM` is a normal var. The default `Tango Mar <onboarding@resend.dev>` works with Resend's test sender. For a real domain, change `EMAIL_FROM` in `wrangler.jsonc` to a verified sender, for example `Tango Mar <board@your-domain>`.
+
+Local secrets, if you want to send real mail from `wrangler dev`, go in `.dev.vars` (gitignored):
+
+```bash
+cp .dev.vars.example .dev.vars
+```
+
+Leave `RESEND_API_KEY` empty to keep the on-screen link.
+
+Magic-link tokens and session tokens are stored as SHA-256 hashes. The cookie is `HttpOnly` and `SameSite=Lax`. `Secure` is set when the site is served over HTTPS. Links expire in 20 minutes and work once. Sessions last 30 days.
+
+## Deploy
+
+```bash
+npm run check
+npm test
+npx wrangler deploy
+```
+
+`APP_ENV` stays `production` on deploy, so magic links are emailed and are not printed on the page. Set `RESEND_API_KEY` first, or owners will see the generic "check your email" message and no mail will go out.
+
+Preview URLs are public unless you put access control in front of them.
+
+## Roles
+
+| Role | What they can see |
+| --- | --- |
+| Public | Logged-out visitor. Neighborhood page and emergency notices. No documents and no balances. |
+| Homeowner | Their own lots, invoices, payments, and messages. Current resident documents. |
+| Board member | Homeowner access, plus admin for this association only. |
+| Officer / manager | Same admin tools as the board in this phase. |
+
+Keep at least one active officer so the association cannot lock itself out of admin.
+
+A board member's dashboard still shows only their own lots. Other residents' balances are on the admin ledger, not on the personal dashboard.
+
+## Data model
+
+Migrations live in `migrations/`.
+
+- `associations`, `users`, `roles`, `memberships`
+- `properties` (lots) and `property_owners`
+- `assessments`, `invoices`, `payments` (amounts in cents; payments are recorded, not charged online)
+- `documents` and `document_versions` (`current_version_id` is what residents see; `visibility` is `residents` or `board`)
+- `announcements`, `events`, `faqs`, `board_contacts`
+- `messages` (private threads to the board)
+- `notifications` (portal notices)
+- `audit_log`
+- `magic_links`, `sessions`
+
+Every tenant-owned row carries `association_id`. Financial queries also require that association id, and homeowner queries join `property_owners` for the signed-in user. Staff queries are rejected unless the membership role is `board` or `officer` for that same association.
+
+Balance = non-void invoice amounts + late fees − recorded payments.
+
+## Scripts
+
+| Script | What it does |
+| --- | --- |
+| `npm run dev` | Local Worker with `APP_ENV=development` |
+| `npm run check` | Typecheck |
+| `npm test` | Unit tests for CSV parsing, money, access rules, and Central Time |
+| `npm run db:migrate:local` | Apply D1 migrations locally |
+| `npm run db:migrate:remote` | Apply D1 migrations to the bound remote database |
+| `npm run types` | Regenerate `worker-configuration.d.ts` after binding changes |
+| `npm run deploy` | `wrangler deploy` |
+
+## Project layout
+
+```text
+migrations/          D1 schema and Tango Mar seed
+samples/             Example owner CSV
+src/index.ts         Worker entry
+src/app.ts           Routes and session loading
+src/routes/          Public, auth, resident, and board handlers
+public/              Static files, including the Tango Mar header logo
+src/views/           Server-rendered HTML
+src/db.ts            Tenant-scoped queries
+src/lib/             CSV, money, tokens, access rules
+```

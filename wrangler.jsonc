@@ -1,0 +1,44 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "tango",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.01
+    }
+  },
+  // APP_ENV=production does not print magic links, except on localhost when email is not sent.
+  // `npm run dev` overrides APP_ENV to development.
+  // EMAIL_FROM must be a sender Resend will accept. onboarding@resend.dev is the Resend test sender.
+  "vars": {
+    "APP_ENV": "production",
+    "EMAIL_FROM": "Tango Mar <onboarding@resend.dev>"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tango",
+      // Replace database_id after `npx wrangler d1 create tango`.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "DOCS",
+      "bucket_name": "tango-documents"
+    }
+  ],
+  // Header logo and other public files. Matching URLs are served as assets; everything else hits the Worker.
+  "assets": {
+    "directory": "./public"
+  }
+}

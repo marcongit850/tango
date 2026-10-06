@@ -1,5 +1,15 @@
 import type { Hono } from "hono";
-import { findAssociationBySlug, findMembership, insertJoinRequest, listStaffContacts, notify, writeAudit } from "../db";
+import {
+  findAssociationBySlug,
+  findMembership,
+  insertJoinRequest,
+  joinRequestNoticeHref,
+  joinRequestNoticeTitle,
+  listStaffContacts,
+  notify,
+  retireLegacyJoinNotices,
+  writeAudit,
+} from "../db";
 import { isAdmin, safeNextPath } from "../lib/access";
 import { resendApiKey, sendResendEmail } from "../lib/email";
 import { NotFoundError, isMissingTable } from "../lib/errors";
@@ -82,14 +92,15 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
         detail: name,
       });
       const staff = await listStaffContacts(c.env.DB, association.id);
+      await retireLegacyJoinNotices(c.env.DB, association.id, { name, email });
       for (const person of staff) {
         await notify(c.env.DB, {
           associationId: association.id,
           userId: person.user_id,
           kind: "join_request",
-          title: `Join request from ${name}`,
+          title: joinRequestNoticeTitle(name),
           body: email,
-          href: `/a/${association.slug}/admin/join-requests`,
+          href: joinRequestNoticeHref(association.slug, id),
         });
       }
       const apiKey = resendApiKey(c.env);

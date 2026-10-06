@@ -1,4 +1,4 @@
-import { findMembership, findUserByEmail } from "../db";
+import { clearJoinRequestNotices, findMembership, findUserByEmail } from "../db";
 import type { MembershipRole } from "../types";
 
 const LOGIN_URL = "https://mytangomar.com/login";
@@ -256,6 +256,7 @@ export async function approveJoinRequest(
 
   const user = await findUserByEmail(db, email);
   if (!user) throw new Error("Join approval did not create a user.");
+  await clearJoinRequestNotices(db, input.associationId, { id: request.id, name: request.name, email: request.email });
 
   let lot: LotOutcome;
   if (lotPlan.kind === "already") lot = { kind: "already", lotNumber: lotPlan.lotNumber };

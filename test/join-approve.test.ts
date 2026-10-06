@@ -12,8 +12,21 @@ import {
   welcomeEmail,
   type LotCandidate,
 } from "../src/lib/join-approve";
+import {
+  countPendingJoinRequests,
+  declineJoinRequest,
+  deleteJoinRequest,
+  joinRequestNoticeHref,
+  joinRequestNoticeTitle,
+  listJoinRequests,
+  notificationsForUser,
+  retireLegacyJoinNotices,
+  reviewJoinRequest,
+  unreadCount,
+} from "../src/db";
 import type { Association } from "../src/types";
-import { joinRequestsPage, ownersPage } from "../src/views/admin";
+import { adminHome, joinRequestsPage, ownersPage } from "../src/views/admin";
+import { dashboardPage, noticesPage } from "../src/views/resident";
 
 const ASSOCIATION = "assoc_tango_mar";
 
@@ -88,6 +101,27 @@ function insertRequest(
        VALUES (?, ?, ?, ?, ?, '', ?, '2026-10-06T12:00:00Z')`,
     )
     .run(row.id, ASSOCIATION, row.name, row.email, row.address ?? "", row.status ?? "pending");
+}
+
+function openPortalWithoutJoinTable(): { sqlite: DatabaseSync; db: D1Database } {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec("PRAGMA foreign_keys = ON");
+  for (const file of ["migrations/0001_schema.sql", "migrations/0002_seed_tango_mar.sql"]) {
+    sqlite.exec(readFileSync(file, "utf8"));
+  }
+  return { sqlite, db: new SqliteD1(sqlite) as unknown as D1Database };
+}
+
+function insertNotice(
+  sqlite: DatabaseSync,
+  row: { id: string; kind: string; title: string; body: string; href: string; userId?: string },
+): void {
+  sqlite
+    .prepare(
+      `INSERT INTO notifications (id, association_id, user_id, kind, title, body, href, read_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, '2026-10-06T12:00:00Z')`,
+    )
+    .run(row.id, ASSOCIATION, row.userId ?? "user_jordan", row.kind, row.title, row.body, row.href);
 }
 
 function count(sqlite: DatabaseSync, sql: string, ...params: (string | number)[]): number {
@@ -450,6 +484,268 @@ describe("login email", () => {
     expect(sqlite.prepare("SELECT email FROM users WHERE id = 'user_sam'").get()).toEqual({
       email: "sam.rivera@example.com",
     });
+    sqlite.close();
+  });
+});
+
+describe("pending join requests and notices", () => {
+  const association: Association = {
+    id: ASSOCIATION,
+    slug: "tango-mar",
+    name: "Tango Mar",
+    legal_name: "Tango Mar Property Owners Association",
+    address_line1: "31 Tang O Mar Drive",
+    city: "Miramar Beach",
+    state: "FL",
+    postal_code: "32550",
+    county: "Walton County",
+    timezone: "America/Chicago",
+  };
+
+  async function titles(db: D1Database): Promise<string[]> {
+    const rows = await notificationsForUser(db, ASSOCIATION, "user_jordan");
+    return rows.map((row) => row.title);
+  }
+
+  it("keeps a pending request on the dashboard, notices, and unread badge", async () => {
+    const { sqlite, db } = openPortal();
+    insertRequest(sqlite, { id: "jr-pat", name: "Pat", email: "pat@example.com" });
+    insertNotice(sqlite, {
+      id: "note-pat",
+      kind: "join_request",
+      title: joinRequestNoticeTitle("Pat"),
+      body: "pat@example.com",
+      href: "/a/tango-mar/admin/join-requests",
+    });
+    expect(await countPendingJoinRequests(db, ASSOCIATION)).toBe(1);
+    expect(await titles(db)).toContain("Join request from Pat");
+    const notices = noticesPage(association, await notificationsForUser(db, ASSOCIATION, "user_jordan"));
+    const dashboard = dashboardPage({
+      association,
+      name: "Jordan Lee",
+      ledger: [],
+      upcoming: [],
+      invoices: [],
+      payments: [],
+      notices: await notificationsForUser(db, ASSOCIATION, "user_jordan"),
+      emergencies: [],
+    });
+    expect(notices).toContain("Join request from Pat");
+    expect(dashboard).toContain("Join request from Pat");
+    expect(await unreadCount(db, ASSOCIATION, "user_jordan")).toBeGreaterThan(0);
+    sqlite.close();
+  });
+
+  it("removes a deleted request from the pending count, notices, dashboard, and badge", async () => {
+    const { sqlite, db } = openPortal();
+    insertRequest(sqlite, { id: "jr-pat", name: "Pat", email: "pat@example.com" });
+    insertRequest(sqlite, { id: "jr-sam", name: "Sam", email: "sam@example.com" });
+    insertNotice(sqlite, {
+      id: "note-pat",
+      kind: "join_request",
+      title: joinRequestNoticeTitle("Pat"),
+      body: "pat@example.com",
+      href: "/a/tango-mar/admin/join-requests",
+    });
+    insertNotice(sqlite, {
+      id: "note-sam",
+      kind: "join_request",
+      title: joinRequestNoticeTitle("Sam"),
+      body: "sam@example.com",
+      href: joinRequestNoticeHref("tango-mar", "jr-sam"),
+    });
+    insertNotice(sqlite, {
+      id: "note-dues",
+      kind: "account",
+      title: "Dues reminder",
+      body: "Please mail a check.",
+      href: "/a/tango-mar/notices",
+    });
+    const before = await unreadCount(db, ASSOCIATION, "user_jordan");
+
+    expect(await deleteJoinRequest(db, ASSOCIATION, "jr-pat")).toBe(true);
+    expect(await countPendingJoinRequests(db, ASSOCIATION)).toBe(1);
+    expect((await listJoinRequests(db, ASSOCIATION)).map((row) => row.id)).toEqual(["jr-sam"]);
+    expect(sqlite.prepare("SELECT id FROM notifications WHERE id = 'note-pat'").get()).toBeUndefined();
+    expect(await titles(db)).not.toContain("Join request from Pat");
+    expect(await titles(db)).toContain("Join request from Sam");
+    expect(await titles(db)).toContain("Dues reminder");
+    const listed = await notificationsForUser(db, ASSOCIATION, "user_jordan");
+    const notices = noticesPage(association, listed);
+    const dashboard = dashboardPage({
+      association,
+      name: "Jordan Lee",
+      ledger: [],
+      upcoming: [],
+      invoices: [],
+      payments: [],
+      notices: listed,
+      emergencies: [],
+    });
+    expect(notices).not.toContain("Join request from Pat");
+    expect(dashboard).not.toContain("Join request from Pat");
+    expect(notices).toContain("Join request from Sam");
+    expect(await unreadCount(db, ASSOCIATION, "user_jordan")).toBe(before - 1);
+    const home = adminHome({
+      association,
+      lots: 3,
+      members: 1,
+      delinquent: 0,
+      waiting: 0,
+      pendingJoins: await countPendingJoinRequests(db, ASSOCIATION),
+      audit: [],
+    });
+    expect(home).toContain("Join requests waiting");
+    expect(home).not.toContain("Pat");
+    sqlite.close();
+  });
+
+  it("hides a notice whose request was already deleted, and does not count declined, reviewed, or approved", async () => {
+    const { sqlite, db } = openPortal();
+    insertRequest(sqlite, { id: "jr-no", name: "Noe", email: "noe@example.com", status: "declined" });
+    insertRequest(sqlite, { id: "jr-rae", name: "Rae", email: "rae@example.com", status: "reviewed" });
+    insertRequest(sqlite, { id: "jr-ada", name: "Ada", email: "ada@example.com", status: "approved" });
+    insertNotice(sqlite, {
+      id: "note-gone",
+      kind: "join_request",
+      title: joinRequestNoticeTitle("Pat"),
+      body: "pat@example.com",
+      href: "/a/tango-mar/admin/join-requests",
+    });
+    insertNotice(sqlite, {
+      id: "note-noe",
+      kind: "join_request",
+      title: joinRequestNoticeTitle("Noe"),
+      body: "noe@example.com",
+      href: "/a/tango-mar/admin/join-requests",
+    });
+    insertNotice(sqlite, {
+      id: "note-rae",
+      kind: "join_request",
+      title: joinRequestNoticeTitle("Rae"),
+      body: "rae@example.com",
+      href: joinRequestNoticeHref("tango-mar", "jr-rae"),
+    });
+    insertNotice(sqlite, {
+      id: "note-ada",
+      kind: "join_request",
+      title: joinRequestNoticeTitle("Ada"),
+      body: "ada@example.com",
+      href: joinRequestNoticeHref("tango-mar", "jr-ada"),
+    });
+    expect(await countPendingJoinRequests(db, ASSOCIATION)).toBe(0);
+    const shown = await titles(db);
+    expect(shown).not.toContain("Join request from Pat");
+    expect(shown).not.toContain("Join request from Noe");
+    expect(shown).not.toContain("Join request from Rae");
+    expect(shown).not.toContain("Join request from Ada");
+    const unread = await unreadCount(db, ASSOCIATION, "user_jordan");
+    expect(unread).toBe(count(sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE user_id = 'user_jordan' AND kind != 'join_request' AND read_at IS NULL"));
+    sqlite.close();
+  });
+
+  it("clears the notice when a request is declined, reviewed, or approved", async () => {
+    const { sqlite, db } = openPortal();
+    insertRequest(sqlite, { id: "jr-no", name: "Noe", email: "noe@example.com" });
+    insertRequest(sqlite, { id: "jr-rae", name: "Rae", email: "rae@example.com" });
+    insertRequest(sqlite, { id: "jr-pat", name: "Pat Example", email: "pat@example.com" });
+    insertNotice(sqlite, {
+      id: "note-noe",
+      kind: "join_request",
+      title: joinRequestNoticeTitle("Noe"),
+      body: "noe@example.com",
+      href: "/a/tango-mar/admin/join-requests",
+    });
+    insertNotice(sqlite, {
+      id: "note-rae",
+      kind: "join_request",
+      title: joinRequestNoticeTitle("Rae"),
+      body: "rae@example.com",
+      href: joinRequestNoticeHref("tango-mar", "jr-rae"),
+    });
+    insertNotice(sqlite, {
+      id: "note-pat",
+      kind: "join_request",
+      title: joinRequestNoticeTitle("Pat Example"),
+      body: "pat@example.com",
+      href: joinRequestNoticeHref("tango-mar", "jr-pat"),
+    });
+
+    expect(await declineJoinRequest(db, ASSOCIATION, "jr-no")).toBe(true);
+    expect(sqlite.prepare("SELECT status FROM join_requests WHERE id = 'jr-no'").get()).toEqual({ status: "declined" });
+    expect(sqlite.prepare("SELECT id FROM notifications WHERE id = 'note-noe'").get()).toBeUndefined();
+    expect(await countPendingJoinRequests(db, ASSOCIATION)).toBe(2);
+
+    expect(await reviewJoinRequest(db, ASSOCIATION, "jr-rae")).toBe(true);
+    expect(sqlite.prepare("SELECT id FROM notifications WHERE id = 'note-rae'").get()).toBeUndefined();
+    expect(await countPendingJoinRequests(db, ASSOCIATION)).toBe(1);
+
+    const approved = await approveJoinRequest(db, { associationId: ASSOCIATION, requestId: "jr-pat" });
+    expect(approved).toMatchObject({ ok: true });
+    expect(sqlite.prepare("SELECT id FROM notifications WHERE id = 'note-pat'").get()).toBeUndefined();
+    expect(await countPendingJoinRequests(db, ASSOCIATION)).toBe(0);
+    expect(await titles(db)).not.toContain("Join request from Noe");
+    expect(await titles(db)).not.toContain("Join request from Rae");
+    expect(await titles(db)).not.toContain("Join request from Pat Example");
+    sqlite.close();
+  });
+
+  it("does not drop another pending request that shares an id prefix", async () => {
+    const { sqlite, db } = openPortal();
+    insertRequest(sqlite, { id: "jr-pat", name: "Pat", email: "pat@example.com" });
+    insertRequest(sqlite, { id: "jr-pat-extra", name: "Pat Extra", email: "extra@example.com" });
+    insertNotice(sqlite, {
+      id: "note-pat",
+      kind: "join_request",
+      title: joinRequestNoticeTitle("Pat"),
+      body: "pat@example.com",
+      href: joinRequestNoticeHref("tango-mar", "jr-pat"),
+    });
+    insertNotice(sqlite, {
+      id: "note-extra",
+      kind: "join_request",
+      title: joinRequestNoticeTitle("Pat Extra"),
+      body: "extra@example.com",
+      href: joinRequestNoticeHref("tango-mar", "jr-pat-extra"),
+    });
+    expect(await deleteJoinRequest(db, ASSOCIATION, "jr-pat")).toBe(true);
+    expect(sqlite.prepare("SELECT id FROM notifications WHERE id = 'note-pat'").get()).toBeUndefined();
+    expect(sqlite.prepare("SELECT id FROM notifications WHERE id = 'note-extra'").get()).toEqual({ id: "note-extra" });
+    expect(await titles(db)).toEqual(expect.arrayContaining(["Join request from Pat Extra"]));
+    expect(await titles(db)).not.toContain("Join request from Pat");
+    expect(await countPendingJoinRequests(db, ASSOCIATION)).toBe(1);
+    sqlite.close();
+  });
+
+  it("replaces an old notice when the same person asks again", async () => {
+    const { sqlite, db } = openPortal();
+    insertNotice(sqlite, {
+      id: "note-old",
+      kind: "join_request",
+      title: joinRequestNoticeTitle("Pat"),
+      body: "pat@example.com",
+      href: "/a/tango-mar/admin/join-requests",
+    });
+    await retireLegacyJoinNotices(db, ASSOCIATION, { name: "Pat", email: "pat@example.com" });
+    insertRequest(sqlite, { id: "jr-new", name: "Pat", email: "pat@example.com" });
+    insertNotice(sqlite, {
+      id: "note-new",
+      kind: "join_request",
+      title: joinRequestNoticeTitle("Pat"),
+      body: "pat@example.com",
+      href: joinRequestNoticeHref("tango-mar", "jr-new"),
+    });
+    expect(sqlite.prepare("SELECT id FROM notifications WHERE id = 'note-old'").get()).toBeUndefined();
+    expect(await titles(db)).toContain("Join request from Pat");
+    expect(await countPendingJoinRequests(db, ASSOCIATION)).toBe(1);
+    sqlite.close();
+  });
+
+  it("still lists ordinary notices when the join request table is missing", async () => {
+    const { sqlite, db } = openPortalWithoutJoinTable();
+    const shown = await titles(db);
+    expect(shown).toContain("New message from Casey Nguyen");
+    expect(await unreadCount(db, ASSOCIATION, "user_jordan")).toBeGreaterThan(0);
     sqlite.close();
   });
 });

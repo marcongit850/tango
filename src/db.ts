@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import type { LotType } from "./lib/dues";
 import { lotsToInvoice } from "./lib/dues";
+import { isMissingTable } from "./lib/errors";
 import { balanceCents, invoiceStatus, isDelinquent } from "./lib/money";
 
 async function hasColumn(db: D1Database, table: "memberships" | "properties" | "assessments", column: string): Promise<boolean> {
@@ -455,32 +456,136 @@ export type NoticeRow = {
   created_at: string;
 };
 
+const JOIN_NOTICE_PREFIX = "Join request from ";
+
+export function joinRequestNoticeTitle(name: string): string {
+  return `${JOIN_NOTICE_PREFIX}${name}`;
+}
+
+export function joinRequestNoticeHref(slug: string, requestId: string): string {
+  return `/a/${slug}/admin/join-requests?request=${requestId}`;
+}
+
+// A join-request notice is still pending only when a pending join_requests row matches it.
+// Newer notices carry the request id in the href. Older notices match the stored name and email.
+const OPEN_JOIN_NOTICE = `(
+  notifications.kind != 'join_request'
+  OR (
+    instr(notifications.href || '&', 'request=') > 0
+    AND EXISTS (
+      SELECT 1 FROM join_requests jr
+      WHERE jr.association_id = notifications.association_id
+        AND jr.status = 'pending'
+        AND instr(notifications.href || '&', 'request=' || jr.id || '&') > 0
+    )
+  )
+  OR (
+    instr(notifications.href, 'request=') = 0
+    AND EXISTS (
+      SELECT 1 FROM join_requests jr
+      WHERE jr.association_id = notifications.association_id
+        AND jr.status = 'pending'
+        AND jr.email = notifications.body
+        AND notifications.title = '${JOIN_NOTICE_PREFIX}' || jr.name
+    )
+  )
+)`;
+
+async function withOpenJoinNotices<T>(filtered: () => Promise<T>, plain: () => Promise<T>): Promise<T> {
+  try {
+    return await filtered();
+  } catch (error) {
+    if (!isMissingTable(error)) throw error;
+    return await plain();
+  }
+}
+
 export async function notificationsForUser(
   db: D1Database,
   associationId: string,
   userId: string,
 ): Promise<NoticeRow[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT id, kind, title, body, href, read_at, created_at
-       FROM notifications
-       WHERE association_id = ? AND user_id = ?
-       ORDER BY created_at DESC
-       LIMIT 100`,
-    )
-    .bind(associationId, userId)
-    .all<NoticeRow>();
+  const load = (openOnly: boolean) => {
+    const filter = openOnly ? ` AND ${OPEN_JOIN_NOTICE}` : "";
+    return db
+      .prepare(
+        `SELECT id, kind, title, body, href, read_at, created_at
+         FROM notifications
+         WHERE association_id = ? AND user_id = ?${filter}
+         ORDER BY created_at DESC
+         LIMIT 100`,
+      )
+      .bind(associationId, userId)
+      .all<NoticeRow>();
+  };
+  const { results } = await withOpenJoinNotices(
+    () => load(true),
+    () => load(false),
+  );
   return results;
 }
 
 export async function unreadCount(db: D1Database, associationId: string, userId: string): Promise<number> {
-  const row = await db
-    .prepare(
-      "SELECT COUNT(*) AS n FROM notifications WHERE association_id = ? AND user_id = ? AND read_at IS NULL",
-    )
-    .bind(associationId, userId)
-    .first<{ n: number }>();
+  const load = (openOnly: boolean) => {
+    const filter = openOnly ? ` AND ${OPEN_JOIN_NOTICE}` : "";
+    return db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM notifications
+         WHERE association_id = ? AND user_id = ? AND read_at IS NULL${filter}`,
+      )
+      .bind(associationId, userId)
+      .first<{ n: number }>();
+  };
+  const row = await withOpenJoinNotices(
+    () => load(true),
+    () => load(false),
+  );
   return Number(row?.n ?? 0);
+}
+
+type JoinNoticeTarget = { id: string; name: string; email: string };
+
+async function joinNoticeTarget(db: D1Database, associationId: string, requestId: string): Promise<JoinNoticeTarget | null> {
+  return db
+    .prepare("SELECT id, name, email FROM join_requests WHERE association_id = ? AND id = ?")
+    .bind(associationId, requestId)
+    .first<JoinNoticeTarget>();
+}
+
+export async function retireLegacyJoinNotices(
+  db: D1Database,
+  associationId: string,
+  request: { name: string; email: string },
+): Promise<void> {
+  await db
+    .prepare(
+      `DELETE FROM notifications
+       WHERE association_id = ? AND kind = 'join_request'
+         AND instr(href, 'request=') = 0
+         AND body = ? AND title = ?`,
+    )
+    .bind(associationId, request.email, joinRequestNoticeTitle(request.name))
+    .run();
+}
+
+export async function clearJoinRequestNotices(db: D1Database, associationId: string, request: JoinNoticeTarget): Promise<void> {
+  await db
+    .prepare(
+      `DELETE FROM notifications
+       WHERE association_id = ? AND kind = 'join_request'
+         AND instr(href || '&', 'request=' || ? || '&') > 0`,
+    )
+    .bind(associationId, request.id)
+    .run();
+  const pending = await db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM join_requests
+       WHERE association_id = ? AND status = 'pending' AND email = ? AND name = ?`,
+    )
+    .bind(associationId, request.email, request.name)
+    .first<{ n: number }>();
+  if (Number(pending?.n ?? 0) > 0) return;
+  await retireLegacyJoinNotices(db, associationId, request);
 }
 
 export type AnnouncementRow = {
@@ -863,29 +968,41 @@ export async function countPendingJoinRequests(db: D1Database, associationId: st
 }
 
 export async function reviewJoinRequest(db: D1Database, associationId: string, requestId: string): Promise<boolean> {
+  const request = await joinNoticeTarget(db, associationId, requestId);
+  if (!request) return false;
   const result = await db
     .prepare("UPDATE join_requests SET status = 'reviewed' WHERE association_id = ? AND id = ? AND status = 'pending'")
     .bind(associationId, requestId)
     .run();
-  return (result.meta.changes ?? 0) > 0;
+  if ((result.meta.changes ?? 0) === 0) return false;
+  await clearJoinRequestNotices(db, associationId, request);
+  return true;
 }
 
 export async function declineJoinRequest(db: D1Database, associationId: string, requestId: string): Promise<boolean> {
+  const request = await joinNoticeTarget(db, associationId, requestId);
+  if (!request) return false;
   const result = await db
     .prepare(
       "UPDATE join_requests SET status = 'declined' WHERE association_id = ? AND id = ? AND status IN ('pending', 'reviewed')",
     )
     .bind(associationId, requestId)
     .run();
-  return (result.meta.changes ?? 0) > 0;
+  if ((result.meta.changes ?? 0) === 0) return false;
+  await clearJoinRequestNotices(db, associationId, request);
+  return true;
 }
 
 export async function deleteJoinRequest(db: D1Database, associationId: string, requestId: string): Promise<boolean> {
+  const request = await joinNoticeTarget(db, associationId, requestId);
+  if (!request) return false;
   const result = await db
     .prepare("DELETE FROM join_requests WHERE association_id = ? AND id = ?")
     .bind(associationId, requestId)
     .run();
-  return (result.meta.changes ?? 0) > 0;
+  if ((result.meta.changes ?? 0) === 0) return false;
+  await clearJoinRequestNotices(db, associationId, request);
+  return true;
 }
 
 export async function staffUserIds(db: D1Database, associationId: string): Promise<string[]> {

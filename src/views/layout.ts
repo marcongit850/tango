@@ -6,6 +6,10 @@ import type { Context } from "hono";
 
 type AppContext = Context<AppBindings>;
 
+const FONTS = `<link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Instrument+Serif:ital@0;1&display=swap">`;
+
 const STYLES = `
 :root {
   --sand: #f4efe6;
@@ -20,7 +24,9 @@ const STYLES = `
   --warn: #8a5a12;
   --emergency: #f8e4e1;
   --shadow: 0 1px 0 rgba(28, 40, 48, 0.04);
-  font-family: "Segoe UI", system-ui, sans-serif;
+  --sans: "DM Sans", "Segoe UI", system-ui, sans-serif;
+  --serif: "Instrument Serif", Georgia, "Iowan Old Style", Palatino, serif;
+  font-family: var(--sans);
   color: var(--ink);
   background: var(--sand);
 }
@@ -51,7 +57,8 @@ main { padding-bottom: 2.5rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
 a.card { color: inherit; text-decoration: none; display: block; }
 a.card:hover, a.card:focus { border-color: var(--gulf); }
-h1, h2, h3 { font-family: Georgia, "Iowan Old Style", Palatino, serif; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h1, h2, h3 { font-family: var(--serif); font-weight: 400; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+button, .button, nav, label, input, select, textarea, th { font-family: var(--sans); }
 h1 { font-size: 2rem; }
 .muted { color: var(--muted); }
 .flash { padding: 0.75rem 1rem; border-radius: 12px; background: #e7f4ee; color: var(--ok); }
@@ -147,7 +154,7 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
 .shore h1 {
   color: #1a2744;
   font-size: clamp(1.85rem, 4vw, 2.55rem);
-  font-weight: 560;
+  font-weight: 400;
   margin: 0 0 0.3rem;
 }
 .shore .place { margin: 0 0 0.4rem; font-size: 1rem; }
@@ -200,6 +207,7 @@ function shell(options: {
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" href="/favicon.png" type="image/png">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  ${FONTS}
   <style>${STYLES}</style>
 </head>
 <body class="landing">
@@ -219,6 +227,7 @@ function shell(options: {
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" href="/favicon.png" type="image/png">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  ${FONTS}
   <style>${STYLES}</style>
 </head>
 <body>

@@ -172,9 +172,9 @@ export function ownersPage(
     </section>
     <section class="panel" id="logins">
       <h2>${delinquentOnly ? "Delinquent accounts" : "Logins"}</h2>
-      <p class="actions">
-        <a class="button ${delinquentOnly ? "secondary" : ""}" href="/a/${esc(association.slug)}/admin/owners#logins">All owners</a>
-        <a class="button ${delinquentOnly ? "" : "secondary"}" href="/a/${esc(association.slug)}/admin/owners?delinquent=1#logins">Delinquent</a>
+      <p class="filters">
+        <a ${delinquentOnly ? "" : `class="active"`} href="/a/${esc(association.slug)}/admin/owners#logins">Everyone</a>
+        <a ${delinquentOnly ? `class="active"` : ""} href="/a/${esc(association.slug)}/admin/owners?delinquent=1#logins">Past due only</a>
       </p>
       ${rows ? `<table><thead><tr><th>Person</th><th>Role</th><th>Status</th><th>Lot</th><th>Balance</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No matching accounts.")}
     </section>`;
@@ -592,7 +592,7 @@ export function joinRequestsPage(association: Association, rows: JoinRequestRow[
   return `${adminNav(association.slug, "joins")}
     <section class="panel">
       <h1>Join requests</h1>
-      <p class="muted">People who asked to join from the public home page. Approve creates or reuses a homeowner login and sends a welcome email. Decline marks the request declined and does not create a login. Delete removes the request. Mark reviewed when you are not ready to decide. A lot is linked only when the address matches one lot that has no owner.</p>
+      <p class="muted">Approve creates a login and sends a welcome email. Decline does not. Delete removes the request. A lot links only if the address matches one empty lot.</p>
       ${body ? `<table><thead><tr><th>Received</th><th>Person</th><th>Address or lot</th><th>Note</th><th>Status</th><th></th></tr></thead><tbody>${body}</tbody></table>` : empty("No join requests yet.")}
     </section>`;
 }
@@ -612,7 +612,7 @@ function joinRequestActions(slug: string, row: JoinRequestRow): string {
       ? `<form method="post" action="${base}/reviewed"><button class="secondary" type="submit">Mark reviewed</button></form>`
       : "";
   const remove = `<form method="post" action="${base}/delete" onsubmit="return confirm('Delete this join request? This cannot be undone.')"><input type="hidden" name="confirm" value="yes"><button class="secondary" type="submit">Delete</button></form>`;
-  return `<div class="actions">${approve}${decline}${review}${remove}</div>`;
+  return `<div class="actions join-actions">${approve}${decline}${review}${remove}</div>`;
 }
 
 function joinStatusLabel(status: string): string {

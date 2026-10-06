@@ -73,6 +73,11 @@ textarea { min-height: 7rem; }
 form.fields { display: grid; gap: 0.75rem; }
 .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
 .actions form { display: flex; align-items: center; margin: 0; }
+.join-actions { flex-wrap: nowrap; }
+.join-actions form { flex: 0 0 auto; }
+.filters { display: flex; flex-wrap: wrap; gap: 0.15rem 0.9rem; margin: 0 0 0.75rem; font-size: 0.88rem; }
+.filters a { color: var(--muted); text-decoration: none; padding-bottom: 0.1rem; }
+.filters a.active { color: var(--gulf); box-shadow: inset 0 -2px 0 var(--gulf); }
 .badge { display: inline-block; border-radius: 999px; padding: 0.05rem 0.5rem; background: #e7eeed; color: var(--gulf-dark); font-size: 0.82rem; }
 .badge.late { background: var(--emergency); color: var(--late); }
 .devbox { border: 1px dashed var(--gulf); border-radius: 12px; padding: 0.8rem 1rem; background: #f3faf8; }

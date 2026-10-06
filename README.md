@@ -24,7 +24,7 @@ Moderated forum, online card or ACH payments, ARC or other request workflows, SM
 
 - Cloudflare Workers
 - D1 for the database (`DB` binding, database name `tango`)
-- R2 for document files (`DOCS` binding, bucket name `tango-documents`)
+- R2 for document files (`DOCUMENTS` binding, bucket name `tango-documents`)
 - [Resend](https://resend.com) for magic-link email when `RESEND_API_KEY` is set
 
 Local development works without Resend. On `localhost`, or when `APP_ENV` is `development`, a sign-in link that could not be emailed is shown on the next page.
@@ -93,29 +93,9 @@ Importing the sample file onto the seed data adds Quinn Harper (board, Lot 41, $
 
 ## Create D1 and bind it
 
-From the Cloudflare account that should own the Worker:
+`wrangler.jsonc` binds `DB` to the existing D1 database `tango` (`d3f6cfd2-cae0-42ef-843f-b5465efebd2b`).
 
-```bash
-npx wrangler login
-npx wrangler d1 create tango
-```
-
-Copy the `database_id` from that command into `wrangler.jsonc`:
-
-```jsonc
-"d1_databases": [
-  {
-    "binding": "DB",
-    "database_name": "tango",
-    "database_id": "<database_id from wrangler d1 create>",
-    "migrations_dir": "migrations"
-  }
-]
-```
-
-The placeholder `00000000-0000-0000-0000-000000000000` is only for local migrations. Replace it before a remote deploy.
-
-Apply the schema and the Tango Mar seed to the remote database:
+Apply the schema and the Tango Mar seed to that remote database:
 
 ```bash
 npm run db:migrate:remote
@@ -131,7 +111,7 @@ Document bytes live in R2. The database stores the version metadata and the obje
 npx wrangler r2 bucket create tango-documents
 ```
 
-The binding name in `wrangler.jsonc` is `DOCS`, and the bucket name is `tango-documents`. Local `wrangler dev` uses a simulated bucket, so this command is only required before deploy.
+The binding name in `wrangler.jsonc` is `DOCUMENTS`, and the bucket name is `tango-documents`. Local `wrangler dev` uses a simulated bucket, so this command is only required before deploy.
 
 The seed covenants and budget are placeholder text, not the recorded documents. The Worker writes those sample files into R2 the first time someone opens Documents. Replace them by uploading a new version and marking it current. Residents then see the new file. Older versions stay available to the board.
 

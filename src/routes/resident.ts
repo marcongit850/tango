@@ -123,7 +123,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
 
   app.get("/a/:slug/documents", async (c) => {
     const { association, membership } = requireMember(c);
-    await ensureSeedFiles(c.env.DOCS, c.env.DB);
+    await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
     const documents = await listDocuments(c.env.DB, association.id, isStaff(membership.role_id));
     return render(c, { title: "Documents", active: "documents", body: documentsPage(association, documents) });
   });
@@ -322,8 +322,8 @@ async function streamCurrent(c: AppContext, association: Association, role: Memb
   if (document.visibility === "board" && !isStaff(role)) throw new ForbiddenError();
   const version = await versionById(c.env.DB, association.id, document.current_version_id);
   if (!version || version.document_id !== document.id) throw new NotFoundError();
-  await ensureSeedFiles(c.env.DOCS, c.env.DB);
-  const object = await c.env.DOCS.get(version.r2_key);
+  await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
+  const object = await c.env.DOCUMENTS.get(version.r2_key);
   if (!object) throw new NotFoundError();
   const headers = new Headers();
   object.writeHttpMetadata(headers);

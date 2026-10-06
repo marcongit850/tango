@@ -1,0 +1,198 @@
+import type { Hono } from "hono";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import { findAssociationBySlug, findMembership, findUserByEmail, writeAudit } from "../db";
+import { shouldRevealMagicLink, safeNextPath } from "../lib/access";
+import { formatPlace } from "../lib/dates";
+import { resendApiKey, sendResendEmail } from "../lib/email";
+import { isHttps } from "../lib/html";
+import { logInfo } from "../lib/log";
+import { randomToken, sha256Hex } from "../lib/tokens";
+import type { AppBindings } from "../types";
+import { render } from "../views/layout";
+import { checkEmailPage, invalidLinkPage, loginPage } from "../views/public";
+import { readForm, redirectTo, requireAssociation, textValue, type AppContext } from "./common";
+
+const LINK_MINUTES = 20;
+const SESSION_SECONDS = 60 * 60 * 24 * 30;
+
+export function registerAuthRoutes(app: Hono<AppBindings>): void {
+  app.post("/a/:slug/login", async (c) => {
+    const association = requireAssociation(c);
+    const fields = await readForm(c);
+    const email = textValue(fields, "email", 200).toLowerCase();
+    const nextPath = safeNextPath(association.slug, textValue(fields, "next", 300));
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return render(c, {
+        title: `Sign in · ${association.name}`,
+        active: "login",
+        status: 400,
+        body: loginPage(association, nextPath, "Enter the email address on the roster."),
+      });
+    }
+
+    const user = await findUserByEmail(c.env.DB, email);
+    const membership = user ? await findMembership(c.env.DB, association.id, user.id) : null;
+    let devLink: string | null = null;
+    if (user && membership && membership.status !== "inactive") {
+      devLink = await issueMagicLink(c, {
+        email,
+        associationId: association.id,
+        associationName: association.name,
+        place: formatPlace(association),
+        redirectPath: nextPath,
+      });
+    } else {
+      await sha256Hex(email);
+    }
+
+    return render(c, {
+      title: "Check your email",
+      active: "login",
+      body: checkEmailPage(association.name, devLink),
+    });
+  });
+
+  app.get("/auth/verify", async (c) => {
+    const token = c.req.query("token") ?? "";
+    if (!/^[a-f0-9]{64}$/.test(token)) return renderInvalid(c, null);
+    const tokenHash = await sha256Hex(token);
+    const now = new Date().toISOString();
+    const link = await c.env.DB
+      .prepare(
+        `SELECT id, email, association_id, redirect_path, expires_at, used_at
+         FROM magic_links WHERE token_hash = ?`,
+      )
+      .bind(tokenHash)
+      .first<{
+        id: string;
+        email: string;
+        association_id: string | null;
+        redirect_path: string;
+        expires_at: string;
+        used_at: string | null;
+      }>();
+    if (!link || link.used_at || link.expires_at <= now) return renderInvalid(c, link?.association_id ?? null);
+
+    const consumed = await c.env.DB
+      .prepare("UPDATE magic_links SET used_at = ? WHERE id = ? AND used_at IS NULL")
+      .bind(now, link.id)
+      .run();
+    if ((consumed.meta.changes ?? 0) === 0) return renderInvalid(c, link.association_id);
+
+    const user = await findUserByEmail(c.env.DB, link.email);
+    if (!user) return renderInvalid(c, link.association_id);
+    await c.env.DB.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").bind(now, user.id).run();
+
+    let destination = "/";
+    if (link.association_id) {
+      const association = await c.env.DB
+        .prepare("SELECT id, slug FROM associations WHERE id = ?")
+        .bind(link.association_id)
+        .first<{ id: string; slug: string }>();
+      if (association) {
+        await c.env.DB
+          .prepare(
+            `UPDATE memberships SET status = 'active'
+             WHERE association_id = ? AND user_id = ? AND status = 'invited'`,
+          )
+          .bind(association.id, user.id)
+          .run();
+        destination = safeNextPath(association.slug, link.redirect_path || `/a/${association.slug}/dashboard`);
+        await writeAudit(c.env.DB, {
+          associationId: association.id,
+          actorUserId: user.id,
+          action: "login",
+          entityType: "user",
+          entityId: user.id,
+          detail: "Signed in with a magic link.",
+        });
+      }
+    }
+
+    const sessionToken = randomToken();
+    const expires = new Date(Date.now() + SESSION_SECONDS * 1000).toISOString();
+    await c.env.DB
+      .prepare("INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(crypto.randomUUID(), user.id, await sha256Hex(sessionToken), expires, now)
+      .run();
+    setCookie(c, "tango_session", sessionToken, {
+      path: "/",
+      httpOnly: true,
+      sameSite: "Lax",
+      secure: isHttps(c.req.url),
+      maxAge: SESSION_SECONDS,
+    });
+    logInfo("login", { associationId: link.association_id });
+    return c.redirect(destination, 303);
+  });
+
+  app.post("/logout", async (c) => {
+    await readForm(c);
+    const token = getCookie(c, "tango_session");
+    if (token) {
+      await c.env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256Hex(token)).run();
+    }
+    deleteCookie(c, "tango_session", { path: "/" });
+    return redirectTo(c, "/", "You are signed out.");
+  });
+}
+
+async function issueMagicLink(
+  c: AppContext,
+  input: { email: string; associationId: string; associationName: string; place: string; redirectPath: string },
+): Promise<string | null> {
+  const now = new Date();
+  await c.env.DB.prepare("DELETE FROM magic_links WHERE expires_at < ?").bind(now.toISOString()).run();
+  const token = randomToken();
+  const expires = new Date(now.getTime() + LINK_MINUTES * 60 * 1000).toISOString();
+  await c.env.DB
+    .prepare(
+      `INSERT INTO magic_links (id, email, association_id, token_hash, redirect_path, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(crypto.randomUUID(), input.email, input.associationId, await sha256Hex(token), input.redirectPath, expires, now.toISOString())
+    .run();
+
+  const url = new URL(c.req.url);
+  const link = `${url.origin}/auth/verify?token=${token}`;
+  const text = [
+    `Use this link to sign in to the ${input.associationName} owner portal.`,
+    `It expires in ${LINK_MINUTES} minutes and works once.`,
+    "",
+    link,
+    "",
+    "If you did not ask for this link, you can ignore this email.",
+    "",
+    `${input.associationName} is ${input.place.startsWith("Miramar") ? "a beach neighborhood in" : "located in"} ${input.place}.`,
+    "This portal is not legal advice.",
+  ].join("\n");
+
+  const apiKey = resendApiKey(c.env);
+  const sent = apiKey
+    ? await sendResendEmail({
+        apiKey,
+        from: c.env.EMAIL_FROM,
+        to: input.email,
+        subject: `Your ${input.associationName} sign-in link`,
+        text,
+      })
+    : false;
+  logInfo("magic_link_issued", { associationId: input.associationId, emailed: sent });
+  return shouldRevealMagicLink({ appEnv: `${c.env.APP_ENV}`, hostname: url.hostname, emailSent: sent }) ? link : null;
+}
+
+async function renderInvalid(c: AppContext, associationId: string | null): Promise<Response> {
+  let slug = "tango-mar";
+  if (associationId) {
+    const row = await c.env.DB.prepare("SELECT slug FROM associations WHERE id = ?").bind(associationId).first<{ slug: string }>();
+    if (row) slug = row.slug;
+  } else {
+    const fallback = await findAssociationBySlug(c.env.DB, "tango-mar");
+    if (!fallback) slug = "";
+  }
+  return render(c, {
+    title: "Link not valid",
+    status: 400,
+    body: slug ? invalidLinkPage(slug) : "<section class='panel'><h1>That link is not valid</h1></section>",
+  });
+}

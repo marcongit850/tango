@@ -1,0 +1,3 @@
+# Copy to .dev.vars for local secrets. Never commit .dev.vars.
+# Leave RESEND_API_KEY unset to use the on-screen magic link at http://localhost:8787.
+RESEND_API_KEY=

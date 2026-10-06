@@ -17,6 +17,11 @@ export function isMissingTable(error: unknown): boolean {
   return /no such table/i.test(message);
 }
 
+export function isCheckConstraint(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /check constraint failed/i.test(message);
+}
+
 export class RedirectError extends Error {
   readonly location: string;
 

@@ -38,7 +38,7 @@ import { parseOwnersCsv } from "../lib/csv";
 import { formatAddress, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../lib/dates";
 import { resendApiKey, sendResendEmail } from "../lib/email";
 import { approvalSummary, approveJoinRequest, welcomeEmail } from "../lib/join-approve";
-import { attachmentDisposition, contentTypeForUpload, MAX_CSV_BYTES, MAX_DOCUMENT_BYTES, safeFilename } from "../lib/files";
+import { applyDocumentResponseHeaders, contentTypeForUpload, MAX_CSV_BYTES, MAX_DOCUMENT_BYTES, safeFilename } from "../lib/files";
 import { importOwners } from "../lib/import-owners";
 import { csvText, formatDollarsPlain, formatMoney, parseMoneyToCents } from "../lib/money";
 import { ensureSeedFiles } from "../lib/seed-files";
@@ -918,10 +918,11 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     if (!object) throw new NotFoundError();
     const headers = new Headers();
     object.writeHttpMetadata(headers);
-    if (!headers.has("Content-Type")) headers.set("Content-Type", version.content_type);
-    headers.set("Content-Disposition", attachmentDisposition(version.filename));
-    headers.set("Cache-Control", "private, no-store");
-    headers.set("X-Content-Type-Options", "nosniff");
+    applyDocumentResponseHeaders(headers, {
+      filename: version.filename,
+      contentType: version.content_type,
+      download: c.req.query("download") === "1",
+    });
     return new Response(object.body, { headers });
   });
 

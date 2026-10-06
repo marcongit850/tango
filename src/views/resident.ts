@@ -13,7 +13,7 @@ import type {
 } from "../db";
 import { paragraphs, esc } from "../lib/html";
 import type { Association } from "../types";
-import { categoryCell, dateCell, dateTimeCell, empty, methodLabel, moneySpan, textField, areaField } from "./bits";
+import { categoryCell, dateCell, dateTimeCell, documentFileLinks, empty, methodLabel, moneySpan, textField, areaField } from "./bits";
 
 export function dashboardPage(options: {
   association: Association;
@@ -179,10 +179,10 @@ export function noticesPage(association: Association, notices: NoticeRow[]): str
 export function documentsPage(association: Association, documents: DocumentRow[]): string {
   const rows = documents
     .map((row) => {
-      const download = row.current_version_id
-        ? `<a href="/a/${esc(association.slug)}/documents/${esc(row.id)}/file">Download current</a>`
+      const file = row.current_version_id
+        ? documentFileLinks(`/a/${association.slug}/documents/${row.id}/file`, row.content_type)
         : "No file yet";
-      return `<tr><td>${categoryCell(row.category)}</td><td>${esc(row.title)}</td><td>${row.version_number ? `v${row.version_number}` : "—"}</td><td>${esc(row.filename ?? "")}</td><td>${download}</td></tr>`;
+      return `<tr><td>${categoryCell(row.category)}</td><td>${esc(row.title)}</td><td>${row.version_number ? `v${row.version_number}` : "—"}</td><td>${esc(row.filename ?? "")}</td><td>${file}</td></tr>`;
     })
     .join("");
   return `<section class="panel">
@@ -231,7 +231,14 @@ export function calendarPage(association: Association, events: EventRow[], zoneL
 }
 
 export function faqPage(faqs: FaqRow[]): string {
-  const items = faqs.map((faq) => `<article class="card"><h2>${esc(faq.question)}</h2>${paragraphs(faq.answer)}</article>`).join("");
+  const items = faqs
+    .map(
+      (faq) => `<details class="card faq">
+        <summary>${esc(faq.question)}</summary>
+        <div class="faq-answer">${paragraphs(faq.answer)}</div>
+      </details>`,
+    )
+    .join("");
   return `<section class="panel"><h1>FAQ</h1></section><section class="stack">${items || empty("No questions yet.")}</section>`;
 }
 

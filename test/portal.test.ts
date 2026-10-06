@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { canViewPropertyFinancials, isAdmin, keepsAnAdmin, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
 import { annualDues, defaultDuesYear, lotsToInvoice } from "../src/lib/dues";
 import { landingAccount, loggedOutNav } from "../src/views/layout";
-import { newsAdminPage, ownerDetailPage } from "../src/views/admin";
+import { documentDetailPage, newsAdminPage, ownerDetailPage } from "../src/views/admin";
 import { newsEdit } from "../src/routes/admin";
-import type { AnnouncementRow, EventRow } from "../src/db";
+import type { AnnouncementRow, DocumentRow, EventRow, VersionRow } from "../src/db";
+import { documentContentDisposition, isBrowserViewable } from "../src/lib/files";
+import { documentsPage, faqPage } from "../src/views/resident";
 import { checkEmailPage, homePage, invalidLinkPage, joinReceivedPage, joinRequestPage, loginPage } from "../src/views/public";
 import type { OwnerListRow } from "../src/db";
 import type { Association } from "../src/types";
@@ -400,6 +402,117 @@ describe("news admin", () => {
     expect(newsEdit("faq", "missing", [], [], [], [], association.timezone)).toBeNull();
     expect(newsEdit("", "ann-1", [announcement], [], [], [], association.timezone)).toBeNull();
     expect(newsEdit("announcement", "", [announcement], [], [], [], association.timezone)).toBeNull();
+  });
+});
+
+describe("resident FAQ", () => {
+  it("keeps questions visible and puts answers behind a disclosure", () => {
+    const html = faqPage([
+      { id: "faq-1", question: "Where is the gate?", answer: "On the north side.\n\nLatch it behind you.", sort_order: 1 },
+      { id: "faq-2", question: "Who <pays> dues?", answer: "Each lot.", sort_order: 2 },
+    ]);
+    expect(html).toContain("<h1>FAQ</h1>");
+    expect(html).toContain('<details class="card faq">');
+    expect(html).toContain("<summary>Where is the gate?</summary>");
+    expect(html).toContain("<summary>Who &lt;pays&gt; dues?</summary>");
+    expect(html).toContain('<div class="faq-answer"><p>On the north side.</p><p>Latch it behind you.</p></div>');
+    expect(html.indexOf("<summary>Where is the gate?</summary>")).toBeLessThan(html.indexOf("On the north side."));
+    expect(html).not.toContain("<h2>Where is the gate?</h2>");
+    expect(html).not.toContain("\u2014");
+    expect(faqPage([])).toContain("No questions yet.");
+  });
+});
+
+describe("document viewing", () => {
+  const association: Association = {
+    id: "assoc_tango_mar",
+    slug: "tango-mar",
+    name: "Tango Mar",
+    legal_name: "Tango Mar Property Owners Association",
+    address_line1: "31 Tang O Mar Drive",
+    city: "Miramar Beach",
+    state: "FL",
+    postal_code: "32550",
+    county: "Walton County",
+    timezone: "America/Chicago",
+  };
+
+  it("serves PDFs and images inline unless download is requested", () => {
+    expect(isBrowserViewable("application/pdf")).toBe(true);
+    expect(isBrowserViewable("image/jpeg")).toBe(true);
+    expect(isBrowserViewable("image/png")).toBe(true);
+    expect(isBrowserViewable("image/webp")).toBe(true);
+    expect(isBrowserViewable("text/plain; charset=utf-8")).toBe(false);
+    expect(isBrowserViewable("application/vnd.openxmlformats-officedocument.wordprocessingml.document")).toBe(false);
+    expect(documentContentDisposition('covenants "2026".pdf', "application/pdf", false)).toBe(
+      'inline; filename="covenants 2026.pdf"',
+    );
+    expect(documentContentDisposition("photo.png", "image/png", false)).toBe('inline; filename="photo.png"');
+    expect(documentContentDisposition("photo.png", "image/png", true)).toBe('attachment; filename="photo.png"');
+    expect(documentContentDisposition("notes.txt", "text/plain; charset=utf-8", false)).toBe(
+      'attachment; filename="notes.txt"',
+    );
+  });
+
+  it("offers View for PDFs and images and keeps Download for every file", () => {
+    const documents: DocumentRow[] = [
+      {
+        id: "doc-pdf",
+        category: "covenants",
+        title: "Covenants",
+        visibility: "residents",
+        current_version_id: "ver-pdf",
+        version_number: 2,
+        filename: "covenants.pdf",
+        content_type: "application/pdf",
+        byte_size: 10,
+        created_at: "2026-10-01T15:00:00.000Z",
+      },
+      {
+        id: "doc-txt",
+        category: "minutes",
+        title: "Minutes",
+        visibility: "residents",
+        current_version_id: "ver-txt",
+        version_number: 1,
+        filename: "minutes.txt",
+        content_type: "text/plain; charset=utf-8",
+        byte_size: 10,
+        created_at: "2026-10-01T15:00:00.000Z",
+      },
+    ];
+    const html = documentsPage(association, documents);
+    expect(html).toContain(
+      '<span class="actions"><a href="/a/tango-mar/documents/doc-pdf/file" target="_blank" rel="noopener">View</a><a href="/a/tango-mar/documents/doc-pdf/file?download=1">Download</a></span>',
+    );
+    expect(html).toContain('<a href="/a/tango-mar/documents/doc-txt/file?download=1">Download</a>');
+    expect(html).not.toContain("/documents/doc-txt/file\" target=\"_blank\"");
+    expect(html).not.toContain("\u2014");
+  });
+
+  it("offers View beside Download on an admin version that can open in the browser", () => {
+    const version: VersionRow = {
+      id: "ver-pdf",
+      document_id: "doc-pdf",
+      version_number: 1,
+      r2_key: "assoc/doc/v1-covenants.pdf",
+      filename: "covenants.pdf",
+      content_type: "application/pdf",
+      byte_size: 10,
+      notes: "",
+      created_at: "2026-10-01T15:00:00.000Z",
+    };
+    const html = documentDetailPage(
+      association,
+      { id: "doc-pdf", title: "Covenants", category: "covenants", visibility: "residents", current_version_id: "ver-pdf" },
+      [version],
+    );
+    expect(html).toContain(
+      '<a href="/a/tango-mar/admin/documents/doc-pdf/versions/ver-pdf/file" target="_blank" rel="noopener">View</a>',
+    );
+    expect(html).toContain(
+      '<a href="/a/tango-mar/admin/documents/doc-pdf/versions/ver-pdf/file?download=1">Download</a>',
+    );
   });
 });
 

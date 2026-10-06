@@ -1,5 +1,6 @@
 import { categoryLabel } from "../lib/categories";
 import { formatDate, formatDateTime } from "../lib/dates";
+import { isBrowserViewable } from "../lib/files";
 import { esc } from "../lib/html";
 import { formatMoney } from "../lib/money";
 
@@ -40,6 +41,13 @@ export function methodLabel(method: string): string {
   if (method === "ach_recorded") return "ACH (recorded)";
   if (method === "other") return "Other";
   return method;
+}
+
+export function documentFileLinks(href: string, contentType: string | null | undefined): string {
+  const safe = esc(href);
+  const download = `<a href="${safe}?download=1">Download</a>`;
+  if (!isBrowserViewable(contentType ?? "")) return download;
+  return `<span class="actions"><a href="${safe}" target="_blank" rel="noopener">View</a>${download}</span>`;
 }
 
 export function empty(text: string): string {

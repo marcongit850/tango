@@ -26,6 +26,7 @@ import {
   categoryCell,
   dateCell,
   dateTimeCell,
+  documentFileLinks,
   empty,
   moneySpan,
   roleLabel,
@@ -385,7 +386,7 @@ export function documentDetailPage(
         <td>${esc(version.filename)}</td>
         <td>${esc(version.notes)}</td>
         <td>${dateTimeCell(version.created_at, association.timezone)}</td>
-        <td><a href="/a/${esc(association.slug)}/admin/documents/${esc(document.id)}/versions/${esc(version.id)}/file">Download</a></td>
+        <td>${documentFileLinks(`/a/${association.slug}/admin/documents/${document.id}/versions/${version.id}/file`, version.content_type)}</td>
         <td>${version.id === document.current_version_id ? "" : `<form method="post" action="/a/${esc(association.slug)}/admin/documents/${esc(document.id)}/current"><input type="hidden" name="version_id" value="${esc(version.id)}"><button class="secondary" type="submit">Make current</button></form>`}</td>
       </tr>`,
     )

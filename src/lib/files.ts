@@ -37,7 +37,30 @@ export function contentTypeForUpload(file: File): string | null {
   return mapped === "text/plain" ? "text/plain; charset=utf-8" : mapped;
 }
 
-export function attachmentDisposition(filename: string): string {
+const BROWSER_VIEWABLE = new Set(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
+
+export function isBrowserViewable(contentType: string): boolean {
+  const base = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  return BROWSER_VIEWABLE.has(base);
+}
+
+function dispositionFilename(filename: string): string {
   const ascii = filename.replace(/[^\x20-\x7E]/g, "").replaceAll('"', "");
-  return `attachment; filename="${ascii || "document"}"`;
+  return ascii || "document";
+}
+
+export function documentContentDisposition(filename: string, contentType: string, download: boolean): string {
+  const mode = !download && isBrowserViewable(contentType) ? "inline" : "attachment";
+  return `${mode}; filename="${dispositionFilename(filename)}"`;
+}
+
+export function applyDocumentResponseHeaders(
+  headers: Headers,
+  file: { filename: string; contentType: string; download: boolean },
+): void {
+  if (!headers.has("Content-Type")) headers.set("Content-Type", file.contentType);
+  const served = headers.get("Content-Type") || file.contentType;
+  headers.set("Content-Disposition", documentContentDisposition(file.filename, served, file.download));
+  headers.set("Cache-Control", "private, no-store");
+  headers.set("X-Content-Type-Options", "nosniff");
 }

@@ -3,7 +3,7 @@ import { canViewPropertyFinancials, isAdmin, isBoardMember } from "../lib/access
 import { timeZoneLabel, todayIso } from "../lib/dates";
 import { ForbiddenError, NotFoundError } from "../lib/errors";
 import { ensureSeedFiles } from "../lib/seed-files";
-import { attachmentDisposition } from "../lib/files";
+import { applyDocumentResponseHeaders } from "../lib/files";
 import {
   invoiceById,
   invoicesForUser,
@@ -332,9 +332,10 @@ async function streamCurrent(c: AppContext, association: Association, membership
   if (!object) throw new NotFoundError();
   const headers = new Headers();
   object.writeHttpMetadata(headers);
-  if (!headers.has("Content-Type")) headers.set("Content-Type", version.content_type);
-  headers.set("Content-Disposition", attachmentDisposition(version.filename));
-  headers.set("Cache-Control", "private, no-store");
-  headers.set("X-Content-Type-Options", "nosniff");
+  applyDocumentResponseHeaders(headers, {
+    filename: version.filename,
+    contentType: version.content_type,
+    download: c.req.query("download") === "1",
+  });
   return new Response(object.body, { headers });
 }

@@ -75,8 +75,9 @@ form.fields { display: grid; gap: 0.75rem; }
 .badge { display: inline-block; border-radius: 999px; padding: 0.05rem 0.5rem; background: #e7eeed; color: var(--gulf-dark); font-size: 0.82rem; }
 .badge.late { background: var(--emergency); color: var(--late); }
 .devbox { border: 1px dashed var(--gulf); border-radius: 12px; padding: 0.8rem 1rem; background: #f3faf8; }
-body.landing { background: #d5e7f2; }
-body.landing main { padding: 0; }
+body.landing { background: var(--sand); }
+body.landing main { padding: 0 0 2.5rem; }
+body.landing .shore + .wrap { padding-top: 1.5rem; }
 .topbar {
   position: absolute;
   z-index: 3;
@@ -103,14 +104,14 @@ body.landing main { padding: 0; }
 .topbar .button.secondary { background: rgba(255, 255, 255, 0.92); color: #1c3558; }
 .shore {
   position: relative;
-  min-height: 100vh;
-  min-height: 100dvh;
-  display: grid;
-  place-items: center;
+  min-height: clamp(32rem, 68vh, 44rem);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
   overflow: hidden;
   text-align: center;
   color: #1a2744;
-  padding: 4.5rem 1.25rem 3rem;
+  padding: 3.4rem 1.25rem 1.5rem;
 }
 .shore-photo {
   position: absolute;
@@ -118,41 +119,25 @@ body.landing main { padding: 0; }
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: center center;
+  object-position: center top;
 }
 .shore-scrim {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0.14) 48%, rgba(255, 255, 255, 0) 72%);
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.04) 32%, rgba(255, 255, 255, 0) 56%);
 }
 .shore-inner { position: relative; z-index: 1; width: min(40rem, 100%); }
-.mark { width: 108px; height: auto; display: block; margin: 0 auto 0.35rem; }
-.wordmark {
-  margin: 0;
-  font-family: Georgia, "Iowan Old Style", Palatino, serif;
-  font-size: clamp(1.7rem, 4vw, 2.55rem);
-  font-weight: 650;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: #1a2744;
-}
-.wordmark-sub {
-  margin: 0.2rem 0 0;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: #1a2744;
-}
-.rule { display: block; width: 3.4rem; height: 2px; margin: 0.75rem auto 0.9rem; background: #c6a15a; }
+.mark { width: min(13.75rem, 70%); height: auto; display: block; margin: 0 auto 0; }
+.rule { display: block; width: 3.4rem; height: 2px; margin: 0.45rem auto 0.55rem; background: #c6a15a; }
 .shore h1 {
   color: #1a2744;
-  font-size: clamp(2.15rem, 5vw, 3.15rem);
+  font-size: clamp(1.85rem, 4vw, 2.55rem);
   font-weight: 560;
-  margin: 0 0 0.45rem;
+  margin: 0 0 0.3rem;
 }
-.shore .place { margin: 0 0 0.75rem; font-size: 1.05rem; }
-.shore .blurb { max-width: 34rem; margin: 0 auto 1.35rem; font-size: 1.02rem; }
+.shore .place { margin: 0 0 0.4rem; font-size: 1rem; }
+.shore .blurb { max-width: 34rem; margin: 0 auto 0.85rem; font-size: 0.98rem; }
 .shore .actions { justify-content: center; }
 .shore .button {
   background: #1c3558;
@@ -175,9 +160,8 @@ body.landing main { padding: 0; }
   .account { margin-left: 0; }
   .brand img { height: 84px; }
   table { display: block; overflow-x: auto; }
-  .mark { width: 84px; }
-  .wordmark { letter-spacing: 0.1em; }
-  .wordmark-sub { letter-spacing: 0.12em; }
+  .mark { width: min(12rem, 74%); }
+  .shore { padding-top: 4.4rem; }
 }
 `;
 

@@ -22,9 +22,7 @@ export function homePage(showDemo: boolean, portal: HomePortal | null = null): s
       <img class="shore-photo" src="/tango-mar-boardwalk.png" alt="">
       <div class="shore-scrim" aria-hidden="true"></div>
       <div class="shore-inner">
-        <img class="mark" src="/favicon.png" alt="" width="512" height="512">
-        <p class="wordmark">Tango Mar</p>
-        <p class="wordmark-sub">Property Owners Association</p>
+        <img class="mark" src="/tango-mar-mark.png" alt="Tango Mar Property Owners Association" width="1143" height="789">
         <span class="rule" aria-hidden="true"></span>
         <h1>Welcome to Tango Mar</h1>
         <p class="place">A private beach neighborhood in Miramar Beach, Walton County, Florida.</p>

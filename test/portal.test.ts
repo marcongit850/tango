@@ -307,7 +307,7 @@ describe("public home", () => {
     expect(html).toContain("Request access");
     expect(html).toContain('href="/join"');
     expect(html).toContain("Welcome to Tango Mar");
-    expect(html).toContain("A private beach neighborhood in Miramar Beach, Walton County, Florida.");
+    expect(html).not.toContain("A private beach neighborhood in Miramar Beach, Walton County, Florida.");
     expect(html).toContain("Your neighborhood portal for association information, documents, announcements, account details, and community resources.");
     expect(html).toContain('src="/tango-mar-boardwalk.png"');
     expect(html).toContain('src="/tango-mar-mark.png"');

@@ -26,7 +26,6 @@ export function homePage(showDemo: boolean, portal: HomePortal | null = null): s
           <img class="mark" src="/tango-mar-mark.png" alt="Tango Mar Property Owners Association" width="1143" height="789">
           <span class="rule" aria-hidden="true"></span>
           <h1>Welcome to Tango Mar</h1>
-          <p class="place">A private beach neighborhood in Miramar Beach, Walton County, Florida.</p>
           <p class="blurb">Your neighborhood portal for association information, documents, announcements, account details, and community resources.</p>
           <p class="actions">
             ${

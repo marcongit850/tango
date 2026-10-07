@@ -1,4 +1,5 @@
 import { clearJoinRequestNotices, findMembership, findUserByEmail } from "../db";
+import { isValidEmail, userUpsertSql } from "./homeowner-account";
 import type { MembershipRole } from "../types";
 
 const LOGIN_URL = "https://mytangomar.com/login";
@@ -146,7 +147,7 @@ export type ApproveJoinResult =
   | { ok: false; reason: "missing" | "invalid_email" };
 
 function validEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return isValidEmail(email);
 }
 
 export async function approveJoinRequest(
@@ -197,13 +198,8 @@ export async function approveJoinRequest(
   const now = new Date().toISOString();
   const statements = [
     db
-      .prepare(
-        `INSERT INTO users (id, email, name, phone, created_at)
-         VALUES (?, ?, ?, '', ?)
-         ON CONFLICT(email) DO UPDATE SET
-           name = CASE WHEN trim(users.name) != '' THEN users.name ELSE excluded.name END`,
-      )
-      .bind(existing?.id ?? crypto.randomUUID(), email, request.name.trim(), now),
+      .prepare(userUpsertSql("keep"))
+      .bind(existing?.id ?? crypto.randomUUID(), email, request.name.trim(), "", now),
     db
       .prepare(
         `INSERT INTO memberships (id, association_id, user_id, role_id, status, created_at)

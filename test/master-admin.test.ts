@@ -399,6 +399,9 @@ describe("master admin protection", () => {
             mailingCity: "",
             mailingState: "",
             mailingPostalCode: "",
+            owner2Name: "",
+            owner2Email: "",
+            owner2Phone: "",
           },
         ],
       );

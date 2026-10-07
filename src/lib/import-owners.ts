@@ -1,6 +1,7 @@
 import type { Association, User } from "../types";
 import { keepsAnAdmin, MASTER_ADMIN_EDIT_MESSAGE, masterKeepsAdminWrites } from "./access";
 import type { OwnerCsvRow } from "./csv";
+import { ensureHomeownerAccount, linkLotOwner, normalizeEmail, upsertUserByEmail } from "./homeowner-account";
 import { countActiveAdmins, writeAudit } from "../db";
 
 const OPENING_DESCRIPTION = "Opening balance (CSV import)";
@@ -34,6 +35,7 @@ export async function importOwners(
       const outcome = await importRow(db, association, row, now);
       if (outcome.createdUser) result.createdUsers += 1;
       else result.updatedUsers += 1;
+      if (outcome.createdCoOwner) result.createdUsers += 1;
       if (outcome.invoice) result.invoices += 1;
       if (outcome.credit) result.credits += 1;
     } catch (error) {
@@ -77,20 +79,15 @@ async function importRow(
   association: Association,
   row: OwnerCsvRow,
   now: string,
-): Promise<{ createdUser: boolean; invoice: boolean; credit: boolean }> {
+): Promise<{ createdUser: boolean; createdCoOwner: boolean; invoice: boolean; credit: boolean }> {
   const existing = await db.prepare("SELECT id FROM users WHERE email = ?").bind(row.email).first<{ id: string }>();
-  const user = await db
-    .prepare(
-      `INSERT INTO users (id, email, name, phone, created_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(email) DO UPDATE SET
-         name = excluded.name,
-         phone = CASE WHEN excluded.phone != '' THEN excluded.phone ELSE users.phone END
-       RETURNING id`,
-    )
-    .bind(crypto.randomUUID(), row.email, row.name, row.phone, now)
-    .first<{ id: string }>();
-  if (!user) throw new Error("User upsert did not return an id.");
+  const user = await upsertUserByEmail(db, {
+    email: row.email,
+    name: row.name,
+    phone: row.phone,
+    now,
+    policy: "replace",
+  });
 
   const columns = await db.prepare("PRAGMA table_info(memberships)").all<{ name: string }>();
   const hasMaster = columns.results.some((column) => column.name === "is_master");
@@ -133,21 +130,33 @@ async function importRow(
   const property = await upsertProperty(db, association.id, row, now);
   if (!property) throw new Error("Property upsert did not return an id.");
 
-  await db
-    .prepare(
-      `INSERT INTO property_owners (id, association_id, property_id, user_id, is_primary, created_at)
-       VALUES (?, ?, ?, ?, 1, ?)
-       ON CONFLICT(property_id, user_id) DO UPDATE SET is_primary = 1`,
-    )
-    .bind(crypto.randomUUID(), association.id, property.id, user.id, now)
-    .run();
-  await db
-    .prepare(
-      `UPDATE property_owners SET is_primary = 0
-       WHERE association_id = ? AND property_id = ? AND user_id != ?`,
-    )
-    .bind(association.id, property.id, user.id)
-    .run();
+  await linkLotOwner(db, {
+    associationId: association.id,
+    propertyId: property.id,
+    userId: user.id,
+    now,
+    primary: "if-none",
+  });
+
+  let createdCoOwner = false;
+  const owner2Email = normalizeEmail(row.owner2Email);
+  if (owner2Email && owner2Email !== normalizeEmail(row.email)) {
+    const coOwner = await ensureHomeownerAccount(db, {
+      associationId: association.id,
+      email: owner2Email,
+      name: row.owner2Name,
+      phone: row.owner2Phone,
+      now,
+    });
+    await linkLotOwner(db, {
+      associationId: association.id,
+      propertyId: property.id,
+      userId: coOwner.userId,
+      now,
+      primary: "never",
+    });
+    createdCoOwner = coOwner.created;
+  }
 
   let invoice = false;
   let credit = false;
@@ -210,7 +219,7 @@ async function importRow(
     }
   }
 
-  return { createdUser: !existing, invoice, credit };
+  return { createdUser: !existing, createdCoOwner, invoice, credit };
 }
 
 async function upsertProperty(db: D1Database, associationId: string, row: OwnerCsvRow, now: string): Promise<{ id: string }> {

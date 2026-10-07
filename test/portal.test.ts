@@ -116,7 +116,8 @@ describe("owner csv", () => {
       timezone: "America/Chicago",
     };
     const html = importPage(association);
-    expect(html).toContain("Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>, <code>house_name</code>, <code>mailing_street</code>, <code>mailing_city</code>, <code>mailing_state</code>, <code>mailing_postal_code</code>.");
+    expect(html).toContain("Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>, <code>house_name</code>, <code>mailing_street</code>, <code>mailing_city</code>, <code>mailing_state</code>, <code>mailing_postal_code</code>, <code>owner2_name</code>, <code>owner2_email</code>, <code>owner2_phone</code>.");
+    expect(html).toContain("owner2_email</code> adds a second person on that lot.");
     expect(html).toContain("Admin notes are not part of this import.");
     expect(html).toContain("A positive starting balance adds one opening invoice per lot (re-import will not double it).");
     expect(html).toContain('<a href="/a/tango-mar/admin/import/template.csv">Download template</a>');
@@ -149,6 +150,10 @@ describe("owner csv", () => {
       mailingState: "FL",
       mailingPostalCode: "32541",
     });
+    expect(parsed.rows[0].owner2Email).toBe("alex.kim@example.com");
+    expect(parsed.rows[0].owner2Name).toBe("Alex Kim");
+    expect(parsed.rows[0].owner2Phone).toBe("850-555-0199");
+    expect(parsed.rows[1].owner2Email).toBe("");
     expect(parsed.rows[1].houseName).toBe("AVERITTS FAVORITE");
     expect(parsed.rows[1].mailingStreet).toBe("");
     expect(parsed.rows[1]).toMatchObject({

@@ -29,6 +29,7 @@ import {
   listJoinRequests,
   adminNotesForProperty,
   contactsForProperty,
+  listLotOwners,
   listLots,
   listOwners,
   listProperties,
@@ -74,6 +75,7 @@ import {
 } from "../lib/email";
 import { approvalSummary, approveJoinRequest, welcomeEmail } from "../lib/join-approve";
 import { applyDocumentResponseHeaders, contentTypeForUpload, MAX_CSV_BYTES, MAX_DOCUMENT_BYTES, noticeFileProblem, safeFilename } from "../lib/files";
+import { ensureHomeownerAccount, isValidEmail, linkLotOwner, unlinkLotOwner } from "../lib/homeowner-account";
 import { importOwners } from "../lib/import-owners";
 import { csvText, formatDollarsPlain, formatMoney, parseMoneyToCents } from "../lib/money";
 import { ensureSeedFiles } from "../lib/seed-files";
@@ -155,10 +157,11 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const { association, membership } = requireStaff(c);
     const delinquentOnly = c.req.query("delinquent") === "1";
     const today = todayIso(association.timezone);
-    const [owners, ledger, lots] = await Promise.all([
+    const [owners, ledger, lots, links] = await Promise.all([
       listOwners(c.env.DB, association.id),
       ledgerForAssociation(c.env.DB, association.id, today),
       listLots(c.env.DB, association.id),
+      listLotOwners(c.env.DB, association.id),
     ]);
     const byProperty = new Map(ledger.map((row) => [row.property_id, row]));
     const decoratedLots = lots.map((lot) => {
@@ -169,10 +172,21 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         delinquent: balance?.delinquent ?? false,
       };
     });
+    const ownersByLot = new Map<string, { userId: string; name: string; email: string; isPrimary: boolean }[]>();
+    for (const link of links) {
+      const list = ownersByLot.get(link.property_id) ?? [];
+      list.push({
+        userId: link.user_id,
+        name: link.name,
+        email: link.email,
+        isPrimary: Number(link.is_primary) === 1,
+      });
+      ownersByLot.set(link.property_id, list);
+    }
     return render(c, {
       title: delinquentOnly ? "Past due lots" : "Owners & lots",
       active: "admin",
-      body: ownersPage(association, decoratedLots, owners, delinquentOnly, canEditAdmin(membership)),
+      body: ownersPage(association, decoratedLots, owners, delinquentOnly, canEditAdmin(membership), ownersByLot),
     });
   });
 
@@ -638,9 +652,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   app.post("/a/:slug/admin/lots/:propertyId/owner", async (c) => {
     const { association, user } = requireEditor(c);
     const fields = await readForm(c);
-    const back = `/a/${association.slug}/admin/owners#lots`;
     const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
     if (!property) throw new NotFoundError();
+    const back = lotReturnPath(association.slug, property.id, textValue(fields, "return_to", 20));
     const ownerId = textValue(fields, "user_id", 80);
     const owner = (await listOwners(c.env.DB, association.id)).find((row) => row.user_id === ownerId);
     if (!owner) return redirectTo(c, back, "Choose a person in this association.", "warn");
@@ -666,6 +680,91 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       detail: `${owner.name} is the primary owner of lot ${property.lot_number}.`,
     });
     return redirectTo(c, back, `${owner.name} is now the primary owner of lot ${property.lot_number}.`);
+  });
+
+  app.post("/a/:slug/admin/lots/:propertyId/owners", async (c) => {
+    const { association, user } = requireEditor(c);
+    const fields = await readForm(c);
+    const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
+    if (!property) throw new NotFoundError();
+    const back = lotReturnPath(association.slug, property.id, textValue(fields, "return_to", 20));
+    const email = textValue(fields, "email", 200).toLowerCase();
+    const name = textValue(fields, "name", 120);
+    const phone = textValue(fields, "phone", 40);
+    if (!isValidEmail(email)) return redirectTo(c, back, "Enter a valid email.", "warn");
+    const now = new Date().toISOString();
+    const account = await ensureHomeownerAccount(c.env.DB, {
+      associationId: association.id,
+      email,
+      name,
+      phone,
+      now,
+    });
+    const linked = await linkLotOwner(c.env.DB, {
+      associationId: association.id,
+      propertyId: property.id,
+      userId: account.userId,
+      now,
+      primary: "if-none",
+    });
+    const label = personLabel(account.name, account.email);
+    if (!linked.inserted) return redirectTo(c, back, `${label} is already an owner of lot ${property.lot_number}.`);
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "owner_add",
+      entityType: "property",
+      entityId: property.id,
+      detail: `${label} added as an owner of lot ${property.lot_number}.`,
+    });
+    return redirectTo(
+      c,
+      back,
+      `${label} added as an owner of lot ${property.lot_number}. They can sign in with a magic link at their email.`,
+    );
+  });
+
+  app.post("/a/:slug/admin/lots/:propertyId/owners/:userId/remove", async (c) => {
+    const { association, user } = requireEditor(c);
+    const fields = await readForm(c);
+    const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
+    if (!property) throw new NotFoundError();
+    const back = lotReturnPath(association.slug, property.id, textValue(fields, "return_to", 20));
+    const ownerId = c.req.param("userId");
+    const owner = await c.env.DB
+      .prepare(
+        `SELECT u.name, u.email
+         FROM property_owners po
+         JOIN users u ON u.id = po.user_id
+         WHERE po.association_id = ? AND po.property_id = ? AND po.user_id = ?`,
+      )
+      .bind(association.id, property.id, ownerId)
+      .first<{ name: string; email: string }>();
+    if (!owner) return redirectTo(c, back, "That person is not an owner of this lot.", "warn");
+    const removed = await unlinkLotOwner(c.env.DB, {
+      associationId: association.id,
+      propertyId: property.id,
+      userId: ownerId,
+    });
+    if (!removed.removed) return redirectTo(c, back, "That person is not an owner of this lot.", "warn");
+    const label = personLabel(owner.name, owner.email);
+    let promoted = "";
+    if (removed.promotedUserId) {
+      const next = await c.env.DB
+        .prepare("SELECT name, email FROM users WHERE id = ?")
+        .bind(removed.promotedUserId)
+        .first<{ name: string; email: string }>();
+      if (next) promoted = ` ${personLabel(next.name, next.email)} is now the primary owner.`;
+    }
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "owner_remove",
+      entityType: "property",
+      entityId: property.id,
+      detail: `${label} removed from lot ${property.lot_number}.${promoted}`,
+    });
+    return redirectTo(c, back, `${label} removed from lot ${property.lot_number}.${promoted}`);
   });
 
   app.get("/a/:slug/admin/import", async (c) => {
@@ -790,6 +889,12 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         contacts: contacts.map((contact) => ({
           name: contact.name,
           phone: contact.phone,
+          isPrimary: Number(contact.is_primary) === 1,
+        })),
+        lotOwners: contacts.map((contact) => ({
+          userId: contact.user_id,
+          name: contact.name,
+          email: contact.email,
           isPrimary: Number(contact.is_primary) === 1,
         })),
         ownerName: primary?.name ?? "",
@@ -2346,6 +2451,11 @@ function lotDetailsFromForm(fields: Record<string, string | File>): LotDetails {
 
 function lotDetailsEntered(details: LotDetails): boolean {
   return Object.values(details).some((value) => value !== "");
+}
+
+function personLabel(name: string, email: string): string {
+  const clean = name.replace(/[\r\n]+/g, " ").trim();
+  return clean || email;
 }
 
 function lotReturnPath(slug: string, propertyId: string, returnTo: string): string {

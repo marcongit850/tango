@@ -1122,6 +1122,29 @@ export type PropertyContact = {
   is_primary: number;
 };
 
+export type LotOwnerLink = {
+  property_id: string;
+  user_id: string;
+  name: string;
+  email: string;
+  is_primary: number;
+  created_at: string;
+};
+
+export async function listLotOwners(db: D1Database, associationId: string): Promise<LotOwnerLink[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT po.property_id, u.id AS user_id, u.name, u.email, po.is_primary, po.created_at
+       FROM property_owners po
+       JOIN users u ON u.id = po.user_id
+       WHERE po.association_id = ?
+       ORDER BY po.is_primary DESC, po.created_at, u.name`,
+    )
+    .bind(associationId)
+    .all<LotOwnerLink>();
+  return results;
+}
+
 export async function contactsForProperty(
   db: D1Database,
   associationId: string,

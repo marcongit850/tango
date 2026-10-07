@@ -794,6 +794,9 @@ describe("personal notices", () => {
       notice({ id: "note-gate", title: "Gate code", body: "", read_at: null }),
     ]);
     expect(html).toContain("<h1>Notices from the Board</h1>");
+    expect(html).toContain("These notices are one-way from the Board. You cannot reply here. To reply or start a conversation, use ");
+    expect(html).toContain('href="/a/tango-mar/messages">Messages</a>');
+    expect(html).not.toContain("\u2014");
     expect(noticesPage(association, [])).toContain("No notices from the Board.");
     expect(html).toContain(`<p class="muted">${created} · Opened ${opened}</p>`);
     expect(html).toContain(`<p class="muted">${created} · Unread</p>`);

@@ -265,7 +265,10 @@ export function noticesPage(association: Association, notices: NoticeRow[]): str
       </article>`,
     )
     .join("");
-  return `<section class="panel"><h1>Notices from the Board</h1></section>
+  return `<section class="panel">
+      <h1>Notices from the Board</h1>
+      <p class="muted">These notices are one-way from the Board. You cannot reply here. To reply or start a conversation, use <a href="/a/${esc(association.slug)}/messages">Messages</a>.</p>
+    </section>
     ${rows || `<section class="panel">${empty("No notices from the Board.")}</section>`}
     ${notices.some((row) => !row.read_at) ? `<form method="post" action="/a/${esc(association.slug)}/notices/read-all"><button type="submit">Mark all read</button></form>` : ""}`;
 }

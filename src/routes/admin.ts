@@ -59,7 +59,7 @@ import {
   normalizeFolder,
   placeDocumentFolder,
 } from "../lib/categories";
-import { annualDues, assessmentDisplayName, defaultDuesYear, isLotType } from "../lib/dues";
+import { assessmentDisplayName, defaultDuesYear, isDuesSchedule, isLotType, scheduledDues } from "../lib/dues";
 import { parseOwnersCsv } from "../lib/csv";
 import { OWNER_IMPORT_TEMPLATE } from "../lib/owner-import-template";
 import { formatAddress, formatDateTime, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../lib/dates";
@@ -1175,40 +1175,59 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     ) {
       return redirectTo(c, back, "Enter positive amounts and valid open and due dates.", "warn");
     }
+    const schedule = textValue(fields, "schedule", 20) || "annual";
+    if (!isDuesSchedule(schedule)) {
+      return redirectTo(c, back, "Choose Monthly, Quarterly, Semi-annual, or Annual.", "warn");
+    }
     const created: string[] = [];
     const existing: string[] = [];
-    for (const lotType of ["improved", "unimproved"] as const) {
-      const dues = annualDues(year, lotType, {
-        amountCents: lotType === "improved" ? improvedAmount : unimprovedAmount,
-        opensOn,
-        dueOn,
-      });
-      const found = await c.env.DB
-        .prepare("SELECT id FROM assessments WHERE association_id = ? AND due_on = ? AND lot_type = ?")
-        .bind(association.id, dues.dueOn, dues.lotType)
-        .first<{ id: string }>();
-      const shown = `${dues.name} (${lotType} lots)`;
-      if (found) {
-        existing.push(shown);
-        continue;
+    const improvedRows = scheduledDues({
+      year,
+      lotType: "improved",
+      schedule,
+      amountCents: improvedAmount,
+      opensOn,
+      dueOn,
+    });
+    const unimprovedRows = scheduledDues({
+      year,
+      lotType: "unimproved",
+      schedule,
+      amountCents: unimprovedAmount,
+      opensOn,
+      dueOn,
+    });
+    for (let index = 0; index < improvedRows.length; index += 1) {
+      const pair = [improvedRows[index], unimprovedRows[index]];
+      for (const dues of pair) {
+        if (!dues) continue;
+        const found = await c.env.DB
+          .prepare("SELECT id FROM assessments WHERE association_id = ? AND due_on = ? AND lot_type = ?")
+          .bind(association.id, dues.dueOn, dues.lotType)
+          .first<{ id: string }>();
+        const shown = `${dues.name} (${dues.lotType} lots)`;
+        if (found) {
+          existing.push(shown);
+          continue;
+        }
+        const id = crypto.randomUUID();
+        await c.env.DB
+          .prepare(
+            `INSERT INTO assessments (id, association_id, name, description, amount_cents, due_on, opens_on, lot_type, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(id, association.id, dues.name, dues.description, dues.amountCents, dues.dueOn, dues.opensOn, dues.lotType, new Date().toISOString())
+          .run();
+        created.push(shown);
+        await writeAudit(c.env.DB, {
+          associationId: association.id,
+          actorUserId: user.id,
+          action: "assessment_create",
+          entityType: "assessment",
+          entityId: id,
+          detail: dues.name,
+        });
       }
-      const id = crypto.randomUUID();
-      await c.env.DB
-        .prepare(
-          `INSERT INTO assessments (id, association_id, name, description, amount_cents, due_on, opens_on, lot_type, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(id, association.id, dues.name, dues.description, dues.amountCents, dues.dueOn, dues.opensOn, dues.lotType, new Date().toISOString())
-        .run();
-      created.push(shown);
-      await writeAudit(c.env.DB, {
-        associationId: association.id,
-        actorUserId: user.id,
-        action: "assessment_create",
-        entityType: "assessment",
-        entityId: id,
-        detail: dues.name,
-      });
     }
     const message = [
       created.length ? `Added ${created.join(" and ")}.` : "",

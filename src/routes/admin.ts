@@ -18,6 +18,7 @@ import {
   invoicesForProperty,
   ledgerForAssociation,
   ledgerForUser,
+  outstandingInvoiceCents,
   listAssessments,
   listAudit,
   listContacts,
@@ -97,13 +98,14 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   app.get("/a/:slug/admin", async (c) => {
     const { association } = requireStaff(c);
     const today = todayIso(association.timezone);
-    const [properties, owners, ledger, threads, staffIds, audit] = await Promise.all([
+    const [properties, owners, ledger, threads, staffIds, audit, outstandingCents] = await Promise.all([
       listProperties(c.env.DB, association.id),
       listOwners(c.env.DB, association.id),
       ledgerForAssociation(c.env.DB, association.id, today),
       threadsForViewer(c.env.DB, association.id, "", true),
       staffUserIds(c.env.DB, association.id),
       listAudit(c.env.DB, association.id),
+      outstandingInvoiceCents(c.env.DB, association.id),
     ]);
     const staff = new Set(staffIds);
     let pendingJoins: number | null = null;
@@ -122,6 +124,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         delinquent: ledger.filter((row) => row.delinquent).length,
         waiting: threads.filter((thread) => messageWaitingOnBoard(thread, staff)).length,
         pendingJoins,
+        outstandingCents,
         audit,
       }),
     });

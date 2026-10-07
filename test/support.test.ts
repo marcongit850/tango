@@ -321,7 +321,7 @@ describe("privacy and terms header", () => {
         expect(headerNav(memberHtml)).toContain('href="/a/tango-mar/faq">FAQ</a>');
         expect(headerNav(memberHtml)).toContain('href="/a/tango-mar/board">Board</a>');
         expect(headerNav(memberHtml)).toContain('href="/a/tango-mar/messages">Messages</a>');
-        expect(headerNav(memberHtml)).toContain('href="/a/tango-mar/notices">Notices</a>');
+        expect(headerNav(memberHtml)).toContain('href="/a/tango-mar/notices">Notices from the Board</a>');
         expect(headerNav(memberHtml)).not.toContain(">Home</a>");
         expect(headerAccount(memberHtml)).toContain("Sam Rivera");
         expect(headerAccount(memberHtml)).toContain("Log out");

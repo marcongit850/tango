@@ -450,6 +450,25 @@ describe("signed-in header", () => {
     expect(widget).not.toMatch(/openai|workers\.ai|@cf\/|\/api\/chat/i);
   });
 
+  it("uses a solid sand background on signed-in pages", async () => {
+    const response = await render(context(membership("homeowner", 0)), {
+      title: "Dashboard",
+      active: "dashboard",
+      body: `<div class="dash"><p>Hello</p></div>`,
+    });
+    const html = await response.text();
+    expect(html).toContain("background: var(--sand)");
+    expect(html).toContain("--sand: #f4efe6");
+    expect(html).not.toContain('url("/tango-mar-boardwalk.png")');
+    expect(html).not.toContain("background-attachment");
+    expect(html).toContain('class="dash"');
+    expect(html).toContain("SUBSCRIPTION REQUIRED");
+    expect(html).toContain(".site-header .account { padding-right: 1rem; }");
+    expect(html).toContain("font-family: var(--sans)");
+    expect(html).toContain("font-variant-numeric: tabular-nums lining-nums");
+    expect(html).not.toMatch(/\.balance-figure \{[^}]*var\(--serif\)/);
+  });
+
   it("leaves Ask the portal off pages without an active membership", async () => {
     const loggedOut = await render(context(null), { title: "Sign in", active: "login", body: "<p>Login</p>" });
     expect(await loggedOut.text()).not.toContain('class="ask-portal"');
@@ -547,7 +566,8 @@ describe("owner dashboard", () => {
     expect(html).toContain('href="/a/tango-mar/calendar"');
     expect(html).toContain("Invoice history");
     expect(html).toContain("Payment history");
-    expect(html).toContain("Personal notices");
+    expect(html).toContain("Notices from the Board");
+    expect(html).not.toContain("Personal notices");
     expect(html).not.toContain("\u2014");
   });
 });
@@ -574,6 +594,7 @@ describe("admin overview", () => {
       delinquent: 1,
       waiting: 0,
       pendingJoins: null,
+      outstandingCents: 160050,
       audit: [],
     });
     const blurb =
@@ -582,6 +603,10 @@ describe("admin overview", () => {
     expect(html).toContain("<h2>Access</h2>");
     expect(html).toContain(blurb);
     expect(html).not.toContain("<h2>Roles</h2>");
+    expect(html).toContain("<h2>Total outstanding</h2>");
+    expect(html).toContain("$1,600.50");
+    expect(html.indexOf("<h1>Board admin</h1>")).toBeLessThan(html.indexOf("<h2>Total outstanding</h2>"));
+    expect(html.indexOf("<h2>Total outstanding</h2>")).toBeLessThan(html.indexOf(">Lots<"));
     expect(html.indexOf("<h1>Board admin</h1>")).toBeLessThan(html.indexOf("<h2>Access</h2>"));
     expect(html.indexOf("<h2>Access</h2>")).toBeLessThan(html.indexOf(blurb));
     expect(html.indexOf(blurb)).toBeLessThan(html.indexOf("Export ledger for the accountant"));
@@ -749,7 +774,8 @@ describe("personal notices", () => {
       emergencies: [],
     });
     const opened = formatDateTime(readAt, association.timezone);
-    expect(html).toContain("<h2>Personal notices</h2>");
+    expect(html).toContain("<h2>Notices from the Board</h2>");
+    expect(html).not.toContain("Personal notices");
     expect(html).toContain(
       `<li><a href="/a/tango-mar/notices">Dues reminder</a> <span class="muted">${created}</span> <span class="muted">Please mail a check.</span> </li>`,
     );
@@ -767,6 +793,11 @@ describe("personal notices", () => {
       notice({ read_at: readAt }),
       notice({ id: "note-gate", title: "Gate code", body: "", read_at: null }),
     ]);
+    expect(html).toContain("<h1>Notices from the Board</h1>");
+    expect(html).toContain("These notices are one-way from the Board. You cannot reply here. To reply or start a conversation, use ");
+    expect(html).toContain('href="/a/tango-mar/messages">Messages</a>');
+    expect(html).not.toContain("\u2014");
+    expect(noticesPage(association, [])).toContain("No notices from the Board.");
     expect(html).toContain(`<p class="muted">${created} · Opened ${opened}</p>`);
     expect(html).toContain(`<p class="muted">${created} · Unread</p>`);
     expect(html).not.toContain(">Read<");

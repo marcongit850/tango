@@ -121,7 +121,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
   app.get("/a/:slug/notices", async (c) => {
     const { association, user } = requireMember(c);
     const notices = await notificationsForUser(c.env.DB, association.id, user.id);
-    return render(c, { title: "Notices", active: "notices", body: noticesPage(association, notices) });
+    return render(c, { title: "Notices from the Board", active: "notices", body: noticesPage(association, notices) });
   });
 
   app.post("/a/:slug/notices/read-all", async (c) => {
@@ -131,7 +131,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
       .prepare("UPDATE notifications SET read_at = ? WHERE association_id = ? AND user_id = ? AND read_at IS NULL")
       .bind(new Date().toISOString(), association.id, user.id)
       .run();
-    return redirectTo(c, `/a/${association.slug}/notices`, "Notices marked read.");
+    return redirectTo(c, `/a/${association.slug}/notices`, "Notices from the Board marked read.");
   });
 
   app.get("/a/:slug/notices/:noticeId/file", async (c) => {

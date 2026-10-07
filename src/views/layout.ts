@@ -31,7 +31,7 @@ const STYLES = `
   background: var(--sand);
 }
 * { box-sizing: border-box; }
-body { margin: 0; line-height: 1.5; }
+body { margin: 0; line-height: 1.5; background: var(--sand); }
 a { color: var(--gulf); }
 .skip { position: absolute; left: -999px; }
 .skip:focus { left: 1rem; top: 1rem; background: white; padding: 0.4rem 0.7rem; z-index: 2; }
@@ -43,6 +43,7 @@ nav { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; }
 nav a { text-decoration: none; color: var(--ink); padding-bottom: 0.15rem; }
 nav a.active { color: var(--gulf); box-shadow: inset 0 -2px 0 var(--gulf); }
 .account { margin-left: auto; color: var(--muted); display: flex; gap: 0.75rem; align-items: center; }
+.site-header .account { padding-right: 1rem; }
 .account a.account-admin { text-decoration: none; color: var(--ink); padding-bottom: 0.15rem; }
 .account a.account-admin.active { color: var(--gulf); box-shadow: inset 0 -2px 0 var(--gulf); }
 button, .button {
@@ -240,17 +241,6 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
   .shore-video { justify-self: center; margin-top: 0.35rem; }
   .shore-video video { height: auto; width: min(15rem, 68vw); }
 }
-body:has(.dash) {
-  background-color: #f4efe6;
-  background-image:
-    linear-gradient(180deg, rgba(244, 239, 230, 0.9) 0%, rgba(244, 239, 230, 0.62) 22%, rgba(226, 241, 238, 0.72) 100%),
-    url("/tango-mar-boardwalk.png");
-  background-repeat: no-repeat;
-  background-size: cover;
-  background-position: center 30%;
-  background-attachment: fixed;
-}
-body:has(.dash) .site-header { background: rgba(255, 253, 248, 0.92); }
 .kicker {
   margin: 0 0 0.3rem;
   font-size: 0.72rem;
@@ -272,11 +262,13 @@ body:has(.dash) .site-header { background: rgba(255, 253, 248, 0.92); }
   background: linear-gradient(180deg, rgba(226, 242, 239, 0.98), rgba(255, 253, 248, 0.96));
 }
 .balance-figure {
-  font-family: var(--serif);
+  font-family: var(--sans);
+  font-variant-numeric: tabular-nums lining-nums;
   font-size: clamp(2.5rem, 5vw, 3.3rem);
   line-height: 1;
   margin: 0.35rem 0 0.55rem;
 }
+.balance-figure .money { font-variant-numeric: tabular-nums lining-nums; }
 .dash-balance .money.settled { color: var(--gulf-dark); }
 .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
 .panel-head h2 { margin: 0; }
@@ -351,7 +343,6 @@ body:has(.ask-portal) main { padding-bottom: 5rem; }
 .ask-note { margin: 0.45rem 0 0; font-size: 0.88rem; }
 @media (max-width: 800px) {
   .dash-grid { grid-template-columns: 1fr; }
-  body:has(.dash) { background-attachment: scroll; }
   .lot { flex-direction: column; }
   .lot-figures { text-align: left; }
 }
@@ -560,7 +551,7 @@ export async function render(
       { id: "faq", href: `${base}/faq`, label: "FAQ" },
       { id: "board", href: `${base}/board`, label: "Board" },
       { id: "messages", href: `${base}/messages`, label: "Messages" },
-      { id: "notices", href: `${base}/notices`, label: unread > 0 ? `Notices (${unread})` : "Notices" },
+      { id: "notices", href: `${base}/notices`, label: unread > 0 ? `Notices from the Board (${unread})` : "Notices from the Board" },
     );
   } else {
     items.push(...loggedOutNav(options.active));

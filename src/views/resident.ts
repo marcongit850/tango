@@ -177,8 +177,8 @@ export function dashboardPage(options: {
       </article>
     </section>
     <section class="panel">
-      <h2>Personal notices</h2>
-      ${notices ? `<ul>${notices}</ul>` : empty("No account messages.")}
+      <h2>Notices from the Board</h2>
+      ${notices ? `<ul>${notices}</ul>` : empty("No notices from the Board.")}
     </section>
   </div>`;
 }
@@ -265,8 +265,11 @@ export function noticesPage(association: Association, notices: NoticeRow[]): str
       </article>`,
     )
     .join("");
-  return `<section class="panel"><h1>Notices</h1></section>
-    ${rows || `<section class="panel">${empty("No notices.")}</section>`}
+  return `<section class="panel">
+      <h1>Notices from the Board</h1>
+      <p class="muted">These notices are one-way from the Board. You cannot reply here. To reply or start a conversation, use <a href="/a/${esc(association.slug)}/messages">Messages</a>.</p>
+    </section>
+    ${rows || `<section class="panel">${empty("No notices from the Board.")}</section>`}
     ${notices.some((row) => !row.read_at) ? `<form method="post" action="/a/${esc(association.slug)}/notices/read-all"><button type="submit">Mark all read</button></form>` : ""}`;
 }
 
@@ -380,11 +383,14 @@ export function messagesPage(
   const lotOptions = properties
     .map((property) => `<option value="${esc(property.id)}">Lot ${esc(property.lot_number)}</option>`)
     .join("");
+  const adminPlace = adminInboxHref
+    ? `<a href="${esc(adminInboxHref)}">Admin → Messages</a>`
+    : "Admin → Messages";
   return `<section class="split">
     <article class="panel">
       <h1>Messages</h1>
-      <p class="muted">Private notes to the board. Other residents cannot read them.</p>
-      ${adminInboxHref ? `<p class="muted">Incoming from owners is listed under <a href="${esc(adminInboxHref)}">Admin, Messages</a>.</p>` : ""}
+      <p class="muted">Send a private message to the Board. Messages are not visible to other residents.</p>
+      <p class="muted">Board members and authorized administrators can review incoming owner messages under ${adminPlace}.</p>
       ${rows ? `<table><thead><tr><th>Subject</th><th>Latest from</th><th>When</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No messages yet.")}
     </article>
     <article class="panel">

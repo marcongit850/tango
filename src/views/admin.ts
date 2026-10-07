@@ -237,7 +237,10 @@ export function ownerDetailPage(options: {
         <form class="fields" method="post" action="${esc(base)}/notice" enctype="multipart/form-data">
           ${textField("Title", "title", { required: true })}
           ${areaField("Message", "body", "", true)}
+          <label>File (optional)<input type="file" name="file" accept=".pdf,.txt,.jpg,.jpeg,.png,.webp,.doc,.docx,application/pdf,text/plain,image/jpeg,image/png,image/webp,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label>
+          <p class="muted">PDF, text, image, or Word. 8 MB or smaller. The owner can view or download it on their notices.</p>
           ${emailOwnersField("Email owner", "email_owner")}
+          <p class="muted">Sends one email to this owner with a link to the notice. A file on the form is attached to that email.</p>
           <button type="submit">Post to their notices</button>
         </form>
       </article>

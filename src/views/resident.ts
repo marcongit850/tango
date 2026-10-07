@@ -58,7 +58,9 @@ export function dashboardPage(options: {
     .join("");
   const notices = options.notices
     .slice(0, 5)
-    .map((row) => `<li><a href="/a/${esc(association.slug)}/notices">${esc(row.title)}</a> <span class="muted">${esc(row.body)}</span></li>`)
+    .map(
+      (row) => `<li><a href="/a/${esc(association.slug)}/notices">${esc(row.title)}</a> <span class="muted">${esc(row.body)}</span> ${noticeFileLinks(association.slug, row)}</li>`,
+    )
     .join("");
   const emergencies = options.emergencies
     .map((row) => `<article class="emergency"><h2>${esc(row.title)}</h2>${paragraphs(row.body)}</article>`)
@@ -159,6 +161,11 @@ export function paymentDetailPage(association: Association, payment: PaymentRow)
   </section>`;
 }
 
+function noticeFileLinks(slug: string, row: NoticeRow): string {
+  if (!row.attachment_filename) return "";
+  return documentFileLinks(`/a/${slug}/notices/${row.id}/file`, row.attachment_content_type);
+}
+
 export function noticesPage(association: Association, notices: NoticeRow[]): string {
   const rows = notices
     .map(
@@ -166,6 +173,7 @@ export function noticesPage(association: Association, notices: NoticeRow[]): str
         <h2>${esc(row.title)}</h2>
         <p class="muted">${dateTimeCell(row.created_at, association.timezone)} · ${row.read_at ? "Read" : "Unread"}</p>
         ${row.body ? paragraphs(row.body) : ""}
+        ${row.attachment_filename ? `<p>${esc(row.attachment_filename)}</p><p>${noticeFileLinks(association.slug, row)}</p>` : ""}
         ${row.href ? `<p><a href="${esc(row.href)}">Open</a></p>` : ""}
         ${row.read_at ? "" : `<form method="post" action="/a/${esc(association.slug)}/notices/${esc(row.id)}/read"><button class="secondary" type="submit">Mark read</button></form>`}
       </article>`,

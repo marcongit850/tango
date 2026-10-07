@@ -14,6 +14,7 @@ import {
   listDocuments,
   listEvents,
   listFaqs,
+  noticeFileForUser,
   notificationsForUser,
   ownerIdsForProperty,
   paymentById,
@@ -111,6 +112,22 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
       .bind(new Date().toISOString(), association.id, user.id)
       .run();
     return redirectTo(c, `/a/${association.slug}/notices`, "Notices marked read.");
+  });
+
+  app.get("/a/:slug/notices/:noticeId/file", async (c) => {
+    const { association, user } = requireMember(c);
+    const file = await noticeFileForUser(c.env.DB, association.id, user.id, c.req.param("noticeId"));
+    if (!file) throw new NotFoundError();
+    const object = await c.env.DOCUMENTS.get(file.r2_key);
+    if (!object) throw new NotFoundError();
+    const headers = new Headers();
+    object.writeHttpMetadata(headers);
+    applyDocumentResponseHeaders(headers, {
+      filename: file.filename,
+      contentType: file.content_type,
+      download: c.req.query("download") === "1",
+    });
+    return new Response(object.body, { headers });
   });
 
   app.post("/a/:slug/notices/:noticeId/read", async (c) => {

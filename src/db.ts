@@ -13,7 +13,7 @@ import type {
 } from "./types";
 import type { LotType } from "./lib/dues";
 import { lotsToInvoice } from "./lib/dues";
-import { isMissingTable } from "./lib/errors";
+import { isMissingColumn, isMissingTable } from "./lib/errors";
 import { balanceCents, invoiceStatus, isDelinquent } from "./lib/money";
 
 async function hasColumn(db: D1Database, table: "memberships" | "properties" | "assessments", column: string): Promise<boolean> {
@@ -155,26 +155,61 @@ export async function writeAudit(
     .run();
 }
 
+export type NoticeAttachment = {
+  filename: string;
+  contentType: string;
+  r2Key: string;
+  byteSize: number;
+};
+
 export async function notify(
   db: D1Database,
-  entry: { associationId: string; userId: string; kind: string; title: string; body?: string; href?: string },
-): Promise<void> {
+  entry: {
+    associationId: string;
+    userId: string;
+    kind: string;
+    title: string;
+    body?: string;
+    href?: string;
+    id?: string;
+    attachment?: NoticeAttachment;
+  },
+): Promise<string> {
+  const id = entry.id ?? crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  if (entry.attachment) {
+    await db
+      .prepare(
+        `INSERT INTO notifications (
+           id, association_id, user_id, kind, title, body, href, created_at,
+           attachment_filename, attachment_content_type, attachment_r2_key, attachment_byte_size
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        id,
+        entry.associationId,
+        entry.userId,
+        entry.kind,
+        entry.title,
+        entry.body ?? "",
+        entry.href ?? "",
+        createdAt,
+        entry.attachment.filename,
+        entry.attachment.contentType,
+        entry.attachment.r2Key,
+        entry.attachment.byteSize,
+      )
+      .run();
+    return id;
+  }
   await db
     .prepare(
       `INSERT INTO notifications (id, association_id, user_id, kind, title, body, href, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(
-      crypto.randomUUID(),
-      entry.associationId,
-      entry.userId,
-      entry.kind,
-      entry.title,
-      entry.body ?? "",
-      entry.href ?? "",
-      new Date().toISOString(),
-    )
+    .bind(id, entry.associationId, entry.userId, entry.kind, entry.title, entry.body ?? "", entry.href ?? "", createdAt)
     .run();
+  return id;
 }
 
 export type BalanceRow = {
@@ -454,6 +489,16 @@ export type NoticeRow = {
   href: string;
   read_at: string | null;
   created_at: string;
+  attachment_filename?: string;
+  attachment_content_type?: string;
+  attachment_r2_key?: string;
+  attachment_byte_size?: number;
+};
+
+export type NoticeFile = {
+  filename: string;
+  content_type: string;
+  r2_key: string;
 };
 
 const JOIN_NOTICE_PREFIX = "Join request from ";
@@ -500,29 +545,87 @@ async function withOpenJoinNotices<T>(filtered: () => Promise<T>, plain: () => P
   }
 }
 
+const NOTICE_COLUMNS = "id, kind, title, body, href, read_at, created_at";
+const NOTICE_FILE_COLUMNS = "attachment_filename, attachment_content_type, attachment_r2_key, attachment_byte_size";
+
+function withNoticeFile(row: NoticeRow): NoticeRow {
+  return {
+    ...row,
+    attachment_filename: row.attachment_filename ?? "",
+    attachment_content_type: row.attachment_content_type ?? "",
+    attachment_r2_key: row.attachment_r2_key ?? "",
+    attachment_byte_size: Number(row.attachment_byte_size ?? 0),
+  };
+}
+
+async function selectNotices(
+  db: D1Database,
+  associationId: string,
+  userId: string,
+  openOnly: boolean,
+  withAttachment: boolean,
+): Promise<NoticeRow[]> {
+  const columns = withAttachment ? `${NOTICE_COLUMNS}, ${NOTICE_FILE_COLUMNS}` : NOTICE_COLUMNS;
+  const filter = openOnly ? ` AND ${OPEN_JOIN_NOTICE}` : "";
+  const { results } = await db
+    .prepare(
+      `SELECT ${columns}
+       FROM notifications
+       WHERE association_id = ? AND user_id = ?${filter}
+       ORDER BY created_at DESC
+       LIMIT 100`,
+    )
+    .bind(associationId, userId)
+    .all<NoticeRow>();
+  return results.map(withNoticeFile);
+}
+
 export async function notificationsForUser(
   db: D1Database,
   associationId: string,
   userId: string,
 ): Promise<NoticeRow[]> {
-  const load = (openOnly: boolean) => {
-    const filter = openOnly ? ` AND ${OPEN_JOIN_NOTICE}` : "";
-    return db
+  let openOnly = true;
+  let withAttachment = true;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await selectNotices(db, associationId, userId, openOnly, withAttachment);
+    } catch (error) {
+      if (openOnly && isMissingTable(error)) {
+        openOnly = false;
+        continue;
+      }
+      if (withAttachment && isMissingColumn(error)) {
+        withAttachment = false;
+        continue;
+      }
+      throw error;
+    }
+  }
+  return [];
+}
+
+export async function noticeFileForUser(
+  db: D1Database,
+  associationId: string,
+  userId: string,
+  noticeId: string,
+): Promise<NoticeFile | null> {
+  try {
+    const row = await db
       .prepare(
-        `SELECT id, kind, title, body, href, read_at, created_at
+        `SELECT attachment_filename AS filename, attachment_content_type AS content_type, attachment_r2_key AS r2_key
          FROM notifications
-         WHERE association_id = ? AND user_id = ?${filter}
-         ORDER BY created_at DESC
-         LIMIT 100`,
+         WHERE association_id = ? AND user_id = ? AND id = ?`,
       )
-      .bind(associationId, userId)
-      .all<NoticeRow>();
-  };
-  const { results } = await withOpenJoinNotices(
-    () => load(true),
-    () => load(false),
-  );
-  return results;
+      .bind(associationId, userId, noticeId)
+      .first<NoticeFile>();
+    if (!row?.r2_key || !row.filename) return null;
+    return row;
+  } catch (error) {
+    if (isMissingColumn(error)) return null;
+    throw error;
+  }
 }
 
 export async function unreadCount(db: D1Database, associationId: string, userId: string): Promise<number> {

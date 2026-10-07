@@ -67,7 +67,10 @@ export function ownerNoticeEmail(input: {
   const lines = [intro, "", title];
   if (summary && summary.toLowerCase() !== title.toLowerCase()) lines.push("", summary);
   const attachmentName = input.attachmentName ? oneLine(input.attachmentName) : "";
-  if (attachmentName) lines.push("", `Attached file: ${attachmentName}`);
+  if (attachmentName) {
+    lines.push("", `Attached file: ${attachmentName}`);
+    if (input.kind === "account") lines.push("You can also open it from the notice in the portal.");
+  }
   lines.push("", href);
   return { subject: `${associationName}: ${title}`, text: lines.join("\n"), href };
 }
@@ -84,12 +87,11 @@ export async function fileToResendAttachment(file: File | null): Promise<ResendA
   if (!file || file.size <= 0 || file.size > MAX_DOCUMENT_BYTES) return null;
   const contentType = contentTypeForUpload(file);
   if (!contentType) return null;
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  return {
-    filename: safeFilename(file.name),
-    content: bytesToBase64(bytes),
-    contentType,
-  };
+  return resendAttachment(safeFilename(file.name), contentType, new Uint8Array(await file.arrayBuffer()));
+}
+
+export function resendAttachment(filename: string, contentType: string, bytes: Uint8Array): ResendAttachment {
+  return { filename, content: bytesToBase64(bytes), contentType };
 }
 
 function bytesToBase64(bytes: Uint8Array): string {

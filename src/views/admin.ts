@@ -198,6 +198,13 @@ export function ownerDetailPage(options: {
       <p>${esc(owner.email)}${owner.phone ? ` · ${esc(owner.phone)}` : ""}</p>
       <p>${esc(roleLabel(owner.role_id, owner.is_admin === 1))} · ${esc(owner.status)}</p>
       <p>Primary lot balance ${options.balance === null ? "" : moneySpan(options.balance)}</p>
+      <h2>Name and phone</h2>
+      <p class="muted">Name is required. Phone is optional and shows on this page for the board.</p>
+      <form class="fields" method="post" action="${esc(base)}/profile">
+        ${textField("Name", "name", { value: owner.name, required: true })}
+        ${textField("Phone", "phone", { value: owner.phone })}
+        <button type="submit">Save name and phone</button>
+      </form>
       <h2>Login email</h2>
       <p class="muted">This is the address they use to sign in. Saving it keeps the same person and the lots already linked to them.</p>
       <form class="fields" method="post" action="${esc(base)}/email">

@@ -226,6 +226,32 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     return redirectTo(c, back, "Login email saved.");
   });
 
+  app.post("/a/:slug/admin/owners/:userId/profile", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const owner = (await listOwners(c.env.DB, association.id)).find((row) => row.user_id === c.req.param("userId"));
+    if (!owner) throw new NotFoundError();
+    const back = ownerPath(association.slug, owner.user_id);
+    const name = textValue(fields, "name", 120);
+    const phone = textValue(fields, "phone", 40);
+    if (!name) return redirectTo(c, back, "Enter a name.", "warn");
+    if (name === owner.name && phone === owner.phone) return redirectTo(c, back, "Name and phone saved.");
+    const updated = await c.env.DB
+      .prepare("UPDATE users SET name = ?, phone = ? WHERE id = ?")
+      .bind(name, phone, owner.user_id)
+      .run();
+    if ((updated.meta.changes ?? 0) === 0) throw new NotFoundError();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "profile_change",
+      entityType: "user",
+      entityId: owner.user_id,
+      detail: `${owner.name} to ${name}, ${owner.phone} to ${phone}`,
+    });
+    return redirectTo(c, back, "Name and phone saved.");
+  });
+
   app.post("/a/:slug/admin/owners/:userId/lot", async (c) => {
     const { association, user } = requireStaff(c);
     const fields = await readForm(c);

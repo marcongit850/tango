@@ -76,8 +76,11 @@ describe("legal pages", () => {
     const privacyHtml = await privacy.text();
     expect(privacyHtml).toContain("<title>Privacy Policy · Tango Mar</title>");
     expect(legalText(privacyHtml)).toBe(fixture("privacy-policy.txt"));
+    expect(privacyHtml).toContain('<footer class="home-footer">');
     expect(privacyHtml).toContain('href="/privacy">Privacy Policy</a>');
     expect(privacyHtml).toContain('href="/terms">Terms of Use</a>');
+    expect(privacyHtml).toContain('href="/a/tango-mar/dashboard">Dashboard</a>');
+    expect(privacyHtml).not.toContain('<footer class="site-footer wrap">');
     const privacyNav = privacyHtml.slice(privacyHtml.indexOf("<nav>"), privacyHtml.indexOf("</nav>"));
     expect(privacyNav).toContain('href="/">Home</a>');
     expect(privacyNav).toContain("Resident login");

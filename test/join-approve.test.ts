@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
+import { createApp } from "../src/app";
 import { isCheckConstraint } from "../src/lib/errors";
 import { changeLoginEmail } from "../src/lib/login-email";
+import { sha256Hex } from "../src/lib/tokens";
 import {
   approvalSummary,
   approveJoinRequest,
@@ -491,6 +493,157 @@ describe("login email", () => {
       email: "sam.rivera@example.com",
     });
     sqlite.close();
+  });
+});
+
+describe("owner name and phone", () => {
+  function portalEnv(db: D1Database): Env {
+    return {
+      DB: db,
+      APP_ENV: "production",
+      EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+      DOCUMENTS: {} as R2Bucket,
+    } as Env;
+  }
+
+  async function signIn(sqlite: DatabaseSync, userId: string): Promise<string> {
+    const token = `session-${userId}`;
+    sqlite
+      .prepare("INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(`sess_${userId}`, userId, await sha256Hex(token), "2099-01-01T00:00:00.000Z", "2026-10-06T00:00:00.000Z");
+    return token;
+  }
+
+  function postProfile(token: string, body: Record<string, string>): RequestInit {
+    return {
+      method: "POST",
+      headers: {
+        Cookie: `tango_session=${token}`,
+        Origin: "http://localhost",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams(body),
+    };
+  }
+
+  it("saves a name and phone and shows them on the person page", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const token = await signIn(sqlite, "user_jordan");
+    try {
+      const saved = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_sam/profile",
+        postProfile(token, { name: "  Samantha Rivera  ", phone: "  850-555-0199  " }),
+        env,
+      );
+      expect(saved.status).toBe(303);
+      expect(saved.headers.get("Location")).toBe("/a/tango-mar/admin/owners/user_sam");
+      expect(decodeURIComponent(saved.headers.get("Set-Cookie") ?? "")).toContain("ok:Name and phone saved.");
+
+      const page = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_sam",
+        { headers: { Cookie: `tango_session=${token}; tango_flash=ok:Name and phone saved.` } },
+        env,
+      );
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain("Name and phone saved.");
+      expect(html).toContain("<h1>Samantha Rivera</h1>");
+      expect(html).toContain("sam.rivera@example.com · 850-555-0199");
+      expect(html).toContain('value="Samantha Rivera"');
+      expect(html).toContain('value="850-555-0199"');
+      expect(html).toContain('action="/a/tango-mar/admin/owners/user_sam/email"');
+      expect(sqlite.prepare("SELECT id, email, name, phone FROM users WHERE id = 'user_sam'").get()).toEqual({
+        id: "user_sam",
+        email: "sam.rivera@example.com",
+        name: "Samantha Rivera",
+        phone: "850-555-0199",
+      });
+      expect(sqlite.prepare("SELECT user_id FROM property_owners WHERE property_id = 'prop_14'").get()).toEqual({
+        user_id: "user_sam",
+      });
+      expect(sqlite.prepare("SELECT action, actor_user_id, entity_type, entity_id, detail FROM audit_log WHERE action = 'profile_change'").get()).toEqual({
+        action: "profile_change",
+        actor_user_id: "user_jordan",
+        entity_type: "user",
+        entity_id: "user_sam",
+        detail: "Sam Rivera to Samantha Rivera, 850-555-0102 to 850-555-0199",
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("requires a name, clears a blank phone, and skips an unchanged save", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const token = await signIn(sqlite, "user_jordan");
+    try {
+      const blank = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_sam/profile",
+        postProfile(token, { name: "   ", phone: "850-555-0199" }),
+        env,
+      );
+      expect(blank.status).toBe(303);
+      expect(decodeURIComponent(blank.headers.get("Set-Cookie") ?? "")).toContain("warn:Enter a name.");
+      expect(sqlite.prepare("SELECT name, phone FROM users WHERE id = 'user_sam'").get()).toEqual({
+        name: "Sam Rivera",
+        phone: "850-555-0102",
+      });
+
+      const cleared = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_sam/profile",
+        postProfile(token, { name: "Sam Rivera", phone: "" }),
+        env,
+      );
+      expect(cleared.status).toBe(303);
+      expect(sqlite.prepare("SELECT name, phone FROM users WHERE id = 'user_sam'").get()).toEqual({
+        name: "Sam Rivera",
+        phone: "",
+      });
+      const page = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_sam",
+        { headers: { Cookie: `tango_session=${token}` } },
+        env,
+      );
+      const html = await page.text();
+      expect(html).toContain("<h1>Sam Rivera</h1>");
+      expect(html).toContain("<p>sam.rivera@example.com</p>");
+      expect(html).not.toContain("850-555-0102");
+
+      const same = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_sam/profile",
+        postProfile(token, { name: "Sam Rivera", phone: "" }),
+        env,
+      );
+      expect(same.status).toBe(303);
+      expect(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'profile_change'").get()).toEqual({ n: 1 });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("refuses a homeowner", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const token = await signIn(sqlite, "user_sam");
+    try {
+      const refused = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_sam/profile",
+        postProfile(token, { name: "Not Allowed", phone: "850-555-0199" }),
+        env,
+      );
+      expect(refused.status).toBe(403);
+      expect(sqlite.prepare("SELECT name, phone FROM users WHERE id = 'user_sam'").get()).toEqual({
+        name: "Sam Rivera",
+        phone: "850-555-0102",
+      });
+    } finally {
+      sqlite.close();
+    }
   });
 });
 

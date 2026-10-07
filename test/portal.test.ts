@@ -284,12 +284,12 @@ describe("public home", () => {
     expect(admin).toContain("Log out");
   });
 
-  it("lets an admin edit the login email on the owner page", () => {
+  it("lets an admin edit the name, phone, and login email on the owner page", () => {
     const owner: OwnerListRow = {
       user_id: "user_sam",
       email: "sam.rivera@example.com",
       name: "Sam Rivera",
-      phone: "",
+      phone: "850-555-0102",
       role_id: "homeowner",
       is_admin: 0,
       status: "active",
@@ -310,10 +310,20 @@ describe("public home", () => {
       timezone: "America/Chicago",
     };
     const html = ownerDetailPage({ association, owner, balance: 0, lots: [], properties: [] });
-    expect(html).toContain('action="/a/tango-mar/admin/owners/user_sam/email"');
-    expect(html).toContain('value="sam.rivera@example.com"');
-    expect(html).toContain("Save email");
+    const profile = formByAction(html, "/a/tango-mar/admin/owners/user_sam/profile");
+    expect(profile).toContain('name="name"');
+    expect(profile).toContain('value="Sam Rivera"');
+    expect(profile).toContain("required");
+    expect(profile).toContain('name="phone"');
+    expect(profile).toContain('value="850-555-0102"');
+    expect(profile).toContain("Save name and phone");
+    expect(profile).not.toContain('name="email"');
+    const email = formByAction(html, "/a/tango-mar/admin/owners/user_sam/email");
+    expect(email).toContain('value="sam.rivera@example.com"');
+    expect(email).toContain("Save email");
+    expect(html).toContain("Name is required. Phone is optional");
     expect(html).toContain("keeps the same person");
+    expect(html).toContain("850-555-0102");
     expect(html).not.toContain("\u2014");
   });
 
@@ -593,7 +603,7 @@ describe("document viewing", () => {
     const html = documentsPage(association, documents);
     expect(html).toContain("Covenants and restrictions");
     expect(html).toContain("Covenants");
-    expect(html).toContain("Meeting minutes");
+    expect(html).toContain("Meeting Minutes / Agendas");
     expect(html).toContain("Minutes");
     expect(html).not.toContain("covenants.pdf");
     expect(html).not.toContain("minutes.txt");

@@ -364,6 +364,52 @@ export async function invoiceById(
     .first<InvoiceRow>();
 }
 
+export async function invoicesForProperty(
+  db: D1Database,
+  associationId: string,
+  propertyId: string,
+): Promise<InvoiceRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT i.id, i.property_id, p.lot_number, i.invoice_number, i.description, i.amount_cents,
+              i.late_fee_cents, i.issued_on, i.due_on, i.status,
+              COALESCE((SELECT SUM(amount_cents) FROM payments pay WHERE pay.invoice_id = i.id AND pay.association_id = i.association_id), 0) AS paid_cents
+       FROM invoices i
+       JOIN properties p ON p.id = i.property_id AND p.association_id = i.association_id
+       WHERE i.association_id = ? AND i.property_id = ?
+       ORDER BY i.due_on DESC, i.invoice_number`,
+    )
+    .bind(associationId, propertyId)
+    .all<InvoiceRow>();
+  return results;
+}
+
+export type InvoicePaymentRow = {
+  id: string;
+  amount_cents: number;
+  method: PaymentMethod;
+  reference: string;
+  paid_on: string;
+  notes: string;
+};
+
+export async function paymentsForInvoice(
+  db: D1Database,
+  associationId: string,
+  invoiceId: string,
+): Promise<InvoicePaymentRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, amount_cents, method, reference, paid_on, notes
+       FROM payments
+       WHERE association_id = ? AND invoice_id = ?
+       ORDER BY paid_on DESC, created_at DESC`,
+    )
+    .bind(associationId, invoiceId)
+    .all<InvoicePaymentRow>();
+  return results;
+}
+
 export type PaymentRow = {
   id: string;
   property_id: string;

@@ -90,7 +90,7 @@ Optional columns:
 | `phone` | Stored on the user. Visible to the board, not to other residents. |
 | `city`, `state`, `postal_code` | Default to the association's city, state, and postal code. |
 
-A positive starting balance creates one invoice named `Opening balance (CSV import)`. Importing the same lot again updates the person and lot and does not add a second opening invoice. Change a balance later from Admin → Ledger.
+A positive starting balance creates one invoice named `Opening balance (CSV import)`. Importing the same lot again updates the person and lot and does not add a second opening invoice. Change a balance later from Admin → Ledger: click the dollar amount, then open the invoice.
 
 Importing the sample file onto the seed data adds Quinn Harper (board, Lot 41, $1,200 opening balance) and refreshes the three demo rows.
 
@@ -160,13 +160,22 @@ Run that file once. If the console says a column already exists, or `join_reques
 After it succeeds, use the portal:
 
 - Admin, Owners and lots: edit a lot, set improved or unimproved, and assign the primary owner. Open a person to change the login email. That keeps the same user and the lots already linked to them, and it is refused when another person already uses that email. CSV import remains the bulk path.
-- Admin, Ledger, Annual dues: add a year (this creates both amounts), then check **Assign this assessment to matching lots** and choose **Assign to matching lots**. That writes the invoices Upcoming assessments uses. Changing an amount later does not rewrite invoices already assigned.
+- Admin, Ledger, Annual dues: add a year (this creates both amounts), then check **Assign this assessment to matching lots** and choose **Assign to matching lots**. That writes the invoices Upcoming assessments uses. Changing an amount later does not rewrite invoices already assigned. Click a dollar amount under Assessments and balances to change one invoice.
+- Admin, Ledger, Assessments and balances: click a dollar amount to open that lot's invoices, then edit or delete one. See [Edit an invoice](#edit-an-invoice). No new D1 SQL is required for that.
 - Admin, Messages: incoming from owners.
 - The activity page is the old audit log. The database table is still `audit_log`.
 
 If this Worker is deployed before the SQL runs, current board members can still sign in. Saving a role, setting lot type, assigning dues, or declining a request will ask you to apply this file first.
 
 Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0004` is already on the remote database.
+
+## Edit an invoice
+
+No D1 migration. Marc does not paste SQL for this change. Amount, late fee, issued date, due date, description, and status are already columns on `invoices`.
+
+On Admin, Ledger, click a dollar amount under Assessments and balances. That opens the lot's invoices. The same amounts on Owners and lots, and on a person's page, open that lot too. Click an invoice amount to edit it or delete it. Only a board admin can open these pages.
+
+Save updates that bill. Open, partial, and paid follow payments recorded on it. Void leaves the invoice off the balance. A recorded payment stays on the lot either way. Delete asks for confirmation and stays blocked while a payment is recorded on that invoice. Deleting an invoice leaves its assessment in place. Deleting an assessment still removes its unpaid invoices and stays blocked when a payment is recorded on one of them.
 
 ## Portal notice files (paste this before merge)
 

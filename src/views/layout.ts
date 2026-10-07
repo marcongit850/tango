@@ -83,6 +83,8 @@ h1 { font-size: 2rem; }
 .money.credit { color: var(--ok); }
 .figure { font-size: 2rem; margin: 0.2rem 0; }
 table { width: 100%; border-collapse: collapse; }
+a.money-link { color: inherit; text-decoration: underline; text-underline-offset: 0.15em; }
+a.money-link:hover { text-decoration-thickness: 2px; }
 th, td { text-align: left; padding: 0.55rem 0.4rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { font-size: 0.82rem; color: var(--muted); font-weight: 600; }
 label { display: grid; gap: 0.3rem; font-size: 0.92rem; }

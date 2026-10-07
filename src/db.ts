@@ -1243,6 +1243,67 @@ export async function assignAssessmentInvoices(
   return { created, already: plan.already, name: assessment.name };
 }
 
+export type AssessmentDeleteResult =
+  | { ok: true; name: string; invoicesRemoved: number }
+  | { ok: false; reason: "missing" | "payments" };
+
+/** Removes an assessment and invoices that have no payment. Any recorded payment blocks the delete. */
+export async function deleteAssessment(
+  db: D1Database,
+  associationId: string,
+  assessmentId: string,
+): Promise<AssessmentDeleteResult> {
+  const assessment = await db
+    .prepare("SELECT name FROM assessments WHERE association_id = ? AND id = ?")
+    .bind(associationId, assessmentId)
+    .first<{ name: string }>();
+  if (!assessment) return { ok: false, reason: "missing" };
+
+  const results = await db.batch([
+    db
+      .prepare(
+        `DELETE FROM invoices
+         WHERE rowid IN (
+           SELECT i.rowid FROM invoices i
+           WHERE i.association_id = ? AND i.assessment_id = ?
+             AND NOT EXISTS (
+               SELECT 1
+               FROM payments pay
+               JOIN invoices paid ON paid.id = pay.invoice_id AND paid.association_id = pay.association_id
+               WHERE paid.association_id = i.association_id AND paid.assessment_id = i.assessment_id
+             )
+         )`,
+      )
+      .bind(associationId, assessmentId),
+    db
+      .prepare(
+        `DELETE FROM assessments
+         WHERE association_id = ? AND id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM invoices i
+             WHERE i.association_id = assessments.association_id AND i.assessment_id = assessments.id
+           )`,
+      )
+      .bind(associationId, assessmentId),
+  ]);
+
+  if ((results[1]?.meta.changes ?? 0) > 0) {
+    return { ok: true, name: assessment.name, invoicesRemoved: results[0]?.meta.changes ?? 0 };
+  }
+
+  const paid = await db
+    .prepare(
+      `SELECT 1 AS found
+       FROM payments pay
+       JOIN invoices i ON i.id = pay.invoice_id AND i.association_id = pay.association_id
+       WHERE i.association_id = ? AND i.assessment_id = ?
+       LIMIT 1`,
+    )
+    .bind(associationId, assessmentId)
+    .first<{ found: number }>();
+  return { ok: false, reason: paid ? "payments" : "missing" };
+}
+
 export type MessageRow = {
   id: string;
   thread_id: string;

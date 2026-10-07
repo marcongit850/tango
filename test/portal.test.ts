@@ -490,6 +490,13 @@ describe("document viewing", () => {
       },
     ];
     const html = documentsPage(association, documents);
+    expect(html).toContain("Covenants and restrictions");
+    expect(html).toContain("Covenants");
+    expect(html).toContain("Meeting minutes");
+    expect(html).toContain("Minutes");
+    expect(html).not.toContain("covenants.pdf");
+    expect(html).not.toContain("minutes.txt");
+    expect(html).not.toContain("<th>File</th>");
     expect(html).toContain(
       '<span class="actions"><a href="/a/tango-mar/documents/doc-pdf/file" target="_blank" rel="noopener">View</a><a href="/a/tango-mar/documents/doc-pdf/file?download=1">Download</a></span>',
     );
@@ -521,6 +528,7 @@ describe("document viewing", () => {
     expect(html).toContain(
       '<a href="/a/tango-mar/admin/documents/doc-pdf/versions/ver-pdf/file?download=1">Download</a>',
     );
+    expect(html).toContain("covenants.pdf");
   });
 });
 

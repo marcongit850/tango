@@ -226,10 +226,56 @@ function currentAdminList(slug: string, admins: { user_id: string; name: string;
   return items ? `<div class="access-admin-list"><ul>${items}</ul></div>` : empty("No current admins.");
 }
 
+function lotOwnerEditor(
+  slug: string,
+  propertyId: string,
+  owners: LotOwnerControl[],
+  returnTo: "owners" | "ledger",
+): string {
+  const base = `/a/${esc(slug)}/admin/lots/${esc(propertyId)}`;
+  const items = owners
+    .map((owner) => {
+      const primary = owner.isPrimary ? ` <span class="badge">Primary</span>` : "";
+      const makePrimary = owner.isPrimary
+        ? ""
+        : `<form method="post" action="${base}/owner">
+            <input type="hidden" name="user_id" value="${esc(owner.userId)}">
+            <input type="hidden" name="return_to" value="${esc(returnTo)}">
+            <button class="secondary" type="submit">Make primary</button>
+          </form>`;
+      return `<li>${esc(owner.name)}, ${esc(owner.email)}${primary}
+        ${makePrimary}
+        <form method="post" action="${base}/owners/${esc(owner.userId)}/remove">
+          <input type="hidden" name="return_to" value="${esc(returnTo)}">
+          <button class="secondary" type="submit">Remove from lot</button>
+        </form>
+      </li>`;
+    })
+    .join("");
+  const list = items ? `<ul>${items}</ul>` : `<p class="muted">No owner is linked to this lot.</p>`;
+  return `<p><strong>Owners</strong></p>
+    ${list}
+    <p><strong>Add owner to this lot</strong></p>
+    <form class="fields" method="post" action="${base}/owners">
+      <input type="hidden" name="return_to" value="${esc(returnTo)}">
+      ${textField("Name", "name")}
+      ${textField("Email", "email", { type: "email", required: true })}
+      ${textField("Phone", "phone")}
+      <button class="secondary" type="submit">Add owner</button>
+    </form>`;
+}
+
 function statCard(value: number | string, label: string, href: string): string {
   const figure = typeof value === "number" ? String(value) : esc(value);
   return `<a class="card" href="${href}"><h2>${figure}</h2><p>${esc(label)}</p></a>`;
 }
+
+export type LotOwnerControl = {
+  userId: string;
+  name: string;
+  email: string;
+  isPrimary: boolean;
+};
 
 export function ownersPage(
   association: Association,
@@ -237,6 +283,7 @@ export function ownersPage(
   owners: OwnerListRow[],
   delinquentOnly: boolean,
   canEdit = true,
+  ownersByLot: ReadonlyMap<string, LotOwnerControl[]> = new Map(),
 ): string {
   const shownLots = delinquentOnly ? lots.filter((lot) => lot.delinquent) : lots;
   const loginRows = owners
@@ -267,6 +314,7 @@ export function ownersPage(
               ${selectField("Primary owner", "user_id", [{ value: "", label: "Choose a person" }, ...ownerChoices])}
               <button class="secondary" type="submit">Assign owner</button>
             </form>
+            ${lotOwnerEditor(association.slug, lot.id, ownersByLot.get(lot.id) ?? [], "owners")}
           </details>
         </td>`
         : "";
@@ -299,7 +347,7 @@ export function ownersPage(
   return `${adminNav(association.slug, "owners", canEdit)}
     <section class="panel" id="lots">
       <h1>Owners & lots</h1>
-      <p class="muted">This is the property roster. Each lot shows its house name, property address, mailing address, primary owner, phone, and balance. Open a lot for every linked phone number. Admin notes stay on this page and are not shown to owners. CSV import is still the bulk way to add a roster. Set improved or unimproved here before assigning annual dues.</p>
+      <p class="muted">This is the property roster. Each lot shows its house name, property address, mailing address, primary owner, phone, and balance. Open a lot for every linked phone number. Open Edit on a lot to add another owner. That person can sign in with a magic link at their own email. Admin notes stay on this page and are not shown to owners. CSV import is still the bulk way to add a roster. Set improved or unimproved here before assigning annual dues.</p>
       <p class="filters">
         <a ${delinquentOnly ? "" : `class="active"`} href="/a/${esc(association.slug)}/admin/owners#lots">All lots</a>
         <a ${delinquentOnly ? `class="active"` : ""} href="/a/${esc(association.slug)}/admin/owners?delinquent=1#lots">Past due only</a>
@@ -438,7 +486,8 @@ export function importPage(
   return `${adminNav(association.slug, "import", canEdit)}
     <section class="panel">
       <h1>Import owners from CSV</h1>
-      <p>Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>, <code>zip</code>, <code>house_name</code>, <code>mailing_street</code>, <code>mailing_city</code>, <code>mailing_state</code>, <code>mailing_postal_code</code>.</p>
+      <p>Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>, <code>zip</code>, <code>house_name</code>, <code>mailing_street</code>, <code>mailing_city</code>, <code>mailing_state</code>, <code>mailing_postal_code</code>, <code>owner2_name</code>, <code>owner2_email</code>, <code>owner2_phone</code>.</p>
+      <p><code>owner2_email</code> adds a second person on that lot. They are not the primary owner. Blank owner2 cells are skipped. A row for a lot that already has a primary owner links that person as another owner and does not replace the primary.</p>
       <p><code>city</code>, <code>state</code>, and <code>postal_code</code> (or <code>zip</code>) are the physical address of the house. A blank city, state, ZIP, house name, or mailing cell keeps the value already stored. Phone is stored on the person and shown when you open the lot. Admin notes are not part of this import.</p>
       <p>A positive starting balance adds one opening invoice per lot (re-import will not double it).</p>
       <p>The admin column is edit access for a homeowner or a board member. Leave it blank to keep an existing flag. A new person with a blank admin cell does not get edit access.</p>
@@ -557,6 +606,7 @@ export function ledgerLotPage(options: {
   lotType?: string;
   status?: string;
   contacts?: { name: string; phone: string; isPrimary?: boolean }[];
+  lotOwners?: LotOwnerControl[];
   ownerName: string;
   balance: BalanceRow | null;
   invoices: InvoiceRow[];
@@ -587,6 +637,7 @@ export function ledgerLotPage(options: {
   const houseName = options.houseName?.trim() ?? "";
   const notes = options.adminNotes ?? "";
   const phones = contactPhones(options.contacts ?? (options.ownerName ? [{ name: options.ownerName, phone: "", isPrimary: true }] : []));
+  const ownerEditor = canEdit ? lotOwnerEditor(options.association.slug, options.propertyId, options.lotOwners ?? [], "ledger") : "";
   const profileForm = canEdit
     ? `<form class="fields" method="post" action="/a/${esc(options.association.slug)}/admin/lots/${esc(options.propertyId)}">
         <input type="hidden" name="return_to" value="ledger">
@@ -645,6 +696,7 @@ export function ledgerLotPage(options: {
       ${mailingAddressHtml(options.mailingStreet ?? "", options.mailingCity ?? "", options.mailingState ?? "", options.mailingPostalCode ?? "")}
       <h2>Phone numbers</h2>
       ${phones}
+      ${ownerEditor}
       ${profileForm}
       ${balance}
       ${scheduledNote}

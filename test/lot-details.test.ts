@@ -294,6 +294,9 @@ describe("lot details", () => {
         mailingCity: "Destin",
         mailingState: "FL",
         mailingPostalCode: "32541",
+        owner2Name: "",
+        owner2Email: "",
+        owner2Phone: "",
       };
       const imported = await importOwners(db, tango, actor, [row]);
       expect(imported.errors).toEqual([]);

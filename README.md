@@ -97,12 +97,19 @@ Optional columns:
 | `city`, `state`, `postal_code` | City, state, and ZIP of the physical address. `zip` is accepted in place of `postal_code`. A blank cell keeps the value already stored. |
 | `house_name` | Name on the lot. A blank cell keeps the name already stored. |
 | `mailing_street`, `mailing_city`, `mailing_state`, `mailing_postal_code` | Where mail for that lot should go when it is not the lot address. A blank cell keeps the value already stored. |
+| `owner2_name` | Name for a second person on the same lot. Used only when `owner2_email` is filled in. |
+| `owner2_email` | Login for that co-owner. Creates or reuses the person, gives them an active homeowner membership (an existing board role is kept, and edit access is not changed), and links them to the lot without replacing the primary owner. Blank means no co-owner. |
+| `owner2_phone` | Phone for that co-owner when the login is new, or when no phone is saved yet. |
 
 Admin notes are not imported. Add those on the lot in Owners and lots.
 
 A positive starting balance creates one invoice named `Opening balance (CSV import)`. Importing the same lot again updates the person and lot and does not add a second opening invoice. Change a balance later from Admin → Ledger: click the dollar amount, then open the invoice.
 
-Importing the sample file onto the seed data adds Quinn Harper (board, Lot 41, $1,200 opening balance) and refreshes the three demo rows.
+The first person linked to a lot is the primary owner. A later row with the same `lot_number` and a different email does not take primary away. That person is linked as another owner. If the email is already linked to the lot, the primary flag stays as it is. Re-importing the primary owner updates that person's name, phone, and role, and does not remove other owners. Change who is primary from Owners and lots, Edit, Make primary.
+
+`owner2_email` on the same row is the same kind of co-owner link. A blank `owner2_email` does nothing, even if `owner2_name` or `owner2_phone` is filled in. An existing login keeps its name, and keeps its phone when one is already saved.
+
+Importing the sample file onto the seed data adds Quinn Harper (board, Lot 41, $1,200 opening balance), refreshes the three demo rows, and links Alex Kim (`alex.kim@example.com`) as a co-owner of lot 14. Sam Rivera stays the primary owner of that lot.
 
 ## Create D1 and bind it
 
@@ -169,7 +176,7 @@ Run that file once. If the console says a column already exists, or `join_reques
 
 After it succeeds, use the portal:
 
-- Admin, Owners and lots: edit a lot, set improved or unimproved, and assign the primary owner. House name, property address, mailing address, and admin notes are edited on that roster and on the lot page. Open a person under Users to change the login email. That keeps the same user and the lots already linked to them, and it is refused when another person already uses that email. CSV import remains the bulk path.
+- Admin, Owners and lots: edit a lot, set improved or unimproved, and assign the primary owner. In Edit, Add owner to this lot adds another person to that lot. Make primary and Remove from lot are on each linked person there, and on the lot page under the phone numbers. House name, property address, mailing address, and admin notes are edited on that roster and on the lot page. Open a person under Users to change the login email. That keeps the same user and the lots already linked to them, and it is refused when another person already uses that email. CSV import remains the bulk path.
 - Admin, Ledger, Annual dues: add a year (this creates both amounts). On the open date, matching lots are invoiced automatically. Check **Assign this assessment to matching lots** only when you want those invoices before the open date. That writes the invoices Upcoming assessments uses. Changing an amount later does not rewrite invoices already assigned. Click a dollar amount under Assessments and balances to change one invoice.
 - Admin, Ledger, Assessments and balances: click a dollar amount to open that lot's invoices, then edit or delete one. See [Edit an invoice](#edit-an-invoice). No new D1 SQL is required for that.
 - Admin, Messages: incoming from owners.
@@ -339,6 +346,18 @@ After it succeeds, use Admin, Owners and lots. The property roster is that page.
 City, state, and ZIP for the physical address are the existing `properties.city`, `properties.state`, and `properties.postal_code` columns from the original schema. No further migration is required to edit them. The lot page shows the street, then city, state, and ZIP on the next line. Mailing address stays labeled "Mailing address (if different)". A blank mailing address means it matches the property address.
 
 Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0010` is already on the remote database.
+
+## Second owner on a lot
+
+No D1 migration. Marc does not paste SQL for this change. A lot can already have more than one row in `property_owners`.
+
+Open Admin, Owners and lots, then Edit on a lot. Add owner to this lot asks for a name, an email, and an optional phone. The email is stored in lowercase. If that email already has a login, that login is reused. An existing board role stays. Edit access and the master admin flag are not changed. The new link is primary only when the lot does not already have a primary owner. Otherwise the person is another owner and the current primary stays primary. The page says they can sign in with a magic link at their email.
+
+That Edit panel lists every person linked to the lot, with a Primary label. Make primary switches which linked person is primary. Remove from lot unlinks that person and does not delete the login. Removing the last owner is allowed. Removing the primary owner while someone else is still linked promotes the oldest remaining link to primary.
+
+The lot page under Admin, Ledger has the same list and form under the phone numbers. Edit access is required to add, remove, or change the primary owner.
+
+Any linked owner, including one who is not primary, sees that lot, its balance, and its invoices after signing in. CSV import can add the second person with `owner2_email`. See [CSV import](#csv-import).
 
 ## Delete a person or a lot
 

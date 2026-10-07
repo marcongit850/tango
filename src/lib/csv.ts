@@ -22,6 +22,9 @@ export type OwnerCsvRow = {
   mailingCity: string;
   mailingState: string;
   mailingPostalCode: string;
+  owner2Name: string;
+  owner2Email: string;
+  owner2Phone: string;
 };
 
 export type CsvIssue = { line: number; message: string };
@@ -123,6 +126,9 @@ export function parseOwnersCsv(
     const mailingCity = cell("mailing_city");
     const mailingState = cell("mailing_state");
     const mailingPostalCode = cell("mailing_postal_code");
+    const owner2Name = cell("owner2_name");
+    const owner2Email = cell("owner2_email").toLowerCase();
+    const owner2Phone = cell("owner2_phone");
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       errors.push({ line, message: "Email is not valid." });
@@ -149,6 +155,10 @@ export function parseOwnersCsv(
       errors.push({ line, message: "balance_as_of must be YYYY-MM-DD." });
       continue;
     }
+    if (owner2Email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(owner2Email)) {
+      errors.push({ line, message: "Second owner email is not valid." });
+      continue;
+    }
 
     rows.push({
       line,
@@ -169,6 +179,9 @@ export function parseOwnersCsv(
       mailingCity,
       mailingState,
       mailingPostalCode,
+      owner2Name: owner2Email ? owner2Name : "",
+      owner2Email,
+      owner2Phone: owner2Email ? owner2Phone : "",
     });
   }
 

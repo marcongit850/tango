@@ -338,7 +338,7 @@ describe("annual dues assign", () => {
     expect(assign).toContain("Assign this assessment to matching lots");
     expect(assign).toContain('class="secondary" type="submit">Assign to matching lots</button>');
     expect(html).toContain(
-      "Set the open date, due date, and amounts for improved and unimproved lots. Add a year creates both, using the amounts and dates you enter.",
+      "Pick a schedule and the amount per installment for improved and unimproved lots. Annual is the amount for the year. Add a year creates each installment for both lot types. The open date and due date are for the first installment. Later installments keep that gap and step forward by the period.",
     );
     expect(html).not.toContain("improved lots at $625");
     expect(html).not.toContain("unimproved lots at $100");
@@ -453,9 +453,13 @@ describe("annual dues add year", () => {
       duesYear: 2027,
     });
     const add = addForm(html);
-    expect(add.indexOf(">Year<input")).toBeLessThan(add.indexOf(">Improved lot amount<input"));
-    expect(add.indexOf(">Improved lot amount<input")).toBeLessThan(add.indexOf(">Unimproved lot amount<input"));
-    expect(add.indexOf(">Unimproved lot amount<input")).toBeLessThan(add.indexOf(">Open date<input"));
+    expect(add.indexOf(">Year<input")).toBeLessThan(add.indexOf(">Schedule<select"));
+    expect(add.indexOf(">Schedule<select")).toBeLessThan(add.indexOf('data-dues-amount="improved"'));
+    expect(add.indexOf('data-dues-amount="improved"')).toBeLessThan(add.indexOf('data-dues-amount="unimproved"'));
+    expect(add).toContain(">Improved lot amount per year<input");
+    expect(add).toContain(">Unimproved lot amount per year<input");
+    expect(add).toContain('value="annual" selected');
+    expect(add.indexOf('data-dues-amount="unimproved"')).toBeLessThan(add.indexOf(">Open date<input"));
     expect(add.indexOf(">Open date<input")).toBeLessThan(add.indexOf(">Due date<input"));
     expect(add).toContain('name="year" type="text" value="2027" required');
     expect(add).toContain('name="improved_amount" type="text" value="700.00" required');
@@ -463,6 +467,8 @@ describe("annual dues add year", () => {
     expect(add).toContain('name="opens_on" type="date" value="2027-01-01" required');
     expect(add).toContain('name="due_on" type="date" value="2027-03-01" required');
     expect(add).toContain(">Add improved and unimproved dues</button>");
+    expect(html).toContain('<script src="/dues-schedule.js"></script>');
+    expect(html).toContain("Pick a schedule and the amount per installment");
 
     const edit = formByAction(html, "/a/tango-mar/admin/assessments/assessment_2026_improved");
     expect(html).toContain("2026 annual assessment (improved lots)");
@@ -488,6 +494,8 @@ describe("annual dues add year", () => {
     const fallback = addForm(await first.text());
     expect(fallback).toContain('name="improved_amount" type="text" value="625.00" required');
     expect(fallback).toContain('name="unimproved_amount" type="text" value="100.00" required');
+    expect(fallback).toContain(">Improved lot amount per year<input");
+    expect(fallback).toContain('value="annual" selected');
     expect(fallback).toContain(`name="opens_on" type="date" value="${year}-01-01" required`);
     expect(fallback).toContain(`name="due_on" type="date" value="${year}-03-01" required`);
 
@@ -602,7 +610,112 @@ describe("annual dues add year", () => {
       "warn:Enter positive amounts and valid open and due dates.",
     );
     expect(count(sqlite, "SELECT COUNT(*) AS n FROM assessments WHERE name LIKE '2029 annual assessment%'")).toBe(0);
+    const badSchedule = await app.request(
+      "http://localhost/a/tango-mar/admin/assessments",
+      {
+        method: "POST",
+        headers,
+        body: new URLSearchParams({
+          year: "2029",
+          schedule: "weekly",
+          improved_amount: "625",
+          unimproved_amount: "100.00",
+          opens_on: "2029-01-01",
+          due_on: "2029-03-01",
+        }),
+      },
+      env,
+    );
+    expect(badSchedule.status).toBe(303);
+    expect(decodeURIComponent(badSchedule.headers.get("Set-Cookie") ?? "")).toContain(
+      "warn:Choose Monthly, Quarterly, Semi-annual, or Annual.",
+    );
     sqlite.close();
+  });
+
+  it("creates four installments per lot type for a quarterly year", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const admin = await signIn(sqlite, "user_jordan");
+    const headers = { Cookie: `tango_session=${admin}`, Origin: "http://localhost" };
+
+    const created = await app.request(
+      "http://localhost/a/tango-mar/admin/assessments",
+      {
+        method: "POST",
+        headers,
+        body: new URLSearchParams({
+          year: "2027",
+          schedule: "quarterly",
+          improved_amount: "150.00",
+          unimproved_amount: "40.00",
+          opens_on: "2027-01-01",
+          due_on: "2027-03-01",
+        }),
+      },
+      env,
+    );
+    expect(created.status).toBe(303);
+    expect(decodeURIComponent(created.headers.get("Set-Cookie") ?? "")).toContain(
+      "ok:Added 2027 dues, Q1 (improved lots) and 2027 dues, Q1 (unimproved lots) and 2027 dues, Q2 (improved lots) and 2027 dues, Q2 (unimproved lots) and 2027 dues, Q3 (improved lots) and 2027 dues, Q3 (unimproved lots) and 2027 dues, Q4 (improved lots) and 2027 dues, Q4 (unimproved lots).",
+    );
+    const rows = sqlite
+      .prepare(
+        `SELECT name, description, amount_cents, opens_on, due_on, lot_type
+         FROM assessments
+         WHERE name LIKE '2027 dues, Q%'
+         ORDER BY due_on, lot_type`,
+      )
+      .all() as { name: string; description: string; amount_cents: number; opens_on: string; due_on: string; lot_type: string }[];
+    expect(rows).toEqual([
+      { name: "2027 dues, Q1", description: "HOA dues for improved lots.", amount_cents: 15000, opens_on: "2027-01-01", due_on: "2027-03-01", lot_type: "improved" },
+      { name: "2027 dues, Q1", description: "HOA dues for unimproved lots.", amount_cents: 4000, opens_on: "2027-01-01", due_on: "2027-03-01", lot_type: "unimproved" },
+      { name: "2027 dues, Q2", description: "HOA dues for improved lots.", amount_cents: 15000, opens_on: "2027-04-01", due_on: "2027-06-01", lot_type: "improved" },
+      { name: "2027 dues, Q2", description: "HOA dues for unimproved lots.", amount_cents: 4000, opens_on: "2027-04-01", due_on: "2027-06-01", lot_type: "unimproved" },
+      { name: "2027 dues, Q3", description: "HOA dues for improved lots.", amount_cents: 15000, opens_on: "2027-07-01", due_on: "2027-09-01", lot_type: "improved" },
+      { name: "2027 dues, Q3", description: "HOA dues for unimproved lots.", amount_cents: 4000, opens_on: "2027-07-01", due_on: "2027-09-01", lot_type: "unimproved" },
+      { name: "2027 dues, Q4", description: "HOA dues for improved lots.", amount_cents: 15000, opens_on: "2027-10-01", due_on: "2027-12-01", lot_type: "improved" },
+      { name: "2027 dues, Q4", description: "HOA dues for unimproved lots.", amount_cents: 4000, opens_on: "2027-10-01", due_on: "2027-12-01", lot_type: "unimproved" },
+    ]);
+    sqlite.close();
+  });
+
+  it("lists dues by year, then installment, and prefills a newer quarterly schedule", () => {
+    const html = ledgerPage({
+      association,
+      ledger: [],
+      ownersByProperty: new Map(),
+      properties: [],
+      invoices: [],
+      assessments: [
+        { id: "q2u", name: "2027 dues, Q2", description: "", amount_cents: 15000, due_on: "2027-06-01", opens_on: "2027-04-01", lot_type: "unimproved", invoice_count: 0 },
+        { id: "a2026", name: "2026 annual assessment (improved lots)", description: "", amount_cents: 70000, due_on: "2026-03-01", opens_on: "2026-01-01", lot_type: "improved", invoice_count: 0 },
+        { id: "q1u", name: "2027 dues, Q1", description: "", amount_cents: 4000, due_on: "2027-03-01", opens_on: "2027-01-01", lot_type: "unimproved", invoice_count: 0 },
+        { id: "q1i", name: "2027 dues, Q1", description: "", amount_cents: 16000, due_on: "2027-03-01", opens_on: "2027-01-01", lot_type: "improved", invoice_count: 0 },
+        { id: "walk", name: "Walkway repair", description: "", amount_cents: 5000, due_on: "2027-11-15", opens_on: "2027-11-01", lot_type: "improved", invoice_count: 0 },
+      ],
+      duesReady: true,
+      duesYear: 2028,
+    });
+    const q1 = html.indexOf("<td>2027 dues, Q1</td>");
+    const q1Next = html.indexOf("<td>2027 dues, Q1</td>", q1 + 1);
+    const q2 = html.indexOf("<td>2027 dues, Q2</td>");
+    const older = html.indexOf("<td>2026 annual assessment (improved lots)</td>");
+    const walk = html.indexOf("<td>Walkway repair</td>");
+    expect(q1).toBeGreaterThan(-1);
+    expect(q1).toBeLessThan(q1Next);
+    expect(html.slice(q1, q1Next)).toContain("<td>Improved</td>");
+    expect(q1Next).toBeLessThan(q2);
+    expect(q2).toBeLessThan(walk);
+    expect(walk).toBeLessThan(older);
+    const add = addForm(html);
+    expect(add).toContain('value="quarterly" selected');
+    expect(add).toContain(">Improved lot amount per installment<input");
+    expect(add).toContain('name="improved_amount" type="text" value="160.00" required');
+    expect(add).toContain('name="unimproved_amount" type="text" value="150.00" required');
+    expect(add).toContain('name="opens_on" type="date" value="2028-01-01" required');
+    expect(add).toContain('name="due_on" type="date" value="2028-03-01" required');
   });
 
   it("lets a later amount edit stand without rewriting invoices already assigned", async () => {

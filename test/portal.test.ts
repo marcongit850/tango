@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { activeAdminContacts, canEditAdmin, canViewAdmin, canViewPropertyFinancials, isAdmin, keepsAnAdmin, masterKeepsAdminWrites, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
-import { annualDues, assessmentDisplayName, defaultDuesYear, latestDuesAmounts, lotsToInvoice } from "../src/lib/dues";
+import { addCalendarMonths, annualDues, assessmentDisplayName, compareDuesRows, defaultDuesYear, duesInstallments, latestDuesAmounts, latestDuesPrefill, lotsToInvoice, scheduledDues } from "../src/lib/dues";
 import { landingAccount, loggedOutNav, render } from "../src/views/layout";
 import { adminHome, documentDetailPage, documentsAdminPage, importPage, ledgerPage, newsAdminPage, ownerDetailPage, paymentInvoiceVisible } from "../src/views/admin";
 import { newsEdit } from "../src/routes/admin";
@@ -329,6 +329,8 @@ describe("annual dues", () => {
       opensOn: "2027-01-01",
       dueOn: "2027-03-01",
       lotType: "improved",
+      name: "2027 annual assessment",
+      description: "HOA dues for improved lots. Open January 1 and due March 1.",
     });
     expect(annualDues(2027, "unimproved").amountCents).toBe(10000);
     expect(annualDues(2028, "improved", { amountCents: 75000, opensOn: "2028-01-15", dueOn: "2028-04-01" })).toMatchObject({
@@ -388,6 +390,123 @@ describe("annual dues", () => {
         { name: "2027 annual assessment", amount_cents: 16000, due_on: "2027-03-01", lot_type: "unimproved" },
       ]),
     ).toEqual({ improvedCents: 81000, unimprovedCents: 16000 });
+  });
+
+  it("creates one row per installment with stepped dates and the amount entered", () => {
+    expect(addCalendarMonths("2027-01-31", 1)).toBe("2027-02-28");
+    expect(addCalendarMonths("2028-01-31", 1)).toBe("2028-02-29");
+    expect(addCalendarMonths("2027-03-31", 1)).toBe("2027-04-30");
+    expect(duesInstallments({ year: 2027, schedule: "quarterly", opensOn: "2027-01-01", dueOn: "2027-03-01" })).toEqual([
+      { name: "2027 dues, Q1", opensOn: "2027-01-01", dueOn: "2027-03-01" },
+      { name: "2027 dues, Q2", opensOn: "2027-04-01", dueOn: "2027-06-01" },
+      { name: "2027 dues, Q3", opensOn: "2027-07-01", dueOn: "2027-09-01" },
+      { name: "2027 dues, Q4", opensOn: "2027-10-01", dueOn: "2027-12-01" },
+    ]);
+    expect(duesInstallments({ year: 2027, schedule: "quarterly", opensOn: "2027-01-15", dueOn: "2027-03-01" })[1]).toEqual({
+      name: "2027 dues, Q2",
+      opensOn: "2027-04-15",
+      dueOn: "2027-06-01",
+    });
+    const quarterly = scheduledDues({
+      year: 2027,
+      lotType: "improved",
+      schedule: "quarterly",
+      amountCents: 15000,
+      opensOn: "2027-01-01",
+      dueOn: "2027-03-01",
+    });
+    expect(quarterly).toHaveLength(4);
+    expect(quarterly.every((row) => row.amountCents === 15000 && row.description === "HOA dues for improved lots.")).toBe(true);
+    expect(duesInstallments({ year: 2027, schedule: "semiannual", opensOn: "2027-01-01", dueOn: "2027-03-01" })).toEqual([
+      { name: "2027 dues, 1st half", opensOn: "2027-01-01", dueOn: "2027-03-01" },
+      { name: "2027 dues, 2nd half", opensOn: "2027-07-01", dueOn: "2027-09-01" },
+    ]);
+    const monthly = duesInstallments({ year: 2027, schedule: "monthly", opensOn: "2027-01-31", dueOn: "2027-03-31" });
+    expect(monthly).toHaveLength(12);
+    expect(monthly[1]).toEqual({ name: "2027 dues, February", opensOn: "2027-02-28", dueOn: "2027-04-30" });
+    expect(monthly[11]).toEqual({ name: "2027 dues, December", opensOn: "2027-12-31", dueOn: "2028-02-29" });
+    const fromMarch = duesInstallments({ year: 2027, schedule: "monthly", opensOn: "2027-03-01", dueOn: "2027-04-01" });
+    expect(fromMarch[0]?.name).toBe("2027 dues, March");
+    expect(fromMarch[10]).toEqual({ name: "2027 dues, January", opensOn: "2028-01-01", dueOn: "2028-02-01" });
+    expect(fromMarch[11]).toEqual({ name: "2027 dues, February", opensOn: "2028-02-01", dueOn: "2028-03-01" });
+    expect(addCalendarMonths("2027-01-31", 11)).toBe("2027-12-31");
+    expect(duesInstallments({ year: 2027, schedule: "monthly", opensOn: "2027-01-31", dueOn: "2027-01-31" })[11]?.opensOn).toBe("2027-12-31");
+    expect(addCalendarMonths("2027-01-31", 13)).toBe("2028-02-29");
+  });
+
+  it("prefills the schedule from the newest dues year and sorts installments", () => {
+    expect(
+      latestDuesPrefill([
+        { name: "2026 annual assessment (improved lots)", amount_cents: 70000, due_on: "2026-03-01", lot_type: "improved" },
+        { name: "2026 annual assessment (unimproved lots)", amount_cents: 15000, due_on: "2026-03-01", lot_type: "unimproved" },
+        { name: "2027 dues, Q1", amount_cents: 15000, due_on: "2027-03-01", lot_type: "improved" },
+        { name: "2027 dues, Q1", amount_cents: 4000, due_on: "2027-03-01", lot_type: "unimproved" },
+        { name: "2027 dues, Q2", amount_cents: 16000, due_on: "2027-06-01", lot_type: "improved" },
+        { name: "Walkway repair", amount_cents: 5000, due_on: "2027-11-15", lot_type: "improved" },
+      ]),
+    ).toEqual({ schedule: "quarterly", improvedCents: 16000, unimprovedCents: 4000 });
+    expect(
+      latestDuesPrefill([
+        { name: "2026 annual assessment", amount_cents: 70000, due_on: "2026-03-01", lot_type: "improved" },
+        { name: "Walkway repair", amount_cents: 5000, due_on: "2027-11-15", lot_type: "improved" },
+      ]).schedule,
+    ).toBe("annual");
+    const rows = [
+      { name: "2027 dues, Q2", due_on: "2027-06-01", lot_type: "unimproved" },
+      { name: "2026 annual assessment (improved lots)", due_on: "2026-03-01", lot_type: "improved" },
+      { name: "2027 dues, Q1", due_on: "2027-03-01", lot_type: "unimproved" },
+      { name: "2027 dues, Q1", due_on: "2027-03-01", lot_type: "improved" },
+    ];
+    expect([...rows].sort(compareDuesRows).map((row) => `${row.name} ${row.lot_type}`)).toEqual([
+      "2027 dues, Q1 improved",
+      "2027 dues, Q1 unimproved",
+      "2027 dues, Q2 unimproved",
+      "2026 annual assessment (improved lots) improved",
+    ]);
+  });
+
+  it("switches amount labels when the schedule changes", () => {
+    const source = readFileSync("public/dues-schedule.js", "utf8");
+    const sandbox: {
+      tangoDuesSchedule?: {
+        duesAmountLabels: (schedule: string) => { improved: string; unimproved: string };
+        installDuesScheduleLabels: (doc: { querySelector: (selector: string) => unknown }) => void;
+      };
+    } = {};
+    new Function("globalThis", source)(sandbox);
+    const api = sandbox.tangoDuesSchedule;
+    expect(api?.duesAmountLabels("annual")).toEqual({
+      improved: "Improved lot amount per year",
+      unimproved: "Unimproved lot amount per year",
+    });
+    expect(api?.duesAmountLabels("quarterly").improved).toBe("Improved lot amount per installment");
+    if (!api) return;
+    const listeners: Record<string, () => void> = {};
+    const texts: Record<string, { textContent: string }> = {
+      improved: { textContent: "Improved lot amount per year" },
+      unimproved: { textContent: "Unimproved lot amount per year" },
+    };
+    const select = {
+      value: "annual",
+      addEventListener: (event: string, listener: () => void) => {
+        listeners[event] = listener;
+      },
+    };
+    const form = {
+      querySelector: (selector: string) => {
+        if (selector === 'select[name="schedule"]') return select;
+        if (selector === '[data-dues-amount="improved"]') return { firstChild: texts.improved };
+        if (selector === '[data-dues-amount="unimproved"]') return { firstChild: texts.unimproved };
+        return null;
+      },
+    };
+    api.installDuesScheduleLabels({
+      querySelector: (selector: string) => (selector === "form[data-dues-schedule]" ? form : null),
+    });
+    select.value = "monthly";
+    listeners.change?.();
+    expect(texts.improved.textContent).toBe("Improved lot amount per installment");
+    expect(texts.unimproved.textContent).toBe("Unimproved lot amount per installment");
   });
 
   it("drops the lot type suffix from assessment titles", () => {

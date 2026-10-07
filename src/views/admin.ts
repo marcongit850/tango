@@ -1,7 +1,7 @@
 import { DOCUMENT_CATEGORIES } from "../lib/categories";
 import { DOCUMENT_FILE_ACCEPT } from "../lib/files";
 import { zonedIsoDate } from "../lib/dates";
-import { assessmentDisplayName, latestDuesAmounts, lotTypeLabel } from "../lib/dues";
+import { assessmentDisplayName, compareDuesRows, DUES_SCHEDULE_OPTIONS, duesAmountFieldLabel, latestDuesPrefill, lotTypeLabel, type DuesSchedule } from "../lib/dues";
 import { MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE } from "../lib/access";
 import { esc, paragraphs } from "../lib/html";
 import { formatDollarsPlain, formatMoney } from "../lib/money";
@@ -1209,7 +1209,8 @@ function duesSection(options: {
   if (!options.duesReady) {
     return `<section class="panel" id="dues"><h2>Annual dues</h2><p>Apply the admin migration in D1, then reload. The steps are in the README under Admin improvements.</p></section>`;
   }
-  const rows = options.assessments
+  const rows = [...options.assessments]
+    .sort(compareDuesRows)
     .map((row) => {
       const edit = `${base}/assessments/${esc(row.id)}`;
       const confirm = row.invoice_count === 0 ? "Confirm" : "Delete this assessment and its unpaid invoices";
@@ -1245,10 +1246,10 @@ function duesSection(options: {
       </tr>`;
     })
     .join("");
-  const amounts = latestDuesAmounts(options.assessments);
+  const prefill = latestDuesPrefill(options.assessments);
   return `<section class="panel" id="dues">
     <h2>Annual dues</h2>
-    <p class="muted">Set the open date, due date, and amounts for improved and unimproved lots. Add a year creates both, using the amounts and dates you enter.</p>
+    <p class="muted">Pick a schedule and the amount per installment for improved and unimproved lots. Annual is the amount for the year. Add a year creates each installment for both lot types. The open date and due date are for the first installment. Later installments keep that gap and step forward by the period.</p>
     <ul class="muted dues-help">
       <li>On the open date, each active lot of that type that does not already have this assessment gets an invoice. If a day is missed, the next run catches up. The invoice date stays the open date.</li>
       <li>Leave the open date blank if you want to invoice only by hand. Use Assign to matching lots to create those invoices early.</li>
@@ -1258,15 +1259,22 @@ function duesSection(options: {
     </ul>
     ${rows ? `<table><thead><tr><th>Assessment</th><th>Lots</th><th>Opens</th><th>Due</th><th>Amount</th><th>Invoices</th>${canEdit ? "<th></th>" : ""}</tr></thead><tbody>${rows}</tbody></table>` : empty("No assessments yet.")}
     ${canEdit ? `<h3>Add a year</h3>
-    <form class="fields" method="post" action="${base}/assessments">
+    <form class="fields" method="post" action="${base}/assessments" data-dues-schedule>
       ${textField("Year", "year", { value: String(options.duesYear), required: true })}
-      ${textField("Improved lot amount", "improved_amount", { value: formatDollarsPlain(amounts.improvedCents), required: true })}
-      ${textField("Unimproved lot amount", "unimproved_amount", { value: formatDollarsPlain(amounts.unimprovedCents), required: true })}
+      ${selectField("Schedule", "schedule", DUES_SCHEDULE_OPTIONS, prefill.schedule)}
+      ${duesAmountField("improved", prefill.schedule, formatDollarsPlain(prefill.improvedCents))}
+      ${duesAmountField("unimproved", prefill.schedule, formatDollarsPlain(prefill.unimprovedCents))}
       ${textField("Open date", "opens_on", { type: "date", value: `${options.duesYear}-01-01`, required: true })}
       ${textField("Due date", "due_on", { type: "date", value: `${options.duesYear}-03-01`, required: true })}
       <button type="submit">Add improved and unimproved dues</button>
-    </form>` : ""}
+    </form>
+    <script src="/dues-schedule.js"></script>` : ""}
   </section>`;
+}
+
+function duesAmountField(kind: "improved" | "unimproved", schedule: DuesSchedule, value: string): string {
+  const name = kind === "improved" ? "improved_amount" : "unimproved_amount";
+  return `<label data-dues-amount="${kind}">${esc(duesAmountFieldLabel(kind, schedule))}<input name="${name}" type="text" value="${esc(value)}" required></label>`;
 }
 
 function emailOwnersField(label = "Email owners", name = "email_owners"): string {

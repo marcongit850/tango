@@ -1093,7 +1093,7 @@ export function joinRequestsPage(association: Association, rows: JoinRequestRow[
   return `${adminNav(association.slug, "joins", canEdit)}
     <section class="panel">
       <h1>Join requests</h1>
-      <p class="muted">Approve creates a login and sends a welcome email. Decline does not. Delete removes the request. A lot links only if the address matches one empty lot.</p>
+      <p class="muted">Approve creates a login and sends a welcome email. Decline does not. Delete removes the request.</p>
       ${body ? `<table><thead><tr><th>Received</th><th>Person</th><th>Address or lot</th><th>Note</th><th>Status</th><th></th></tr></thead><tbody>${body}</tbody></table>` : empty("No join requests yet.")}
     </section>`;
 }

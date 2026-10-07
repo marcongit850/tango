@@ -10,7 +10,7 @@ This is the Phase 0 foundation and Phase 1 scaffold: magic-link sign-in, a D1 da
 
 ## For Marc: signed-in dashboard
 
-On https://mytangomar.com the signed-in dashboard keeps the same navigation and the same account tools. The page uses clear square panels for account balance, lot dues, news, and upcoming events, in the coastal sand and teal already used on the site. The beach boardwalk photo from the home page sits behind that dashboard as a soft wash. Invoices, payments, and personal notices stay on the page.
+On https://mytangomar.com the signed-in dashboard keeps the same navigation and the same account tools. The page uses clear square panels for account balance, lot dues, news, and upcoming events, in the coastal sand and teal already used on the site. The page background is the same soft sand used on the rest of the signed-in portal. Invoices, payments, and personal notices stay on the page.
 
 Ask the portal is a button at the bottom right of signed-in pages. Opening it shows a chat-style panel titled Ask the portal, with a short line about covenants, bylaws, and your lot. The panel says SUBSCRIPTION REQUIRED. The message box is disabled. Nothing is sent, and no assistant is connected. The paid assistant can be added later.
 

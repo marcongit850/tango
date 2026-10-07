@@ -450,6 +450,21 @@ describe("signed-in header", () => {
     expect(widget).not.toMatch(/openai|workers\.ai|@cf\/|\/api\/chat/i);
   });
 
+  it("uses a solid sand background on signed-in pages", async () => {
+    const response = await render(context(membership("homeowner", 0)), {
+      title: "Dashboard",
+      active: "dashboard",
+      body: `<div class="dash"><p>Hello</p></div>`,
+    });
+    const html = await response.text();
+    expect(html).toContain("background: var(--sand)");
+    expect(html).toContain("--sand: #f4efe6");
+    expect(html).not.toContain('url("/tango-mar-boardwalk.png")');
+    expect(html).not.toContain("background-attachment");
+    expect(html).toContain('class="dash"');
+    expect(html).toContain("SUBSCRIPTION REQUIRED");
+  });
+
   it("leaves Ask the portal off pages without an active membership", async () => {
     const loggedOut = await render(context(null), { title: "Sign in", active: "login", body: "<p>Login</p>" });
     expect(await loggedOut.text()).not.toContain('class="ask-portal"');

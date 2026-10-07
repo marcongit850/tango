@@ -31,7 +31,7 @@ const STYLES = `
   background: var(--sand);
 }
 * { box-sizing: border-box; }
-body { margin: 0; line-height: 1.5; }
+body { margin: 0; line-height: 1.5; background: var(--sand); }
 a { color: var(--gulf); }
 .skip { position: absolute; left: -999px; }
 .skip:focus { left: 1rem; top: 1rem; background: white; padding: 0.4rem 0.7rem; z-index: 2; }
@@ -240,17 +240,6 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
   .shore-video { justify-self: center; margin-top: 0.35rem; }
   .shore-video video { height: auto; width: min(15rem, 68vw); }
 }
-body:has(.dash) {
-  background-color: #f4efe6;
-  background-image:
-    linear-gradient(180deg, rgba(244, 239, 230, 0.9) 0%, rgba(244, 239, 230, 0.62) 22%, rgba(226, 241, 238, 0.72) 100%),
-    url("/tango-mar-boardwalk.png");
-  background-repeat: no-repeat;
-  background-size: cover;
-  background-position: center 30%;
-  background-attachment: fixed;
-}
-body:has(.dash) .site-header { background: rgba(255, 253, 248, 0.92); }
 .kicker {
   margin: 0 0 0.3rem;
   font-size: 0.72rem;
@@ -351,7 +340,6 @@ body:has(.ask-portal) main { padding-bottom: 5rem; }
 .ask-note { margin: 0.45rem 0 0; font-size: 0.88rem; }
 @media (max-width: 800px) {
   .dash-grid { grid-template-columns: 1fr; }
-  body:has(.dash) { background-attachment: scroll; }
   .lot { flex-direction: column; }
   .lot-figures { text-align: left; }
 }

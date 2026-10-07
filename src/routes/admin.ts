@@ -567,14 +567,14 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     }
     const { results: invoices } = await c.env.DB
       .prepare(
-        `SELECT i.id, i.invoice_number, i.description, p.lot_number
+        `SELECT i.id, i.property_id, i.invoice_number, i.description, p.lot_number
          FROM invoices i
          JOIN properties p ON p.id = i.property_id AND p.association_id = i.association_id
          WHERE i.association_id = ? AND i.status IN ('open', 'partial')
          ORDER BY i.due_on`,
       )
       .bind(association.id)
-      .all<{ id: string; invoice_number: string; description: string; lot_number: string }>();
+      .all<{ id: string; property_id: string; invoice_number: string; description: string; lot_number: string }>();
     const duesReady = await duesColumnsReady(c.env.DB);
     const assessments = duesReady ? await listAssessments(c.env.DB, association.id) : [];
     return render(c, {
@@ -587,6 +587,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         properties,
         invoices: invoices.map((invoice) => ({
           id: invoice.id,
+          propertyId: invoice.property_id,
           label: `Lot ${invoice.lot_number} · ${invoice.invoice_number} · ${invoice.description}`,
         })),
         assessments,

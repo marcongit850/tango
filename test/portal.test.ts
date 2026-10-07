@@ -4,9 +4,9 @@ import { describe, expect, it } from "vitest";
 import { canViewPropertyFinancials, isAdmin, keepsAnAdmin, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
 import { annualDues, defaultDuesYear, lotsToInvoice } from "../src/lib/dues";
 import { landingAccount, loggedOutNav, render } from "../src/views/layout";
-import { documentDetailPage, documentsAdminPage, newsAdminPage, ownerDetailPage } from "../src/views/admin";
+import { documentDetailPage, documentsAdminPage, ledgerPage, newsAdminPage, ownerDetailPage, paymentInvoiceVisible } from "../src/views/admin";
 import { newsEdit } from "../src/routes/admin";
-import type { AnnouncementRow, DocumentRow, EventRow, NoticeRow, VersionRow } from "../src/db";
+import type { AnnouncementRow, DocumentRow, EventRow, NoticeRow, PropertyRow, VersionRow } from "../src/db";
 import { documentContentDisposition, isBrowserViewable } from "../src/lib/files";
 import { dashboardPage, documentsPage, faqPage, noticesPage } from "../src/views/resident";
 import { checkEmailPage, homePage, invalidLinkPage, joinReceivedPage, joinRequestPage, loginPage } from "../src/views/public";
@@ -1149,6 +1149,199 @@ function formByAction(html: string, action: string): string {
   const end = html.indexOf("</form>", start);
   return html.slice(start, end);
 }
+
+describe("ledger payment invoices", () => {
+  const association: Association = {
+    id: "assoc_tango_mar",
+    slug: "tango-mar",
+    name: "Tango Mar",
+    legal_name: "Tango Mar Property Owners Association",
+    address_line1: "31 Tang O Mar Drive",
+    city: "Miramar Beach",
+    state: "FL",
+    postal_code: "32550",
+    county: "Walton County",
+    timezone: "America/Chicago",
+  };
+
+  function lot(id: string, lotNumber: string): PropertyRow {
+    return {
+      id,
+      lot_number: lotNumber,
+      street_address: `Lot ${lotNumber}`,
+      city: "Miramar Beach",
+      state: "FL",
+      postal_code: "32550",
+      status: "active",
+      lot_type: "improved",
+    };
+  }
+
+  const invoices = [
+    { id: "inv-3", propertyId: "prop-3", label: "Lot 3 · OPEN-3 · Dues & fees" },
+    { id: "inv-3b", propertyId: "prop-3", label: "Lot 3 · OPEN-3B · Late" },
+    { id: "inv-4", propertyId: "prop-4", label: "Lot 4 · OPEN-4 · Dues" },
+  ];
+
+  function page(): string {
+    return ledgerPage({
+      association,
+      ledger: [],
+      ownersByProperty: new Map(),
+      properties: [lot("prop-3", "3"), lot("prop-4", "4")],
+      invoices,
+      assessments: [],
+      duesReady: false,
+      duesYear: 2027,
+    });
+  }
+
+  function formElement(html: string, action: string): string {
+    const marker = `action="${action}"`;
+    const actionAt = html.indexOf(marker);
+    expect(actionAt).toBeGreaterThan(-1);
+    const start = html.lastIndexOf("<form", actionAt);
+    const end = html.indexOf("</form>", actionAt);
+    return html.slice(start, end);
+  }
+
+  function selectByName(html: string, name: string): string {
+    const marker = `<select name="${name}"`;
+    const start = html.indexOf(marker);
+    expect(start).toBeGreaterThan(-1);
+    const end = html.indexOf("</select>", start);
+    return html.slice(start, end);
+  }
+
+  function optionsOf(selectHtml: string): { value: string; propertyId: string | null; hidden: boolean; label: string }[] {
+    return [...selectHtml.matchAll(/<option value="([^"]*)"([^>]*)>([^<]*)<\/option>/g)].map((match) => ({
+      value: match[1],
+      propertyId: /data-property-id="([^"]*)"/.exec(match[2])?.[1] ?? null,
+      hidden: /\shidden\b/.test(match[2]),
+      label: match[3],
+    }));
+  }
+
+  it("shows only the selected lot's invoices, plus an untied payment", () => {
+    expect(paymentInvoiceVisible("prop-3", "prop-3")).toBe(true);
+    expect(paymentInvoiceVisible("prop-3", "prop-4")).toBe(false);
+    const html = page();
+    const payment = formElement(html, "/a/tango-mar/admin/payments");
+    expect(payment).toContain("data-payment-form");
+    const lots = optionsOf(selectByName(payment, "property_id"));
+    expect(lots.map((option) => option.value)).toEqual(["prop-3", "prop-4"]);
+    expect(lots[0]?.hidden).toBe(false);
+    expect(payment).toContain('value="prop-3" selected');
+    const invoiceOptions = optionsOf(selectByName(payment, "invoice_id"));
+    expect(invoiceOptions.filter((option) => !option.hidden).map((option) => ({ value: option.value, label: option.label }))).toEqual([
+      { value: "", label: "Not tied to one invoice" },
+      { value: "inv-3", label: "Lot 3 · OPEN-3 · Dues &amp; fees" },
+      { value: "inv-3b", label: "Lot 3 · OPEN-3B · Late" },
+    ]);
+    expect(invoiceOptions.filter((option) => option.hidden).map((option) => option.value)).toEqual(["inv-4"]);
+    expect(invoiceOptions.find((option) => option.value === "inv-4")?.propertyId).toBe("prop-4");
+    expect(html).toContain('<script src="/ledger-payment.js"></script>');
+    const invoiceForm = formElement(html, "/a/tango-mar/admin/invoices");
+    expect(invoiceForm).not.toContain("data-payment-form");
+    expect(invoiceForm).not.toContain("data-property-id");
+  });
+
+  it("filters the invoice dropdown when the lot changes", () => {
+    const source = readFileSync("public/ledger-payment.js", "utf8");
+    const sandbox: {
+      tangoLedgerPayment?: {
+        paymentInvoicesForLot: (
+          options: { value: string; label: string; propertyId: string }[],
+          propertyId: string,
+        ) => { value: string; propertyId: string }[];
+        installPaymentInvoiceFilter: (doc: {
+          querySelector: (selector: string) => unknown;
+          createElement: (tag: string) => {
+            value: string;
+            textContent: string;
+            getAttribute: (name: string) => string | null;
+            setAttribute: (name: string, value: string) => void;
+          };
+        }) => void;
+      };
+    } = {};
+    new Function("globalThis", source)(sandbox);
+    const api = sandbox.tangoLedgerPayment;
+    expect(api).toBeTruthy();
+    if (!api) return;
+    expect(api.paymentInvoicesForLot(
+      [
+        { value: "", label: "Not tied to one invoice", propertyId: "" },
+        { value: "inv-3", label: "Lot 3", propertyId: "prop-3" },
+        { value: "inv-4", label: "Lot 4", propertyId: "prop-4" },
+      ],
+      "prop-4",
+    ).map((option) => option.value)).toEqual(["", "inv-4"]);
+
+    function optionElement(value: string, label: string, propertyId = "") {
+      const attrs: Record<string, string> = {};
+      if (propertyId) attrs["data-property-id"] = propertyId;
+      return {
+        value,
+        textContent: label,
+        getAttribute: (name: string) => attrs[name] ?? null,
+        setAttribute: (name: string, next: string) => {
+          attrs[name] = next;
+        },
+      };
+    }
+
+    const listeners: Record<string, () => void> = {};
+    const lot = {
+      value: "prop-3",
+      options: [optionElement("prop-3", "Lot 3"), optionElement("prop-4", "Lot 4")],
+      addEventListener: (type: string, fn: () => void) => {
+        listeners[type] = fn;
+      },
+    };
+    const invoiceOptions = [
+      optionElement("", "Not tied to one invoice"),
+      optionElement("inv-3", "Lot 3 · OPEN-3 · Dues & fees", "prop-3"),
+      optionElement("inv-3b", "Lot 3 · OPEN-3B · Late", "prop-3"),
+      optionElement("inv-4", "Lot 4 · OPEN-4 · Dues", "prop-4"),
+    ];
+    const invoice = {
+      value: "",
+      options: invoiceOptions,
+      addEventListener: () => undefined,
+      remove: (index: number) => {
+        invoiceOptions.splice(index, 1);
+      },
+      appendChild: (node: (typeof invoiceOptions)[number]) => {
+        invoiceOptions.push(node);
+      },
+    };
+    const form = {
+      querySelector: (selector: string) => {
+        if (selector === 'select[name="property_id"]') return lot;
+        if (selector === 'select[name="invoice_id"]') return invoice;
+        return null;
+      },
+    };
+    const doc = {
+      querySelector: (selector: string) => (selector === "form[data-payment-form]" ? form : null),
+      createElement: () => optionElement("", ""),
+    };
+    api.installPaymentInvoiceFilter(doc);
+    expect(invoice.options.map((option) => option.value)).toEqual(["", "inv-3", "inv-3b"]);
+    invoice.value = "inv-3";
+    lot.value = "prop-4";
+    listeners.change();
+    expect(invoice.options.map((option) => option.value)).toEqual(["", "inv-4"]);
+    expect(invoice.options.map((option) => option.textContent)).toEqual(["Not tied to one invoice", "Lot 4 · OPEN-4 · Dues"]);
+    expect(invoice.value).toBe("");
+    invoice.value = "inv-4";
+    lot.value = "prop-3";
+    listeners.change();
+    expect(invoice.options.map((option) => option.value)).toEqual(["", "inv-3", "inv-3b"]);
+    expect(invoice.value).toBe("");
+  });
+});
 
 describe("tokens", () => {
   it("hashes a magic link token with sha-256", async () => {

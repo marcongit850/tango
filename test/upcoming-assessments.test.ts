@@ -222,6 +222,16 @@ const annualNames = [
   "2027 annual assessment (unimproved lots)",
 ];
 
+const improvedNames = [
+  "2027 annual assessment (all lots)",
+  "2027 annual assessment (improved lots)",
+];
+
+const unimprovedNames = [
+  "2027 annual assessment (all lots)",
+  "2027 annual assessment (unimproved lots)",
+];
+
 async function names(db: D1Database, userId: string, today: string): Promise<string[]> {
   const rows = await upcomingAssessments(db, "assoc_tango_mar", userId, today);
   return rows.map((row) => row.name);
@@ -230,18 +240,19 @@ async function names(db: D1Database, userId: string, today: string): Promise<str
 describe("upcoming assessments", () => {
   const today = "2026-10-07";
 
-  it("shows improved, unimproved, and all-lot rows to an owner with only an improved lot", async () => {
+  it("shows improved and all-lot rows to an owner with only an improved lot", async () => {
     const { sqlite, db } = openTypedLots();
     addLot(sqlite, { id: "prop_improved", ownerId: "user_marc", lotType: "improved", lotNumber: "14" });
     addAnnualRows(sqlite);
 
     const rows = await upcomingAssessments(db, "assoc_tango_mar", "user_marc", today);
-    expect(rows.map((row) => row.name)).toEqual(annualNames);
+    expect(rows.map((row) => row.name)).toEqual(improvedNames);
+    expect(rows.map((row) => row.lot_type)).toEqual([null, "improved"]);
     expect(rows.every((row) => row.invoice_count === 0)).toBe(true);
     sqlite.close();
   });
 
-  it("shows every upcoming row when the owner's lot type is missing", async () => {
+  it("shows improved, unimproved, and all-lot rows when the owner's lot type is missing", async () => {
     const { sqlite, db } = openTypedLots();
     addLot(sqlite, { id: "prop_blank", ownerId: "user_marc", lotType: null, lotNumber: "14" });
     addAnnualRows(sqlite);
@@ -282,16 +293,16 @@ describe("upcoming assessments", () => {
     sqlite.close();
   });
 
-  it("shows improved, unimproved, and all-lot rows to an owner with only an unimproved lot", async () => {
+  it("shows unimproved and all-lot rows to an owner with only an unimproved lot", async () => {
     const { sqlite, db } = openTypedLots();
     addLot(sqlite, { id: "prop_unimproved", ownerId: "user_casey", lotType: "unimproved", lotNumber: "27" });
     addAnnualRows(sqlite);
 
-    expect(await names(db, "user_casey", today)).toEqual(annualNames);
+    expect(await names(db, "user_casey", today)).toEqual(unimprovedNames);
     sqlite.close();
   });
 
-  it("shows every upcoming row when the owner has an improved lot and an unimproved lot", async () => {
+  it("shows improved, unimproved, and all-lot rows when the owner has both lot types", async () => {
     const { sqlite, db } = openTypedLots();
     addLot(sqlite, { id: "prop_improved", ownerId: "user_marc", lotType: "improved", lotNumber: "14" });
     addLot(sqlite, { id: "prop_unimproved", ownerId: "user_marc", lotType: "unimproved", lotNumber: "15" });
@@ -322,9 +333,9 @@ describe("upcoming assessments", () => {
     addAnnualRows(sqlite);
     addAnnualRows(sqlite, "assoc_other");
 
-    expect(await names(db, "user_marc", today)).toEqual(annualNames);
+    expect(await names(db, "user_marc", today)).toEqual(improvedNames);
     const other = await upcomingAssessments(db, "assoc_other", "user_pat", today);
-    expect(other.map((row) => row.name)).toEqual(annualNames);
+    expect(other.map((row) => row.name)).toEqual(unimprovedNames);
     expect(await upcomingAssessments(db, "assoc_tango_mar", "user_pat", today)).toEqual([]);
     expect(await upcomingAssessments(db, "assoc_other", "user_marc", today)).toEqual([]);
     sqlite.close();
@@ -451,7 +462,7 @@ describe("assigning a future assessment", () => {
     const upcoming = await upcomingAssessments(db, "assoc_tango_mar", "user_sam", "2026-10-07");
     const improved = upcoming.find((row) => row.id === "assessment_2027_improved");
     expect(improved).toMatchObject({ invoice_count: 1, due_on: "2027-03-01", opens_on: "2027-01-01" });
-    expect(upcoming.some((row) => row.id === "assessment_2027_unimproved")).toBe(true);
+    expect(upcoming.some((row) => row.id === "assessment_2027_unimproved")).toBe(false);
     expect(upcoming.some((row) => row.due_on < "2026-10-07")).toBe(false);
     expect(upcoming.some((row) => row.due_on === "2026-10-07")).toBe(false);
 
@@ -463,7 +474,7 @@ describe("assigning a future assessment", () => {
 
     sqlite.prepare("UPDATE properties SET lot_type = 'unimproved' WHERE id = 'prop_14'").run();
     const retyped = await upcomingAssessments(db, "assoc_tango_mar", "user_sam", "2026-10-07");
-    expect(retyped.some((row) => row.id === "assessment_2027_improved")).toBe(true);
+    expect(retyped.some((row) => row.id === "assessment_2027_improved")).toBe(false);
     expect(retyped.some((row) => row.id === "assessment_2027_unimproved")).toBe(true);
     sqlite.close();
   });

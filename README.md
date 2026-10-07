@@ -93,8 +93,12 @@ Optional columns:
 | `admin` | `yes` or `no` for a homeowner or a board member. Blank keeps an existing edit-access flag. A new row with a blank `admin` cell does not get edit access. |
 | `starting_balance` | Dollars owed. `375.50` and `$1,200.00` both work. A negative amount is recorded as an opening credit. Blank means zero. |
 | `balance_as_of` | `YYYY-MM-DD`. Blank uses today in the association time zone. |
-| `phone` | Stored on the user. Visible to the board, not to other residents. |
+| `phone` | Stored on the user. Shown on Owners and lots and when that lot is opened. Other residents do not see it. |
 | `city`, `state`, `postal_code` | Default to the association's city, state, and postal code. |
+| `house_name` | Name on the lot, such as MELOMAR. A blank cell keeps the name already stored. |
+| `mailing_street`, `mailing_city`, `mailing_state`, `mailing_postal_code` | Where mail for that lot should go when it is not the lot address. A blank cell keeps the value already stored. |
+
+Admin notes are not imported. Add those on the lot in Owners and lots.
 
 A positive starting balance creates one invoice named `Opening balance (CSV import)`. Importing the same lot again updates the person and lot and does not add a second opening invoice. Change a balance later from Admin → Ledger: click the dollar amount, then open the invoice.
 
@@ -165,7 +169,7 @@ Run that file once. If the console says a column already exists, or `join_reques
 
 After it succeeds, use the portal:
 
-- Admin, Owners and lots: edit a lot, set improved or unimproved, and assign the primary owner. Open a person to change the login email. That keeps the same user and the lots already linked to them, and it is refused when another person already uses that email. CSV import remains the bulk path.
+- Admin, Owners and lots: edit a lot, set improved or unimproved, and assign the primary owner. House name, mailing address, and admin notes are edited on that roster and on the lot page. Open a person under Users to change the login email. That keeps the same user and the lots already linked to them, and it is refused when another person already uses that email. CSV import remains the bulk path.
 - Admin, Ledger, Annual dues: add a year (this creates both amounts). On the open date, matching lots are invoiced automatically. Check **Assign this assessment to matching lots** only when you want those invoices before the open date. That writes the invoices Upcoming assessments uses. Changing an amount later does not rewrite invoices already assigned. Click a dollar amount under Assessments and balances to change one invoice.
 - Admin, Ledger, Assessments and balances: click a dollar amount to open that lot's invoices, then edit or delete one. See [Edit an invoice](#edit-an-invoice). No new D1 SQL is required for that.
 - Admin, Messages: incoming from owners.
@@ -309,11 +313,36 @@ On the person page, the master row says Master admin. Edit access is checked and
 
 Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0008` is already on the remote database.
 
+## Lot details (paste this before merge)
+
+`migrations/0011_lot_details.sql` adds house name, mailing address, and admin notes on each lot. Paste it in the Cloudflare dashboard before you merge the pull request. Marc does not need a terminal.
+
+What it does:
+
+- Adds `house_name` on `properties`. Existing lots start blank.
+- Adds `mailing_street`, `mailing_city`, `mailing_state`, and `mailing_postal_code` for mail that should not go to the lot address. Existing lots start blank, which means mail still goes to the lot address.
+- Adds `admin_notes` on `properties`. Only admin pages show or save that text. Owner pages do not include it.
+- Phone numbers stay on the person. Opening a lot shows the phone for each linked owner.
+
+Dashboard steps:
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database**.
+2. Select the database named **tango**.
+3. Open **Console**.
+4. Paste the full contents of `migrations/0011_lot_details.sql`.
+5. Select **Execute**.
+
+Run that file once, after `0010`. If the console says a column already exists, this file was already applied. Do not paste it again.
+
+After it succeeds, use Admin, Owners and lots. The property roster is that page. Users, lower on the same page, is only sign-in accounts: email, admin access, and last login. Open a lot to see every linked phone number. Owners see house name, mailing address, and phones on their own lot. They do not see admin notes.
+
+Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0010` is already on the remote database.
+
 ## Delete a person or a lot
 
 Board admins can remove a person or a lot. Deleting a person does not need its own migration. The master admin lock is `migrations/0009_master_admin.sql`, described above.
 
-Open the person from Admin, Users, for example [https://mytangomar.com/a/tango-mar/admin/owners](https://mytangomar.com/a/tango-mar/admin/owners). Check **Delete this person**, then submit. That removes the login, sessions, magic links, membership, lot links, notices, and messages they sent. Lots and their invoices stay. The portal keeps at least one person with edit access. The master admin for this association cannot be deleted. If that login is also a member of another association, only this association's membership is removed and the account stays. A master in another association is a different membership, so removing someone here does not remove that other lock.
+Open the person from Admin, Owners and lots, under Users, for example [https://mytangomar.com/a/tango-mar/admin/owners](https://mytangomar.com/a/tango-mar/admin/owners). Check **Delete this person**, then submit. That removes the login, sessions, magic links, membership, lot links, notices, and messages they sent. Lots and their invoices stay. The portal keeps at least one person with edit access. The master admin for this association cannot be deleted. If that login is also a member of another association, only this association's membership is removed and the account stays. A master in another association is a different membership, so removing someone here does not remove that other lock.
 
 Open a lot from the ledger, for example [https://mytangomar.com/a/tango-mar/admin/ledger](https://mytangomar.com/a/tango-mar/admin/ledger) and then the lot. Check **Delete this lot**, then submit. The lot and its owner links are removed when it has no invoices and no payments. A lot that still has either stays in place, and the page says to clear those first. Invoices on that page still open for edit, and a payment on an invoice is edited or deleted from the invoice page.
 
@@ -401,7 +430,7 @@ A board member's dashboard still shows only their own lots. Other residents' bal
 Migrations live in `migrations/`.
 
 - `associations`, `users`, `roles`, `memberships` (`is_admin` is edit access on a homeowner or a board member; a board member without it is view-only; `is_master` is the one locked master admin for that association)
-- `properties` (lots, with `lot_type` of `improved` or `unimproved`) and `property_owners`
+- `properties` (lots, with `lot_type` of `improved` or `unimproved`, plus `house_name`, mailing address, and `admin_notes`) and `property_owners`
 - `assessments` (`opens_on`, `lot_type`, amount, due date), `invoices`, `payments` (amounts in cents; payments are recorded, not charged online)
 - `documents` and `document_versions` (`current_version_id` is what residents see; `visibility` is `residents` or `board`; `folder` is an optional subfolder; `document_date` is the date that files Meeting Minutes, Budgets, and Insurance into a year folder)
 - `announcements`, `events`, `faqs`, `board_contacts`

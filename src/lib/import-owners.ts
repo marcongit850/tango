@@ -130,30 +130,7 @@ async function importRow(
     .bind(crypto.randomUUID(), association.id, user.id, row.role, isAdmin, now)
     .run();
 
-  const property = await db
-    .prepare(
-      `INSERT INTO properties (
-         id, association_id, lot_number, street_address, city, state, postal_code, status, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
-       ON CONFLICT(association_id, lot_number) DO UPDATE SET
-         street_address = excluded.street_address,
-         city = excluded.city,
-         state = excluded.state,
-         postal_code = excluded.postal_code,
-         status = 'active'
-       RETURNING id`,
-    )
-    .bind(
-      crypto.randomUUID(),
-      association.id,
-      row.lotNumber,
-      row.streetAddress,
-      row.city,
-      row.state,
-      row.postalCode,
-      now,
-    )
-    .first<{ id: string }>();
+  const property = await upsertProperty(db, association.id, row, now);
   if (!property) throw new Error("Property upsert did not return an id.");
 
   await db
@@ -234,4 +211,64 @@ async function importRow(
   }
 
   return { createdUser: !existing, invoice, credit };
+}
+
+async function upsertProperty(db: D1Database, associationId: string, row: OwnerCsvRow, now: string): Promise<{ id: string }> {
+  const columns = await db.prepare("PRAGMA table_info(properties)").all<{ name: string }>();
+  const names = new Set(columns.results.map((column) => column.name));
+  const detailColumns = ["house_name", "mailing_street", "mailing_city", "mailing_state", "mailing_postal_code"] as const;
+  const hasDetails = detailColumns.every((column) => names.has(column));
+  const property = hasDetails
+    ? await db
+        .prepare(
+          `INSERT INTO properties (
+             id, association_id, lot_number, street_address, city, state, postal_code, status,
+             house_name, mailing_street, mailing_city, mailing_state, mailing_postal_code, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(association_id, lot_number) DO UPDATE SET
+             street_address = excluded.street_address,
+             city = excluded.city,
+             state = excluded.state,
+             postal_code = excluded.postal_code,
+             status = 'active',
+             house_name = CASE WHEN excluded.house_name != '' THEN excluded.house_name ELSE properties.house_name END,
+             mailing_street = CASE WHEN excluded.mailing_street != '' THEN excluded.mailing_street ELSE properties.mailing_street END,
+             mailing_city = CASE WHEN excluded.mailing_city != '' THEN excluded.mailing_city ELSE properties.mailing_city END,
+             mailing_state = CASE WHEN excluded.mailing_state != '' THEN excluded.mailing_state ELSE properties.mailing_state END,
+             mailing_postal_code = CASE WHEN excluded.mailing_postal_code != '' THEN excluded.mailing_postal_code ELSE properties.mailing_postal_code END
+           RETURNING id`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          associationId,
+          row.lotNumber,
+          row.streetAddress,
+          row.city,
+          row.state,
+          row.postalCode,
+          row.houseName,
+          row.mailingStreet,
+          row.mailingCity,
+          row.mailingState,
+          row.mailingPostalCode,
+          now,
+        )
+        .first<{ id: string }>()
+    : await db
+        .prepare(
+          `INSERT INTO properties (
+             id, association_id, lot_number, street_address, city, state, postal_code, status, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
+           ON CONFLICT(association_id, lot_number) DO UPDATE SET
+             street_address = excluded.street_address,
+             city = excluded.city,
+             state = excluded.state,
+             postal_code = excluded.postal_code,
+             status = 'active'
+           RETURNING id`,
+        )
+        .bind(crypto.randomUUID(), associationId, row.lotNumber, row.streetAddress, row.city, row.state, row.postalCode, now)
+        .first<{ id: string }>();
+  if (!property) throw new Error("Property upsert did not return an id.");
+  return property;
 }

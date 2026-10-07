@@ -15,7 +15,7 @@ import { groupDocuments, type CategoryGroup, type FolderGroup } from "../lib/cat
 import { clip, paragraphs, esc } from "../lib/html";
 import { formatMoney } from "../lib/money";
 import type { Association } from "../types";
-import { confirmDeleteButton, dateCell, dateTimeCell, documentFileLinks, empty, methodLabel, moneySpan, textField, areaField } from "./bits";
+import { addressLine, confirmDeleteButton, contactPhones, dateCell, dateTimeCell, documentFileLinks, empty, methodLabel, moneySpan, textField, areaField } from "./bits";
 
 function excerpt(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -63,10 +63,14 @@ export function dashboardPage(options: {
         : row.balance_cents === 0
           ? `<p><span class="badge">Paid</span></p>`
           : "";
+      const house = row.house_name?.trim() ?? "";
+      const mailing = addressLine(row.mailing_street ?? "", row.mailing_city ?? "", row.mailing_state ?? "", row.mailing_postal_code ?? "");
       return `<div class="lot">
         <div>
-          <p class="lot-name">Lot ${esc(row.lot_number)}</p>
+          <p class="lot-name"><a href="${base}/lots/${esc(row.property_id)}">Lot ${esc(row.lot_number)}</a></p>
+          ${house ? `<p>${esc(house)}</p>` : ""}
           <p class="muted">${esc(row.street_address)}</p>
+          ${mailing ? `<p class="muted">Mailing ${esc(mailing)}</p>` : ""}
           ${status}
         </div>
         <div class="lot-figures">
@@ -197,6 +201,36 @@ export function dashboardPage(options: {
       ${notices ? `<ul>${notices}</ul>` : empty("No notices from the Board.")}
     </section>
   </div>`;
+}
+
+export function propertyPage(options: {
+  association: Association;
+  lotNumber: string;
+  houseName: string;
+  streetAddress: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  mailingStreet: string;
+  mailingCity: string;
+  mailingState: string;
+  mailingPostalCode: string;
+  contacts: { name: string; phone: string; isPrimary?: boolean }[];
+}): string {
+  const base = `/a/${esc(options.association.slug)}`;
+  const house = options.houseName.trim();
+  const physical = addressLine(options.streetAddress, options.city, options.state, options.postalCode);
+  const mailing = addressLine(options.mailingStreet, options.mailingCity, options.mailingState, options.mailingPostalCode);
+  return `<section class="panel">
+    <p><a href="${base}/dashboard">Dashboard</a></p>
+    <h1>Lot ${esc(options.lotNumber)}</h1>
+    ${house ? `<p><strong>${esc(house)}</strong></p>` : ""}
+    <p>Lot address: ${esc(physical)}</p>
+    ${mailing ? `<p>Mailing address: ${esc(mailing)}</p>` : `<p class="muted">Mailing address is the same as the lot.</p>`}
+    <h2>Phone numbers</h2>
+    ${contactPhones(options.contacts)}
+    <p><a href="${base}/invoices">Invoice history</a></p>
+  </section>`;
 }
 
 export function invoiceListPage(association: Association, invoices: InvoiceRow[]): string {

@@ -377,23 +377,31 @@ describe("owner login filters", () => {
     timezone: "America/Chicago",
   };
 
-  it("uses small Everyone and Past due only filters", () => {
+  it("keeps past due on the property roster and Users for sign-in accounts", () => {
     const everyone = ownersPage(association, [], [], false);
     const pastDue = ownersPage(association, [], [], true);
+    expect(everyone).toContain("<h1>Owners & lots</h1>");
     expect(everyone).toContain("<h2>Users</h2>");
     expect(everyone).toContain('id="logins"');
     expect(everyone).not.toContain(">Logins<");
-    expect(everyone).toContain(">Everyone<");
+    expect(everyone).toContain(">All lots<");
     expect(everyone).toContain(">Past due only<");
     expect(everyone).toContain('class="filters"');
-    expect(everyone).toContain('class="active" href="/a/tango-mar/admin/owners#logins">Everyone');
+    expect(everyone).toContain('class="active" href="/a/tango-mar/admin/owners#lots">All lots');
     expect(everyone).not.toContain("All owners");
     expect(everyone).not.toContain(">Delinquent<");
+    expect(everyone).not.toContain(">Everyone<");
     expect(everyone).not.toContain('class="button" href="/a/tango-mar/admin/owners#logins"');
-    expect(pastDue).toContain("<h2>Delinquent accounts</h2>");
+    expect(pastDue).toContain("<h2>Users</h2>");
+    expect(pastDue).not.toContain("<h2>Delinquent accounts</h2>");
     expect(pastDue).toContain('id="logins"');
     expect(pastDue).not.toContain(">Logins<");
-    expect(pastDue).toContain('class="active" href="/a/tango-mar/admin/owners?delinquent=1#logins">Past due only');
+    expect(pastDue).toContain('class="active" href="/a/tango-mar/admin/owners?delinquent=1#lots">Past due only');
+    const logins = pastDue.slice(pastDue.indexOf('id="logins"'));
+    expect(logins).toContain("last login");
+    expect(logins).not.toContain("Past due only");
+    expect(logins).not.toContain(">Balance<");
+    expect(logins).not.toContain("Admin notes");
   });
 });
 

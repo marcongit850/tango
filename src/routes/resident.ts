@@ -7,6 +7,7 @@ import { logError, logInfo } from "../lib/log";
 import { ensureSeedFiles } from "../lib/seed-files";
 import { applyDocumentResponseHeaders } from "../lib/files";
 import {
+  contactsForProperty,
   invoiceById,
   invoicesForUser,
   ledgerForUser,
@@ -39,6 +40,7 @@ import {
   calendarPage,
   dashboardPage,
   documentsPage,
+  propertyPage,
   faqPage,
   invoiceDetailPage,
   invoiceListPage,
@@ -87,6 +89,37 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
         news: announcements.filter((item) => item.kind !== "emergency"),
         events: upcomingEvents,
         today,
+      }),
+    });
+  });
+
+  app.get("/a/:slug/lots/:propertyId", async (c) => {
+    const { association, user, membership } = requireMember(c);
+    const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
+    if (!property) throw new NotFoundError();
+    const ownerIds = await ownerIdsForProperty(c.env.DB, association.id, property.id);
+    if (!canViewPropertyFinancials(membership, user.id, ownerIds)) throw new ForbiddenError();
+    const contacts = await contactsForProperty(c.env.DB, association.id, property.id);
+    return render(c, {
+      title: `Lot ${property.lot_number}`,
+      active: "dashboard",
+      body: propertyPage({
+        association,
+        lotNumber: property.lot_number,
+        houseName: property.house_name,
+        streetAddress: property.street_address,
+        city: property.city,
+        state: property.state,
+        postalCode: property.postal_code,
+        mailingStreet: property.mailing_street,
+        mailingCity: property.mailing_city,
+        mailingState: property.mailing_state,
+        mailingPostalCode: property.mailing_postal_code,
+        contacts: contacts.map((contact) => ({
+          name: contact.name,
+          phone: contact.phone,
+          isPrimary: Number(contact.is_primary) === 1,
+        })),
       }),
     });
   });

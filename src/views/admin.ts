@@ -328,8 +328,9 @@ export function importPage(association: Association, result?: { importResult: Im
   return `${adminNav(association.slug, "import")}
     <section class="panel">
       <h1>Import owners from CSV</h1>
-      <p>Save the Excel roster as CSV UTF-8. Required columns: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code> (homeowner or board; an older sheet may still say officer, which becomes board with admin), <code>admin</code> (yes or no), <code>starting_balance</code> (dollars owed; negative is a credit), <code>balance_as_of</code> (YYYY-MM-DD), <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>.</p>
-      <p>A positive starting balance creates one opening invoice per lot. Importing again does not add a second opening balance. Sample file: <code>samples/tango-mar-owners.csv</code>.</p>
+      <p>Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>.</p>
+      <p>A positive starting balance adds one opening invoice per lot (re-import will not double it).</p>
+      <p><a href="/a/${esc(association.slug)}/admin/import/template.csv">Download template</a></p>
       ${summary}
       ${issueList ? `<ul>${issueList}</ul>` : ""}
       <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/import" enctype="multipart/form-data">

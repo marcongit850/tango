@@ -616,3 +616,36 @@ describe("admin overview outstanding", () => {
     }
   });
 });
+
+describe("owner import template", () => {
+  it("downloads the sample CSV for an admin and refuses a resident", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const admin = await signIn(sqlite, "user_jordan");
+    const resident = await signIn(sqlite, "user_sam");
+    try {
+      const page = await app.request("http://localhost/a/tango-mar/admin/import", { headers: { Cookie: `tango_session=${admin}` } }, env);
+      expect(await page.text()).toContain('href="/a/tango-mar/admin/import/template.csv"');
+      const denied = await app.request(
+        "http://localhost/a/tango-mar/admin/import/template.csv",
+        { headers: { Cookie: `tango_session=${resident}` } },
+        env,
+      );
+      expect(denied.status).toBe(403);
+      const file = await app.request(
+        "http://localhost/a/tango-mar/admin/import/template.csv",
+        { headers: { Cookie: `tango_session=${admin}` } },
+        env,
+      );
+      expect(file.status).toBe(200);
+      expect(file.headers.get("Content-Type")).toBe("text/csv; charset=utf-8");
+      expect(file.headers.get("Content-Disposition")).toBe('attachment; filename="tango-mar-owners-template.csv"');
+      const body = await file.text();
+      expect(body).toBe(readFileSync("samples/owner-import-template.csv", "utf8"));
+      expect(body.split("\n").filter((line) => line.length > 0)).toHaveLength(3);
+    } finally {
+      sqlite.close();
+    }
+  });
+});

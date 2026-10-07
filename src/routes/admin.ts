@@ -47,6 +47,7 @@ import { changeLoginEmail } from "../lib/login-email";
 import { isDocumentCategory } from "../lib/categories";
 import { annualDues, defaultDuesYear, isLotType } from "../lib/dues";
 import { parseOwnersCsv } from "../lib/csv";
+import { OWNER_IMPORT_TEMPLATE } from "../lib/owner-import-template";
 import { formatAddress, formatDateTime, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../lib/dates";
 import {
   deliverOwnerEmails,
@@ -580,6 +581,17 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   app.get("/a/:slug/admin/import", async (c) => {
     const { association } = requireStaff(c);
     return render(c, { title: "CSV import", active: "admin", body: importPage(association) });
+  });
+
+  app.get("/a/:slug/admin/import/template.csv", (c) => {
+    const { association } = requireStaff(c);
+    return new Response(OWNER_IMPORT_TEMPLATE, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${association.slug}-owners-template.csv"`,
+        "Cache-Control": "private, no-store",
+      },
+    });
   });
 
   app.post("/a/:slug/admin/import", async (c) => {

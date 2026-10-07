@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { activeAdminContacts, canViewPropertyFinancials, isAdmin, keepsAnAdmin, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
 import { annualDues, defaultDuesYear, lotsToInvoice } from "../src/lib/dues";
 import { landingAccount, loggedOutNav, render } from "../src/views/layout";
-import { adminHome, documentDetailPage, documentsAdminPage, ledgerPage, newsAdminPage, ownerDetailPage, paymentInvoiceVisible } from "../src/views/admin";
+import { adminHome, documentDetailPage, documentsAdminPage, importPage, ledgerPage, newsAdminPage, ownerDetailPage, paymentInvoiceVisible } from "../src/views/admin";
 import { newsEdit } from "../src/routes/admin";
 import { listOwners, type AnnouncementRow, type DocumentRow, type EventRow, type NoticeRow, type PropertyRow, type VersionRow } from "../src/db";
 import { documentContentDisposition, isBrowserViewable } from "../src/lib/files";
@@ -14,6 +14,7 @@ import type { OwnerListRow } from "../src/db";
 import type { AppBindings, Association, Membership, User } from "../src/types";
 import type { Context } from "hono";
 import { parseCsv, parseOwnersCsv } from "../src/lib/csv";
+import { OWNER_IMPORT_TEMPLATE } from "../src/lib/owner-import-template";
 import { formatDateTime, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../src/lib/dates";
 import { balanceCents, csvText, formatMoney, invoiceStatus, isDelinquent, parseMoneyToCents } from "../src/lib/money";
 import { sha256Hex } from "../src/lib/tokens";
@@ -97,6 +98,55 @@ describe("owner csv", () => {
     });
     expect(bad.rows).toHaveLength(0);
     expect(bad.errors[0].message).toMatch(/Role/);
+  });
+
+  it("offers a short template with the documented columns", () => {
+    const association = {
+      id: "assoc_tango_mar",
+      slug: "tango-mar",
+      name: "Tango Mar",
+      legal_name: "Tango Mar Property Owners Association",
+      address_line1: "",
+      city: "Miramar Beach",
+      state: "FL",
+      postal_code: "32550",
+      county: "",
+      timezone: "America/Chicago",
+    };
+    const html = importPage(association);
+    expect(html).toContain("Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>.");
+    expect(html).toContain("A positive starting balance adds one opening invoice per lot (re-import will not double it).");
+    expect(html).toContain('<a href="/a/tango-mar/admin/import/template.csv">Download template</a>');
+    expect(html).not.toContain("Save the Excel roster");
+    expect(html).not.toContain("samples/tango-mar-owners.csv");
+    expect(html).not.toContain("\u2014");
+    expect(OWNER_IMPORT_TEMPLATE).toBe(readFileSync("samples/owner-import-template.csv", "utf8"));
+    const parsed = parseOwnersCsv(OWNER_IMPORT_TEMPLATE, {
+      city: "Miramar Beach",
+      state: "FL",
+      postalCode: "32550",
+      today: "2026-10-06",
+    });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.rows).toHaveLength(2);
+    expect(parsed.rows[0]).toMatchObject({
+      email: "casey.nguyen@example.com",
+      name: "Casey Nguyen",
+      lotNumber: "27",
+      role: "homeowner",
+      isAdmin: null,
+      startingBalanceCents: 37550,
+      balanceAsOf: "2026-01-15",
+      city: "Miramar Beach",
+      state: "FL",
+      postalCode: "32550",
+    });
+    expect(parsed.rows[1]).toMatchObject({
+      email: "jordan.lee@example.com",
+      role: "board",
+      isAdmin: true,
+      startingBalanceCents: 0,
+    });
   });
 
   it("keeps quoted line breaks inside a cell", () => {

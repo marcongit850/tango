@@ -169,7 +169,7 @@ describe("annual dues delete", () => {
       duesYear: 2027,
     });
     expect(html).toContain("Delete removes the assessment and its unpaid invoices.");
-    expect(html).toContain("Delete is refused when a payment is recorded on one of those invoices.");
+    expect(html).toContain("Delete is blocked when a payment is recorded on one of those invoices.");
     const assigned = formByAction(html, "/a/tango-mar/admin/assessments/assessment_2027_improved/delete");
     expect(assigned).toContain('type="checkbox" name="confirm" value="yes" required');
     expect(assigned).toContain("Delete this assessment and its unpaid invoices");
@@ -337,6 +337,9 @@ describe("annual dues assign", () => {
     expect(assign).toContain('class="secondary" type="submit">Assign to matching lots</button>');
     expect(html).toContain("On the open date, each active lot of that type that does not already have this assessment gets an invoice.");
     expect(html).toContain("A voided invoice stays void.");
+    expect(html).toContain("Leave the open date blank if you want to invoice only by hand.");
+    expect(html).toContain("Upcoming stays Scheduled until that open date.");
+    expect(html).not.toContain("A blank open date is not automatic.");
     expect(assign).not.toContain('type="hidden" name="confirm"');
     expect(html.indexOf('action="/a/tango-mar/admin/assessments/assessment_2027_improved/assign"')).toBeLessThan(
       html.indexOf("<h3>Add a year</h3>"),

@@ -173,15 +173,11 @@ describe("message delete controls", () => {
     const resident = messagesPage(association, [], [{ id: "prop_27", lot_number: "27" }]);
     expect(resident).toContain("<h1>Messages</h1>");
     expect(resident).toContain("Send a private message to the Board. Messages are not visible to other residents.");
-    expect(resident).toContain(
-      "Board members and authorized administrators can review incoming owner messages under Admin → Messages.",
-    );
+    expect(resident).not.toContain("Admin → Messages");
+    expect(resident).not.toContain("authorized administrators");
     expect(resident).toContain("No messages yet.");
     expect(resident).not.toContain("Private notes to the board");
     expect(resident).not.toContain("\u2014");
-
-    const admin = messagesPage(association, [], [], "/a/tango-mar/admin/messages");
-    expect(admin).toContain('href="/a/tango-mar/admin/messages">Admin → Messages</a>');
   });
 
   it("lets the resident who started a thread delete it, and only their extra replies", () => {

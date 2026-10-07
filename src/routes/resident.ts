@@ -262,7 +262,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/a/:slug/messages", async (c) => {
-    const { association, user, membership } = requireMember(c);
+    const { association, user } = requireMember(c);
     const [threads, properties] = await Promise.all([
       threadsForViewer(c.env.DB, association.id, user.id, false),
       ownedProperties(c, association.id, user.id),
@@ -274,7 +274,6 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
         association,
         threads,
         properties.map((property) => ({ id: property.id, lot_number: property.lot_number })),
-        isAdmin(membership) ? `/a/${association.slug}/admin/messages` : "",
       ),
     });
   });

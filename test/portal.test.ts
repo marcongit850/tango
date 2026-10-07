@@ -16,7 +16,7 @@ import { parseCsv, parseOwnersCsv } from "../src/lib/csv";
 import { isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../src/lib/dates";
 import { balanceCents, csvText, formatMoney, invoiceStatus, isDelinquent, parseMoneyToCents } from "../src/lib/money";
 import { sha256Hex } from "../src/lib/tokens";
-import { deliverOwnerEmails, loginAudienceForVisibility, ownerEmailFlash, ownerNoticeEmail, uniqueLoginEmails } from "../src/lib/email";
+import { deliverOwnerEmails, fileToResendAttachment, loginAudienceForVisibility, ownerEmailFlash, ownerNoticeEmail, uniqueLoginEmails } from "../src/lib/email";
 import { activeLoginEmails } from "../src/db";
 
 describe("money", () => {
@@ -525,6 +525,29 @@ describe("document viewing", () => {
 });
 
 describe("email owners", () => {
+  const owner: OwnerListRow = {
+    user_id: "user_sam",
+    email: "sam.rivera@example.com",
+    name: "Sam Rivera",
+    phone: "",
+    role_id: "homeowner",
+    is_admin: 0,
+    status: "active",
+    property_id: "prop_14",
+    lot_number: "14",
+    street_address: "Lot 14",
+  };
+
+  it("starts Email owner unchecked on a portal notice and leaves the balance reminder alone", () => {
+    const html = ownerDetailPage({ association, owner, balance: 0, lots: [], properties: [] });
+    const form = formByAction(html, "/a/tango-mar/admin/owners/user_sam/notice");
+    expect(form).toContain('<input type="checkbox" name="email_owner" value="1"> Email owner');
+    expect(form).not.toMatch(/name="email_owner"[^>]*checked/);
+    expect(form).toContain('enctype="multipart/form-data"');
+    expect(formByAction(html, "/a/tango-mar/admin/owners/user_sam/remind")).not.toContain("email_owner");
+    expect(html).not.toContain("\u2014");
+  });
+
   const association: Association = {
     id: "assoc_tango_mar",
     slug: "tango-mar",
@@ -658,6 +681,79 @@ describe("email owners", () => {
     expect(doc.href).toBe("https://mytangomar.com/a/tango-mar/documents");
     expect(doc.text).not.toMatch(/attachment|r2_key/i);
     expect(doc.text).not.toContain("\u2014");
+
+    const notice = ownerNoticeEmail({
+      associationName: "Tango Mar",
+      slug: "tango-mar",
+      kind: "account",
+      title: "Gate\ncode",
+      summary: "The new code is 1234.",
+      attachmentName: "rules.pdf",
+    });
+    expect(notice.subject).toBe("Tango Mar: Gate code");
+    expect(notice.href).toBe("https://mytangomar.com/a/tango-mar/notices");
+    expect(notice.text).toContain("Tango Mar posted a notice.");
+    expect(notice.text).toContain("The new code is 1234.");
+    expect(notice.text).toContain("Attached file: rules.pdf");
+    expect(notice.text).toContain(notice.href);
+    expect(notice.text).not.toContain("\u2014");
+    expect(
+      ownerNoticeEmail({
+        associationName: "Tango Mar",
+        slug: "tango-mar",
+        kind: "account",
+        title: "Gate code",
+        summary: "The new code is 1234.",
+      }).text,
+    ).not.toContain("Attached file");
+  });
+
+  it("attaches a notice file through Resend and skips mail when Resend is missing", async () => {
+    const file = new File([Uint8Array.from([1, 2, 3, 4])], "rules.pdf", { type: "application/pdf" });
+    const attachment = await fileToResendAttachment(file);
+    expect(attachment).toEqual({
+      filename: "rules.pdf",
+      content: btoa(String.fromCharCode(1, 2, 3, 4)),
+      contentType: "application/pdf",
+    });
+    expect(await fileToResendAttachment(new File([], "empty.pdf", { type: "application/pdf" }))).toBeNull();
+    expect(await fileToResendAttachment(new File(["hi"], "notes.exe", { type: "application/octet-stream" }))).toBeNull();
+
+    const bodies: { to: string[]; attachments?: { filename: string; content: string; content_type: string }[]; html?: unknown; text: string }[] = [];
+    const delivery = await deliverOwnerEmails({
+      apiKey: "test-key",
+      from: "Tango Mar <donotreply@mytangomar.com>",
+      recipients: [{ email: "sam.rivera@example.com" }],
+      subject: "Tango Mar: Gate code",
+      text: "Open notices\nhttps://mytangomar.com/a/tango-mar/notices",
+      attachments: attachment ? [attachment] : undefined,
+      fetchImpl: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)) as (typeof bodies)[number]);
+        return new Response("ok", { status: 200 });
+      },
+    });
+    expect(delivery).toEqual({ sent: 1, failed: 0, skipped: false });
+    expect(bodies[0]?.to).toEqual(["sam.rivera@example.com"]);
+    expect(bodies[0]?.attachments).toEqual([
+      { filename: "rules.pdf", content: attachment?.content, content_type: "application/pdf" },
+    ]);
+    expect(bodies[0]?.html).toBeUndefined();
+    expect(
+      ownerEmailFlash({
+        saved: "Notice posted to their portal.",
+        audience: "owners",
+        recipients: 1,
+        delivery: { sent: 0, failed: 0, skipped: true },
+      }),
+    ).toMatchObject({ message: "Notice posted to their portal. Email was not sent.", tone: "warn" });
+    expect(
+      ownerEmailFlash({
+        saved: "Notice posted to their portal.",
+        audience: "owners",
+        recipients: 1,
+        delivery,
+      }).message,
+    ).toBe("Notice posted to their portal. Emailed 1 owner.");
   });
 
   it("keeps one email per person and sends board-only files only to the board", () => {

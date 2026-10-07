@@ -234,9 +234,10 @@ export function ownerDetailPage(options: {
     <section class="split">
       <article class="panel">
         <h2>Portal notice</h2>
-        <form class="fields" method="post" action="${esc(base)}/notice">
+        <form class="fields" method="post" action="${esc(base)}/notice" enctype="multipart/form-data">
           ${textField("Title", "title", { required: true })}
           ${areaField("Message", "body", "", true)}
+          ${emailOwnersField("Email owner", "email_owner")}
           <button type="submit">Post to their notices</button>
         </form>
       </article>
@@ -717,8 +718,8 @@ function duesSection(options: {
   </section>`;
 }
 
-function emailOwnersField(): string {
-  return `<label><input type="checkbox" name="email_owners" value="1"> Email owners</label>`;
+function emailOwnersField(label = "Email owners", name = "email_owners"): string {
+  return `<label><input type="checkbox" name="${name}" value="1"> ${label}</label>`;
 }
 
 function newsItemActions(

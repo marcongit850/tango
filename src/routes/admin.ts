@@ -8,6 +8,8 @@ import {
   declineJoinRequest,
   deleteAssessment,
   deleteJoinRequest,
+  deleteMessage,
+  deleteMessageThread,
   documentVersions,
   duesColumnsReady,
   ledgerForAssociation,
@@ -1606,6 +1608,54 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       });
     }
     return redirectTo(c, back, "Thread marked reviewed.");
+  });
+
+  app.post("/a/:slug/admin/messages/:threadId/delete", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const threadId = c.req.param("threadId");
+    const list = `/a/${association.slug}/admin/messages`;
+    const threadPath = `${list}/${threadId}`;
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, threadPath, "Confirm the delete first.", "warn");
+    const messages = await threadMessages(c.env.DB, association.id, threadId);
+    if (messages.length === 0) return redirectTo(c, list, "That thread is already gone.", "warn");
+    const removed = await deleteMessageThread(c.env.DB, association.id, association.slug, threadId);
+    if (!removed) return redirectTo(c, list, "That thread is already gone.", "warn");
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "message_thread_delete",
+      entityType: "message",
+      entityId: threadId,
+      detail: messages[0].subject,
+    });
+    return redirectTo(c, list, "Message thread deleted.");
+  });
+
+  app.post("/a/:slug/admin/messages/:threadId/messages/:messageId/delete", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const threadId = c.req.param("threadId");
+    const messageId = c.req.param("messageId");
+    const list = `/a/${association.slug}/admin/messages`;
+    const threadPath = `${list}/${threadId}`;
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, threadPath, "Confirm the delete first.", "warn");
+    const messages = await threadMessages(c.env.DB, association.id, threadId);
+    const target = messages.find((message) => message.id === messageId);
+    if (!target) return redirectTo(c, messages.length === 0 ? list : threadPath, "That reply is already gone.", "warn");
+    const removed = await deleteMessage(c.env.DB, association.id, association.slug, threadId, messageId);
+    if (!removed) return redirectTo(c, threadPath, "That reply is already gone.", "warn");
+    const remaining = await threadMessages(c.env.DB, association.id, threadId);
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: remaining.length === 0 ? "message_thread_delete" : "message_delete",
+      entityType: "message",
+      entityId: remaining.length === 0 ? threadId : messageId,
+      detail: target.subject,
+    });
+    if (remaining.length === 0) return redirectTo(c, list, "Message thread deleted.");
+    return redirectTo(c, threadPath, "Reply deleted.");
   });
 
   app.get("/a/:slug/admin/audit", async (c) => {

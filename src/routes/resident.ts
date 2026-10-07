@@ -15,6 +15,8 @@ import {
   listEvents,
   listFaqs,
   noticeFileForUser,
+  deleteMessage,
+  deleteMessageThread,
   notificationsForUser,
   ownerIdsForProperty,
   paymentById,
@@ -23,6 +25,7 @@ import {
   staffUserIds,
   threadMessages,
   threadsForViewer,
+  type MessageRow,
   upcomingAssessments,
   versionById,
   visibleAnnouncements,
@@ -303,9 +306,17 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/a/:slug/messages/:threadId", async (c) => {
-    const { association } = requireMember(c);
+    const { association, user, membership } = requireMember(c);
     const messages = await loadThread(c, association.id, c.req.param("threadId"));
-    return render(c, { title: messages[0].subject, active: "messages", body: threadPage(association, messages[0].subject, messages) });
+    return render(c, {
+      title: messages[0].subject,
+      active: "messages",
+      body: threadPage(association, messages[0].subject, messages, {
+        allowThreadDelete: isAdmin(membership) || userStartedThread(messages, user.id),
+        replyDelete: isAdmin(membership) ? "all" : "own",
+        viewerUserId: user.id,
+      }),
+    });
   });
 
   app.post("/a/:slug/messages/:threadId/reply", async (c) => {
@@ -352,6 +363,67 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     const back = next.startsWith(`/a/${association.slug}/admin/messages/`) ? next : `/a/${association.slug}/messages/${threadId}`;
     return redirectTo(c, back, "Reply sent.");
   });
+
+  app.post("/a/:slug/messages/:threadId/delete", async (c) => {
+    const { association, user, membership } = requireMember(c);
+    const fields = await readForm(c);
+    const threadId = c.req.param("threadId");
+    const list = `/a/${association.slug}/messages`;
+    const threadPath = `${list}/${threadId}`;
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, threadPath, "Confirm the delete first.", "warn");
+    const messages = await threadMessages(c.env.DB, association.id, threadId);
+    if (messages.length === 0) return redirectTo(c, list, "That thread is already gone.", "warn");
+    if (!isAdmin(membership) && !messages.some((message) => message.from_user_id === user.id)) throw new ForbiddenError();
+    if (!isAdmin(membership) && !userStartedThread(messages, user.id)) {
+      return redirectTo(c, threadPath, "You can delete a thread you started.", "warn");
+    }
+    const removed = await deleteMessageThread(c.env.DB, association.id, association.slug, threadId);
+    if (!removed) return redirectTo(c, list, "That thread is already gone.", "warn");
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "message_thread_delete",
+      entityType: "message",
+      entityId: threadId,
+      detail: messages[0].subject,
+    });
+    return redirectTo(c, list, "Message thread deleted.");
+  });
+
+  app.post("/a/:slug/messages/:threadId/messages/:messageId/delete", async (c) => {
+    const { association, user, membership } = requireMember(c);
+    const fields = await readForm(c);
+    const threadId = c.req.param("threadId");
+    const messageId = c.req.param("messageId");
+    const list = `/a/${association.slug}/messages`;
+    const threadPath = `${list}/${threadId}`;
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, threadPath, "Confirm the delete first.", "warn");
+    const messages = await threadMessages(c.env.DB, association.id, threadId);
+    if (messages.length === 0) return redirectTo(c, list, "That reply is already gone.", "warn");
+    if (!isAdmin(membership) && !messages.some((message) => message.from_user_id === user.id)) throw new ForbiddenError();
+    const target = messages.find((message) => message.id === messageId);
+    if (!target) return redirectTo(c, threadPath, "That reply is already gone.", "warn");
+    if (!isAdmin(membership) && target.from_user_id !== user.id) {
+      return redirectTo(c, threadPath, "You can delete your own reply.", "warn");
+    }
+    const ownRemaining = messages.filter((message) => message.from_user_id === user.id && message.id !== messageId).length;
+    if (!isAdmin(membership) && ownRemaining === 0 && messages.length > 1) {
+      return redirectTo(c, threadPath, "Delete the thread to remove the conversation.", "warn");
+    }
+    const removed = await deleteMessage(c.env.DB, association.id, association.slug, threadId, messageId);
+    if (!removed) return redirectTo(c, threadPath, "That reply is already gone.", "warn");
+    const remaining = await threadMessages(c.env.DB, association.id, threadId);
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: remaining.length === 0 ? "message_thread_delete" : "message_delete",
+      entityType: "message",
+      entityId: remaining.length === 0 ? threadId : messageId,
+      detail: target.subject,
+    });
+    if (remaining.length === 0) return redirectTo(c, list, "Message thread deleted.");
+    return redirectTo(c, threadPath, "Reply deleted.");
+  });
 }
 
 async function assertPropertyAccess(c: AppContext, associationId: string, propertyId: string): Promise<void> {
@@ -374,6 +446,13 @@ async function ownedProperties(c: AppContext, associationId: string, userId: str
     .bind(associationId, userId)
     .all<{ id: string; lot_number: string; street_address: string; city: string; state: string; postal_code: string; status: string }>();
   return results;
+}
+
+function userStartedThread(messages: MessageRow[], userId: string): boolean {
+  const threadId = messages[0]?.thread_id ?? "";
+  if (messages.some((message) => message.id === threadId && message.from_user_id === userId)) return true;
+  const root = messages.find((message) => message.parent_id === null);
+  return root?.from_user_id === userId;
 }
 
 async function loadThread(c: AppContext, associationId: string, threadId: string) {

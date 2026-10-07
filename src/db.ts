@@ -1409,6 +1409,67 @@ export async function threadsForViewer(
   return results;
 }
 
+export function messageThreadHrefs(slug: string, threadId: string): { resident: string; admin: string } {
+  return {
+    resident: `/a/${slug}/messages/${threadId}`,
+    admin: `/a/${slug}/admin/messages/${threadId}`,
+  };
+}
+
+/** Drops portal notices that still point at a message thread. */
+export async function clearMessageThreadNotices(
+  db: D1Database,
+  associationId: string,
+  slug: string,
+  threadId: string,
+): Promise<void> {
+  const hrefs = messageThreadHrefs(slug, threadId);
+  await db
+    .prepare(
+      `DELETE FROM notifications
+       WHERE association_id = ? AND kind = 'message' AND href IN (?, ?)`,
+    )
+    .bind(associationId, hrefs.resident, hrefs.admin)
+    .run();
+}
+
+export async function deleteMessageThread(
+  db: D1Database,
+  associationId: string,
+  slug: string,
+  threadId: string,
+): Promise<boolean> {
+  if (!threadId) return false;
+  const result = await db
+    .prepare("DELETE FROM messages WHERE association_id = ? AND thread_id = ?")
+    .bind(associationId, threadId)
+    .run();
+  if ((result.meta.changes ?? 0) === 0) return false;
+  await clearMessageThreadNotices(db, associationId, slug, threadId);
+  return true;
+}
+
+export async function deleteMessage(
+  db: D1Database,
+  associationId: string,
+  slug: string,
+  threadId: string,
+  messageId: string,
+): Promise<boolean> {
+  if (!threadId || !messageId) return false;
+  const result = await db
+    .prepare("DELETE FROM messages WHERE association_id = ? AND thread_id = ? AND id = ?")
+    .bind(associationId, threadId, messageId)
+    .run();
+  if ((result.meta.changes ?? 0) === 0) return false;
+  const remaining = await db
+    .prepare("SELECT COUNT(*) AS n FROM messages WHERE association_id = ? AND thread_id = ?")
+    .bind(associationId, threadId)
+    .first<{ n: number }>();
+  if (Number(remaining?.n ?? 0) === 0) await clearMessageThreadNotices(db, associationId, slug, threadId);
+  return true;
+}
+
 export type AuditRow = {
   id: string;
   action: string;

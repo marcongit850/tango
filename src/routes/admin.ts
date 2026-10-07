@@ -12,6 +12,8 @@ import {
   deleteMessageThread,
   documentVersions,
   duesColumnsReady,
+  invoiceById,
+  invoicesForProperty,
   ledgerForAssociation,
   ledgerForUser,
   listAssessments,
@@ -27,6 +29,7 @@ import {
   markThreadReviewed,
   messageWaitingOnBoard,
   notify,
+  paymentsForInvoice,
   propertyInAssociation,
   refreshInvoiceStatus,
   reviewJoinRequest,
@@ -71,7 +74,9 @@ import {
   documentDetailPage,
   documentsAdminPage,
   importPage,
+  invoiceAdminPage,
   joinRequestsPage,
+  ledgerLotPage,
   ledgerPage,
   newsAdminPage,
   ownerDetailPage,
@@ -84,6 +89,7 @@ import { fileValue, readForm, redirectTo, requireStaff, textValue, type AppConte
 const ROLES = new Set<MembershipRole>(["homeowner", "board"]);
 const STATUSES = new Set<MembershipStatus>(["invited", "active", "inactive"]);
 const METHODS = new Set(["check", "cash", "ach_recorded", "other"]);
+const INVOICE_STATUSES = new Set(["open", "partial", "paid", "void"]);
 
 export function registerAdminRoutes(app: Hono<AppBindings>): void {
   app.get("/a/:slug/admin", async (c) => {
@@ -152,13 +158,15 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       listProperties(c.env.DB, association.id),
     ]);
     const primary = owner.property_id ? ledger.find((row) => row.property_id === owner.property_id) : undefined;
+    const balanceLot = primary ?? (ledger.length === 1 ? ledger[0] : undefined);
     return render(c, {
       title: owner.name,
       active: "admin",
       body: ownerDetailPage({
         association,
         owner,
-        balance: primary ? primary.balance_cents : ledger.reduce((sum, row) => sum + row.balance_cents, 0),
+        balance: balanceLot ? balanceLot.balance_cents : ledger.reduce((sum, row) => sum + row.balance_cents, 0),
+        balanceHref: balanceLot ? `/a/${association.slug}/admin/ledger/${balanceLot.property_id}` : "",
         lots: [],
         properties,
       }),
@@ -600,6 +608,44 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     });
   });
 
+  app.get("/a/:slug/admin/ledger/:propertyId", async (c) => {
+    const { association } = requireStaff(c);
+    const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
+    if (!property) throw new NotFoundError();
+    const today = todayIso(association.timezone);
+    const [ledger, owners, invoices] = await Promise.all([
+      ledgerForAssociation(c.env.DB, association.id, today),
+      listOwners(c.env.DB, association.id),
+      invoicesForProperty(c.env.DB, association.id, property.id),
+    ]);
+    const owner = owners.find((row) => row.property_id === property.id);
+    const balance = ledger.find((row) => row.property_id === property.id) ?? null;
+    return render(c, {
+      title: `Lot ${property.lot_number}`,
+      active: "admin",
+      body: ledgerLotPage({
+        association,
+        lotNumber: property.lot_number,
+        streetAddress: property.street_address,
+        ownerName: owner?.name ?? "",
+        balance,
+        invoices,
+      }),
+    });
+  });
+
+  app.get("/a/:slug/admin/invoices/:invoiceId", async (c) => {
+    const { association } = requireStaff(c);
+    const invoice = await invoiceById(c.env.DB, association.id, c.req.param("invoiceId"));
+    if (!invoice) throw new NotFoundError();
+    const payments = await paymentsForInvoice(c.env.DB, association.id, invoice.id);
+    return render(c, {
+      title: invoice.invoice_number,
+      active: "admin",
+      body: invoiceAdminPage({ association, invoice, payments }),
+    });
+  });
+
   app.post("/a/:slug/admin/invoices", async (c) => {
     const { association, user } = requireStaff(c);
     const fields = await readForm(c);
@@ -633,6 +679,84 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       detail: `${invoiceNumber} for lot ${property.lot_number}`,
     });
     return redirectTo(c, `/a/${association.slug}/admin/ledger`, `Invoice ${invoiceNumber} recorded.`);
+  });
+
+  app.post("/a/:slug/admin/invoices/:invoiceId", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const id = c.req.param("invoiceId");
+    const existing = await invoiceById(c.env.DB, association.id, id);
+    if (!existing) throw new NotFoundError();
+    const back = `/a/${association.slug}/admin/invoices/${id}`;
+    const description = textValue(fields, "description", 200);
+    const amount = parseMoneyToCents(textValue(fields, "amount", 40));
+    const lateFee = parseMoneyToCents(textValue(fields, "late_fee", 40) || "0");
+    const issuedOn = textValue(fields, "issued_on", 20);
+    const dueOn = textValue(fields, "due_on", 20);
+    const status = textValue(fields, "status", 20);
+    if (!description || amount === null || amount < 0 || lateFee === null || lateFee < 0 || !isIsoDate(issuedOn) || !isIsoDate(dueOn) || !INVOICE_STATUSES.has(status)) {
+      return redirectTo(c, back, "Check the description, amounts, dates, and status.", "warn");
+    }
+    const nextStatus = status === "void" ? "void" : "open";
+    await c.env.DB
+      .prepare(
+        `UPDATE invoices
+         SET description = ?, amount_cents = ?, late_fee_cents = ?, issued_on = ?, due_on = ?, status = ?
+         WHERE association_id = ? AND id = ?`,
+      )
+      .bind(description, amount, lateFee, issuedOn, dueOn, nextStatus, association.id, id)
+      .run();
+    if (nextStatus !== "void") await refreshInvoiceStatus(c.env.DB, association.id, id);
+    const saved = await invoiceById(c.env.DB, association.id, id);
+    if (!saved) throw new NotFoundError();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "invoice_update",
+      entityType: "invoice",
+      entityId: id,
+      detail: `${existing.invoice_number} for lot ${existing.lot_number}`,
+    });
+    const message =
+      saved?.status === "void"
+        ? `Invoice ${existing.invoice_number} saved as void. It no longer counts toward the balance.`
+        : saved && saved.status !== status
+          ? `Invoice ${existing.invoice_number} saved. Status is ${saved.status} based on payments on this invoice.`
+          : `Invoice ${existing.invoice_number} saved.`;
+    return redirectTo(c, back, message);
+  });
+
+  app.post("/a/:slug/admin/invoices/:invoiceId/delete", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const id = c.req.param("invoiceId");
+    const invoice = await invoiceById(c.env.DB, association.id, id);
+    if (!invoice) throw new NotFoundError();
+    const back = `/a/${association.slug}/admin/invoices/${id}`;
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, back, "Confirm the delete first.", "warn");
+    const result = await c.env.DB
+      .prepare(
+        `DELETE FROM invoices
+         WHERE association_id = ? AND id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM payments pay
+             WHERE pay.association_id = invoices.association_id AND pay.invoice_id = invoices.id
+           )`,
+      )
+      .bind(association.id, id)
+      .run();
+    if ((result.meta.changes ?? 0) === 0) {
+      return redirectTo(c, back, "That invoice was not deleted because a payment is recorded on it.", "warn");
+    }
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "invoice_delete",
+      entityType: "invoice",
+      entityId: id,
+      detail: `${invoice.invoice_number} for lot ${invoice.lot_number}`,
+    });
+    return redirectTo(c, `/a/${association.slug}/admin/ledger/${invoice.property_id}`, `Invoice ${invoice.invoice_number} deleted.`);
   });
 
   app.post("/a/:slug/admin/assessments", async (c) => {

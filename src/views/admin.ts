@@ -13,6 +13,8 @@ import type {
   DocumentRow,
   EventRow,
   FaqRow,
+  InvoicePaymentRow,
+  InvoiceRow,
   JoinRequestRow,
   LotRow,
   OwnerListRow,
@@ -29,6 +31,7 @@ import {
   confirmDeleteButton,
   documentFileLinks,
   empty,
+  methodLabel,
   moneySpan,
   roleLabel,
   selectField,
@@ -62,6 +65,20 @@ function adminNav(slug: string, current: string): string {
       return `<a class="button ${id === current ? "" : "secondary"}" href="${href}">${label}</a>`;
     })
     .join(" ")}</p>`;
+}
+
+function moneyLink(href: string, cents: number): string {
+  return `<a class="money-link" href="${esc(href)}">${moneySpan(cents)}</a>`;
+}
+
+function ownerBalanceCell(slug: string, owner: { property_id: string | null; balance_cents?: number }): string {
+  if (owner.balance_cents === undefined) return "";
+  if (!owner.property_id) return moneySpan(owner.balance_cents);
+  return moneyLink(`/a/${slug}/admin/ledger/${owner.property_id}`, owner.balance_cents);
+}
+
+function dollarsInput(cents: number): string {
+  return (Number(cents) / 100).toFixed(2);
 }
 
 export function adminHome(options: {
@@ -115,7 +132,7 @@ export function ownersPage(
         <td>${esc(roleLabel(owner.role_id, owner.is_admin === 1))}</td>
         <td>${esc(owner.status)}</td>
         <td>${owner.lot_number ? `Lot ${esc(owner.lot_number)}` : "None"}</td>
-        <td>${owner.balance_cents === undefined ? "" : moneySpan(owner.balance_cents)}</td>
+        <td>${ownerBalanceCell(association.slug, owner)}</td>
         <td>${owner.delinquent ? `<span class="badge late">Past due</span>` : ""}</td>
       </tr>`,
     )
@@ -174,6 +191,7 @@ export function ownersPage(
     </section>
     <section class="panel" id="logins">
       <h2>${delinquentOnly ? "Delinquent accounts" : "Users"}</h2>
+      <p class="muted">A balance opens that lot's invoices.</p>
       <p class="filters">
         <a ${delinquentOnly ? "" : `class="active"`} href="/a/${esc(association.slug)}/admin/owners#logins">Everyone</a>
         <a ${delinquentOnly ? `class="active"` : ""} href="/a/${esc(association.slug)}/admin/owners?delinquent=1#logins">Past due only</a>
@@ -186,6 +204,7 @@ export function ownerDetailPage(options: {
   association: Association;
   owner: OwnerListRow;
   balance: number | null;
+  balanceHref?: string;
   lots: PropertyRow[];
   properties: PropertyRow[];
 }): string {
@@ -198,7 +217,7 @@ export function ownerDetailPage(options: {
       <h1>${esc(owner.name)}</h1>
       <p>${esc(owner.email)}${owner.phone ? ` · ${esc(owner.phone)}` : ""}</p>
       <p>${esc(roleLabel(owner.role_id, owner.is_admin === 1))} · ${esc(owner.status)}</p>
-      <p>Primary lot balance ${options.balance === null ? "" : moneySpan(options.balance)}</p>
+      <p>Primary lot balance ${options.balance === null ? "" : options.balanceHref ? moneyLink(options.balanceHref, options.balance) : moneySpan(options.balance)}</p>
       <h2>Name and phone</h2>
       <p class="muted">Name is required. Phone is optional and shows on this page for the board.</p>
       <form class="fields" method="post" action="${esc(base)}/profile">
@@ -298,17 +317,18 @@ export function ledgerPage(options: {
   duesYear: number;
 }): string {
   const rows = options.ledger
-    .map(
-      (row) => `<tr>
-        <td>Lot ${esc(row.lot_number)}</td>
+    .map((row) => {
+      const href = `/a/${options.association.slug}/admin/ledger/${row.property_id}`;
+      return `<tr>
+        <td><a href="${esc(href)}">Lot ${esc(row.lot_number)}</a></td>
         <td>${esc(options.ownersByProperty.get(row.property_id) ?? "")}</td>
-        <td>${moneySpan(row.charges_cents - row.late_fee_cents)}</td>
-        <td>${moneySpan(row.late_fee_cents)}</td>
-        <td>${moneySpan(row.payment_cents)}</td>
-        <td>${moneySpan(row.balance_cents)}</td>
+        <td>${moneyLink(href, row.charges_cents - row.late_fee_cents)}</td>
+        <td>${moneyLink(href, row.late_fee_cents)}</td>
+        <td>${moneyLink(href, row.payment_cents)}</td>
+        <td>${moneyLink(href, row.balance_cents)}</td>
         <td>${row.delinquent ? `<span class="badge late">Past due</span>` : ""}</td>
-      </tr>`,
-    )
+      </tr>`;
+    })
     .join("");
   const propertyOptions = options.properties.map((property) => ({
     value: property.id,
@@ -318,6 +338,7 @@ export function ledgerPage(options: {
   return `${adminNav(options.association.slug, "ledger")}
     <section class="panel">
       <h1>Assessments and balances</h1>
+      <p class="muted">Click a dollar amount to open that lot's invoices. From there you can edit an invoice or delete it. Delete stays blocked when a payment is recorded on that invoice.</p>
       <p><a href="/a/${esc(options.association.slug)}/admin/export.csv">Download CSV for the accountant</a></p>
       ${rows ? `<table><thead><tr><th>Lot</th><th>Primary owner</th><th>Charges</th><th>Late fees</th><th>Payments</th><th>Balance</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No lots.")}
     </section>
@@ -362,6 +383,110 @@ export function ledgerPage(options: {
         </form>
         <script src="/ledger-payment.js"></script>
       </article>
+    </section>`;
+}
+
+export function ledgerLotPage(options: {
+  association: Association;
+  lotNumber: string;
+  streetAddress: string;
+  ownerName: string;
+  balance: BalanceRow | null;
+  invoices: InvoiceRow[];
+}): string {
+  const base = `/a/${esc(options.association.slug)}/admin`;
+  const rows = options.invoices
+    .map((invoice) => {
+      const href = `${base}/invoices/${invoice.id}`;
+      return `<tr>
+        <td><a href="${esc(href)}">${esc(invoice.invoice_number)}</a></td>
+        <td>${esc(invoice.description)}</td>
+        <td>${dateCell(invoice.due_on, options.association.timezone)}</td>
+        <td>${moneyLink(href, Number(invoice.amount_cents))}</td>
+        <td>${moneyLink(href, Number(invoice.late_fee_cents))}</td>
+        <td>${moneyLink(href, Number(invoice.paid_cents))}</td>
+        <td><span class="badge">${esc(invoice.status)}</span></td>
+      </tr>`;
+    })
+    .join("");
+  const who = [options.ownerName, options.streetAddress].filter(Boolean).join(" · ");
+  const balance = options.balance
+    ? `<p>Balance ${moneySpan(options.balance.balance_cents)}${options.balance.delinquent ? ` <span class="badge late">Past due</span>` : ""}</p>`
+    : "";
+  return `${adminNav(options.association.slug, "ledger")}
+    <section class="panel">
+      <p><a href="${base}/ledger">Assessments and balances</a></p>
+      <h1>Lot ${esc(options.lotNumber)}</h1>
+      ${who ? `<p>${esc(who)}</p>` : ""}
+      ${balance}
+      <p class="muted">Click an amount to edit or delete that invoice. Delete stays blocked when a payment is recorded on that invoice.</p>
+      ${
+        rows
+          ? `<table><thead><tr><th>Invoice</th><th>Description</th><th>Due</th><th>Amount</th><th>Late fee</th><th>Paid</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`
+          : empty("No invoices on this lot.")
+      }
+    </section>`;
+}
+
+export function invoiceAdminPage(options: {
+  association: Association;
+  invoice: InvoiceRow;
+  payments: InvoicePaymentRow[];
+}): string {
+  const { association, invoice } = options;
+  const base = `/a/${esc(association.slug)}/admin`;
+  const paid = Number(invoice.paid_cents);
+  const remaining = Number(invoice.amount_cents) + Number(invoice.late_fee_cents) - paid;
+  const paymentRows = options.payments
+    .map(
+      (payment) => `<tr>
+        <td>${dateCell(payment.paid_on, association.timezone)}</td>
+        <td>${esc(methodLabel(payment.method))}</td>
+        <td>${esc(payment.reference)}</td>
+        <td>${moneySpan(Number(payment.amount_cents))}</td>
+        <td>${esc(payment.notes)}</td>
+      </tr>`,
+    )
+    .join("");
+  const remove =
+    options.payments.length > 0
+      ? `<p class="muted">A payment is recorded on this invoice, so delete stays blocked. You can still change the amount, dates, description, and status. The payment stays on the lot.</p>`
+      : `<p class="muted">This removes the invoice from the lot.</p>
+         ${confirmDeleteButton(`/a/${association.slug}/admin/invoices/${invoice.id}/delete`, "Delete invoice", "Delete this invoice")}`;
+  return `${adminNav(association.slug, "ledger")}
+    <section class="panel">
+      <p><a href="${base}/ledger/${esc(invoice.property_id)}">Lot ${esc(invoice.lot_number)}</a></p>
+      <h1>${esc(invoice.invoice_number)}</h1>
+      <p><span class="badge">${esc(invoice.status)}</span></p>
+      <p>Amount ${moneySpan(Number(invoice.amount_cents))} · Late fee ${moneySpan(Number(invoice.late_fee_cents))} · Paid ${moneySpan(paid)} · Remaining ${moneySpan(remaining)}</p>
+      <h2>Edit invoice</h2>
+      <form class="fields" method="post" action="${base}/invoices/${esc(invoice.id)}">
+        ${textField("Description", "description", { value: invoice.description, required: true })}
+        ${textField("Amount", "amount", { value: dollarsInput(invoice.amount_cents), required: true })}
+        ${textField("Late fee", "late_fee", { value: dollarsInput(invoice.late_fee_cents) })}
+        ${textField("Issued", "issued_on", { type: "date", value: invoice.issued_on, required: true })}
+        ${textField("Due", "due_on", { type: "date", value: invoice.due_on, required: true })}
+        ${selectField("Status", "status", [
+          { value: "open", label: "Open" },
+          { value: "partial", label: "Partial" },
+          { value: "paid", label: "Paid" },
+          { value: "void", label: "Void" },
+        ], invoice.status)}
+        <p class="muted">Open, partial, and paid follow payments on this invoice when you save. Void leaves the invoice off the balance. A recorded payment stays on the lot.</p>
+        <button type="submit">Save invoice</button>
+      </form>
+    </section>
+    <section class="panel">
+      <h2>Payments on this invoice</h2>
+      ${
+        paymentRows
+          ? `<table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th><th>Notes</th></tr></thead><tbody>${paymentRows}</tbody></table>`
+          : empty("No payment is recorded on this invoice.")
+      }
+    </section>
+    <section class="panel">
+      <h2>Delete invoice</h2>
+      ${remove}
     </section>`;
 }
 
@@ -767,7 +892,7 @@ function duesSection(options: {
     .join("");
   return `<section class="panel" id="dues">
     <h2>Annual dues</h2>
-    <p class="muted">The schedule opens January 1 and is due March 1. Improved lots are $625. Unimproved lots are $100. Assigning writes one invoice on each active lot of that type that does not already have this assessment, so Upcoming assessments can show it on those owners' dashboards. Changing the amount later does not rewrite invoices already assigned. Delete removes the assessment and its unpaid invoices. Delete is refused when a payment is recorded on one of those invoices.</p>
+    <p class="muted">The schedule opens January 1 and is due March 1. Improved lots are $625. Unimproved lots are $100. Assigning writes one invoice on each active lot of that type that does not already have this assessment, so Upcoming assessments can show it on those owners' dashboards. Changing the amount later does not rewrite invoices already assigned. Click a dollar amount under Assessments and balances to change one invoice. Delete removes the assessment and its unpaid invoices. Delete is refused when a payment is recorded on one of those invoices.</p>
     ${rows ? `<table><thead><tr><th>Assessment</th><th>Lots</th><th>Opens</th><th>Due</th><th>Amount</th><th>Invoices</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No assessments yet.")}
     <h3>Add a year</h3>
     <form class="fields" method="post" action="${base}/assessments">

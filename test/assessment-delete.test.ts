@@ -711,7 +711,7 @@ describe("annual dues add year", () => {
     expect(walk).toBeLessThan(older);
     const add = addForm(html);
     expect(add).toContain('value="quarterly" selected');
-    expect(add).toContain(">Improved lot amount per installment<input");
+    expect(add).toContain(">Improved lot amount per quarter<input");
     expect(add).toContain('name="improved_amount" type="text" value="160.00" required');
     expect(add).toContain('name="unimproved_amount" type="text" value="150.00" required');
     expect(add).toContain('name="opens_on" type="date" value="2028-01-01" required');

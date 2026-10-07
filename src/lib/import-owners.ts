@@ -1,5 +1,5 @@
 import type { Association, User } from "../types";
-import { keepsAnAdmin } from "./access";
+import { keepsAnAdmin, MASTER_ADMIN_EDIT_MESSAGE, masterKeepsAdminWrites } from "./access";
 import type { OwnerCsvRow } from "./csv";
 import { countActiveAdmins, writeAudit } from "../db";
 
@@ -92,14 +92,30 @@ async function importRow(
     .first<{ id: string }>();
   if (!user) throw new Error("User upsert did not return an id.");
 
+  const columns = await db.prepare("PRAGMA table_info(memberships)").all<{ name: string }>();
+  const hasMaster = columns.results.some((column) => column.name === "is_master");
   const existingMembership = await db
-    .prepare("SELECT role_id, is_admin, status FROM memberships WHERE association_id = ? AND user_id = ?")
+    .prepare(
+      hasMaster
+        ? "SELECT role_id, is_admin, status, is_master FROM memberships WHERE association_id = ? AND user_id = ?"
+        : "SELECT role_id, is_admin, status, 0 AS is_master FROM memberships WHERE association_id = ? AND user_id = ?",
+    )
     .bind(association.id, user.id)
-    .first<{ role_id: string; is_admin: number; status: string }>();
+    .first<{ role_id: string; is_admin: number; status: string; is_master: number }>();
   const keptAdmin =
     existingMembership?.role_id === "officer" || Number(existingMembership?.is_admin) === 1 ? 1 : 0;
   const isAdmin = row.isAdmin === null ? keptAdmin : row.isAdmin ? 1 : 0;
   const currentlyAdmin = !!existingMembership && existingMembership.status === "active" && keptAdmin === 1;
+  if (
+    !masterKeepsAdminWrites({
+      isMaster: Number(existingMembership?.is_master) === 1,
+      nextIsAdmin: isAdmin === 1,
+      nextStatus: "active",
+      nextRole: row.role,
+    })
+  ) {
+    throw new LastAdminError(MASTER_ADMIN_EDIT_MESSAGE);
+  }
   const activeAdmins = await countActiveAdmins(db, association.id);
   if (!keepsAnAdmin({ activeAdminCount: activeAdmins, currentlyAdmin, nextAdmin: isAdmin === 1 })) {
     throw new LastAdminError("Keep at least one person with edit access.");

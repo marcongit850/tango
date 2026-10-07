@@ -46,11 +46,22 @@ export function canViewPropertyFinancials(
   return ownerUserIds.includes(viewerUserId);
 }
 
-export type AdminContact = { user_id: string; name: string; email: string };
+export type AdminContact = { user_id: string; name: string; email: string; is_master?: 0 | 1 };
+
+export const MASTER_ADMIN_DELETE_MESSAGE = "The master admin cannot be deleted.";
+export const MASTER_ADMIN_EDIT_MESSAGE = "The master admin must keep edit access.";
 
 /** Active people with edit access, one row per person, in the given order. */
 export function activeAdminContacts(
-  people: (AdminContact & { role_id: string; is_admin?: number | boolean | string | null; status?: string | null })[],
+  people: ({
+    user_id: string;
+    name: string;
+    email: string;
+    role_id: string;
+    is_admin?: number | boolean | string | null;
+    is_master?: number | boolean | string | null;
+    status?: string | null;
+  })[],
 ): AdminContact[] {
   const seen = new Set<string>();
   const contacts: AdminContact[] = [];
@@ -60,9 +71,30 @@ export function activeAdminContacts(
     const email = person.email.trim();
     if (!name && !email) continue;
     seen.add(person.user_id);
-    contacts.push({ user_id: person.user_id, name, email });
+    const contact: AdminContact = { user_id: person.user_id, name, email };
+    if (Number(person.is_master) === 1) contact.is_master = 1;
+    contacts.push(contact);
   }
   return contacts;
+}
+
+/**
+ * The master admin keeps admin writes. Turning off edit access, marking them inactive,
+ * or moving them to a role that cannot write is refused. Other people are unchanged.
+ */
+export function masterKeepsAdminWrites(input: {
+  isMaster: boolean;
+  nextIsAdmin: boolean;
+  nextStatus: string;
+  nextRole?: string;
+}): boolean {
+  if (!input.isMaster) return true;
+  if (!input.nextIsAdmin) return false;
+  if (input.nextStatus === "inactive") return false;
+  if (input.nextRole && input.nextRole !== "board" && input.nextRole !== "homeowner" && input.nextRole !== "officer") {
+    return false;
+  }
+  return true;
 }
 
 export function keepsAnAdmin(input: {

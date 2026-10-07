@@ -74,6 +74,7 @@ describe("portal notice files", () => {
       phone: "",
       role_id: "homeowner",
       is_admin: 0,
+      is_master: 0,
       status: "active",
       property_id: "prop_14",
       lot_number: "14",

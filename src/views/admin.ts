@@ -1,6 +1,7 @@
 import { DOCUMENT_CATEGORIES } from "../lib/categories";
 import { zonedIsoDate } from "../lib/dates";
 import { lotTypeLabel } from "../lib/dues";
+import { MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE } from "../lib/access";
 import { esc } from "../lib/html";
 import { formatMoney } from "../lib/money";
 import type { Association, DocumentCategory } from "../types";
@@ -90,7 +91,7 @@ export function adminHome(options: {
   waiting: number;
   pendingJoins: number | null;
   outstandingCents: number;
-  admins: { user_id: string; name: string; email: string }[];
+  admins: { user_id: string; name: string; email: string; is_master?: number }[];
   audit: AuditRow[];
   canEdit?: boolean;
 }): string {
@@ -133,7 +134,7 @@ function accessExplainer(): string {
   return `<div class="access-explainer"><p>${ACCESS_EXPLAINER}</p><div class="access-selection-barrier" aria-hidden="true"><br></div></div>`;
 }
 
-function currentAdminList(slug: string, admins: { user_id: string; name: string; email: string }[]): string {
+function currentAdminList(slug: string, admins: { user_id: string; name: string; email: string; is_master?: number }[]): string {
   const items = admins
     .map((admin) => {
       const name = admin.name.trim();
@@ -141,7 +142,8 @@ function currentAdminList(slug: string, admins: { user_id: string; name: string;
       const label = name || email;
       if (!label) return "";
       const emailLine = name && email ? `<span class="muted">${esc(email)}</span>` : "";
-      return `<li><a href="/a/${esc(slug)}/admin/owners/${esc(admin.user_id)}">${esc(label)}</a>${emailLine}</li>`;
+      const master = admin.is_master === 1 ? `<span class="muted">Master admin</span>` : "";
+      return `<li><a href="/a/${esc(slug)}/admin/owners/${esc(admin.user_id)}">${esc(label)}</a>${emailLine}${master}</li>`;
     })
     .filter(Boolean)
     .join("");
@@ -164,7 +166,7 @@ export function ownersPage(
     .map(
       (owner) => `<tr>
         <td><a href="/a/${esc(association.slug)}/admin/owners/${esc(owner.user_id)}">${esc(owner.name)}</a><div class="muted">${esc(owner.email)}</div></td>
-        <td>${esc(roleLabel(owner.role_id, owner.is_admin === 1))}</td>
+        <td>${esc(roleLabel(owner.role_id, owner.is_admin === 1))}${owner.is_master === 1 ? `<div class="muted">Master admin</div>` : ""}</td>
         <td>${esc(owner.status)}</td>
         <td>${owner.lot_number ? `Lot ${esc(owner.lot_number)}` : "None"}</td>
         <td>${ownerBalanceCell(association.slug, owner)}</td>
@@ -241,6 +243,16 @@ export function ownersPage(
     </section>`;
 }
 
+function editAccessField(owner: OwnerListRow): string {
+  if (owner.is_master === 1) {
+    return `<input type="hidden" name="is_admin" value="1">
+          <label><input type="checkbox" value="1" checked disabled> Edit access</label>
+          <p class="muted">${esc(MASTER_ADMIN_EDIT_MESSAGE)}</p>`;
+  }
+  return `<label><input type="checkbox" name="is_admin" value="1" ${owner.is_admin === 1 ? "checked" : ""}> Edit access</label>
+          <p class="muted">Edit access can be given to a homeowner or a board member. It lets them create, edit, and delete. A board member without it can still view these pages. A homeowner without it only sees their own lots. Keep at least one person with edit access.</p>`;
+}
+
 export function ownerDetailPage(options: {
   association: Association;
   owner: OwnerListRow;
@@ -278,8 +290,7 @@ export function ownerDetailPage(options: {
             { value: "homeowner", label: "Homeowner" },
             { value: "board", label: "Board member" },
           ], owner.role_id === "board" ? "board" : "homeowner")}
-          <label><input type="checkbox" name="is_admin" value="1" ${owner.is_admin === 1 ? "checked" : ""}> Edit access</label>
-          <p class="muted">Edit access can be given to a homeowner or a board member. It lets them create, edit, and delete. A board member without it can still view these pages. A homeowner without it only sees their own lots. Keep at least one person with edit access.</p>
+          ${editAccessField(owner)}
           ${selectField("Status", "status", [
             { value: "active", label: "Active" },
             { value: "invited", label: "Invited" },
@@ -317,15 +328,19 @@ export function ownerDetailPage(options: {
     </section>
     <section class="panel" id="delete">
       <h2>Delete person</h2>
-      <p class="muted">This removes the login, sessions, and membership. Messages they sent are removed. Lots and their invoices stay. Keep at least one person with edit access.</p>
-      ${confirmDeleteButton(`${base}/delete`, "Delete person", "Delete this person")}
+      ${
+        owner.is_master === 1
+          ? `<p class="muted">${esc(MASTER_ADMIN_DELETE_MESSAGE)}</p>`
+          : `<p class="muted">This removes the login, sessions, and membership. Messages they sent are removed. Lots and their invoices stay. Keep at least one person with edit access.</p>
+      ${confirmDeleteButton(`${base}/delete`, "Delete person", "Delete this person")}`
+      }
     </section>`
     : "";
   return `${adminNav(association.slug, "owners", canEdit)}
     <section class="panel">
       <h1>${esc(owner.name)}</h1>
       <p>${esc(owner.email)}${owner.phone ? ` · ${esc(owner.phone)}` : ""}</p>
-      <p>${esc(roleLabel(owner.role_id, owner.is_admin === 1))} · ${esc(owner.status)}</p>
+      <p>${esc(roleLabel(owner.role_id, owner.is_admin === 1))} · ${esc(owner.status)}${owner.is_master === 1 ? " · Master admin" : ""}</p>
       <p>Primary lot balance ${options.balance === null ? "" : options.balanceHref ? moneyLink(options.balanceHref, options.balance) : moneySpan(options.balance)}</p>
       ${writes || "</section>"}`;
 }

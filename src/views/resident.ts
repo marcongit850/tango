@@ -11,9 +11,21 @@ import type {
   PaymentRow,
   MessageRow,
 } from "../db";
-import { paragraphs, esc } from "../lib/html";
+import { clip, paragraphs, esc } from "../lib/html";
 import type { Association } from "../types";
 import { categoryCell, confirmDeleteButton, dateCell, dateTimeCell, documentFileLinks, empty, methodLabel, moneySpan, textField, areaField } from "./bits";
+
+function excerpt(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= 180) return flat;
+  return `${clip(flat, 177)}...`;
+}
+
+function eventKindLabel(kind: string): string {
+  if (kind === "meeting") return "Meeting";
+  if (kind === "emergency") return "Emergency";
+  return "Event";
+}
 
 export function dashboardPage(options: {
   association: Association;
@@ -24,78 +36,151 @@ export function dashboardPage(options: {
   payments: PaymentRow[];
   notices: NoticeRow[];
   emergencies: AnnouncementRow[];
+  news?: AnnouncementRow[];
+  events?: EventRow[];
 }): string {
   const { association, ledger } = options;
   const total = ledger.reduce((sum, row) => sum + row.balance_cents, 0);
   const late = ledger.reduce((sum, row) => sum + row.late_fee_cents, 0);
+  const base = `/a/${esc(association.slug)}`;
   const lots = ledger
-    .map(
-      (row) => `<article class="card">
-        <h3>Lot ${esc(row.lot_number)}</h3>
-        <p class="muted">${esc(row.street_address)}</p>
-        <p class="figure">${moneySpan(row.balance_cents)}</p>
-        <p class="muted">Late fees ${moneySpan(row.late_fee_cents)}</p>
-        ${row.delinquent ? `<p><span class="badge late">Past due</span></p>` : ""}
-      </article>`,
-    )
+    .map((row) => {
+      const status = row.delinquent
+        ? `<p><span class="badge late">Past due</span></p>`
+        : row.balance_cents === 0
+          ? `<p><span class="badge">Paid</span></p>`
+          : "";
+      return `<div class="lot">
+        <div>
+          <p class="lot-name">Lot ${esc(row.lot_number)}</p>
+          <p class="muted">${esc(row.street_address)}</p>
+          ${status}
+        </div>
+        <div class="lot-figures">
+          <p class="lot-amount">${moneySpan(row.balance_cents)}</p>
+          <p class="muted">Late fees ${moneySpan(row.late_fee_cents)}</p>
+        </div>
+      </div>`;
+    })
     .join("");
   const upcoming = options.upcoming
-    .map(
-      (row) => `<tr><td>${esc(row.name)}</td><td>${row.opens_on ? dateCell(row.opens_on, association.timezone) : ""}</td><td>${dateCell(row.due_on, association.timezone)}</td><td>${moneySpan(row.amount_cents)}</td><td>${row.invoice_count > 0 ? "Invoiced" : "Scheduled"}</td></tr>`,
-    )
+    .map((row) => {
+      const due = dateCell(row.due_on, association.timezone);
+      const opens = row.opens_on ? ` Opens ${dateCell(row.opens_on, association.timezone)}.` : "";
+      return `<li>
+        <div>
+          <strong>${esc(row.name)}</strong>
+          <p class="muted">Due ${due}.${opens}</p>
+        </div>
+        <div class="dues-amount">
+          <p>${moneySpan(row.amount_cents)}</p>
+          <p class="muted">${row.invoice_count > 0 ? "Invoiced" : "Scheduled"}</p>
+        </div>
+      </li>`;
+    })
+    .join("");
+  const news = (options.news ?? [])
+    .slice(0, 4)
+    .map((item) => {
+      const kind = item.kind === "meeting" ? `<span class="muted">Meeting</span>` : "";
+      return `<li>
+        <a href="${base}/news/${esc(item.id)}">
+          <span class="muted">${dateCell(item.published_at, association.timezone)}</span>
+          <strong>${esc(item.title)}</strong>
+        </a>
+        ${kind}
+        <p>${esc(excerpt(item.body))}</p>
+      </li>`;
+    })
+    .join("");
+  const events = (options.events ?? [])
+    .slice(0, 4)
+    .map((item) => {
+      const place = [eventKindLabel(item.kind), item.location].filter(Boolean).join(" · ");
+      return `<li>
+        <a href="${base}/calendar">
+          <span class="muted">${dateTimeCell(item.starts_at, association.timezone)}</span>
+          <strong>${esc(item.title)}</strong>
+        </a>
+        ${place ? `<p class="muted">${esc(place)}</p>` : ""}
+      </li>`;
+    })
     .join("");
   const invoices = options.invoices
     .slice(0, 6)
     .map(
-      (row) => `<tr><td><a href="/a/${esc(association.slug)}/invoices/${esc(row.id)}">${esc(row.invoice_number)}</a></td><td>${esc(row.description)}</td><td>${dateCell(row.due_on, association.timezone)}</td><td>${moneySpan(row.amount_cents + row.late_fee_cents)}</td><td>${esc(row.status)}</td></tr>`,
+      (row) => `<tr><td><a href="${base}/invoices/${esc(row.id)}">${esc(row.invoice_number)}</a></td><td>${esc(row.description)}</td><td>${dateCell(row.due_on, association.timezone)}</td><td>${moneySpan(row.amount_cents + row.late_fee_cents)}</td><td>${esc(row.status)}</td></tr>`,
     )
     .join("");
   const payments = options.payments
     .slice(0, 6)
     .map(
-      (row) => `<tr><td><a href="/a/${esc(association.slug)}/payments/${esc(row.id)}">${dateCell(row.paid_on, association.timezone)}</a></td><td>${esc(methodLabel(row.method))}</td><td>${esc(row.reference)}</td><td>${moneySpan(row.amount_cents)}</td></tr>`,
+      (row) => `<tr><td><a href="${base}/payments/${esc(row.id)}">${dateCell(row.paid_on, association.timezone)}</a></td><td>${esc(methodLabel(row.method))}</td><td>${esc(row.reference)}</td><td>${moneySpan(row.amount_cents)}</td></tr>`,
     )
     .join("");
   const notices = options.notices
     .slice(0, 5)
     .map(
       (row) =>
-        `<li><a href="/a/${esc(association.slug)}/notices">${esc(row.title)}</a> <span class="muted">${dateTimeCell(row.created_at, association.timezone)}</span> <span class="muted">${esc(row.body)}</span> ${noticeFileLinks(association.slug, row)}</li>`,
+        `<li><a href="${base}/notices">${esc(row.title)}</a> <span class="muted">${dateTimeCell(row.created_at, association.timezone)}</span> <span class="muted">${esc(row.body)}</span> ${noticeFileLinks(association.slug, row)}</li>`,
     )
     .join("");
   const emergencies = options.emergencies
     .map((row) => `<article class="emergency"><h2>${esc(row.title)}</h2>${paragraphs(row.body)}</article>`)
     .join("");
+  const balanceCopy = ledger.length
+    ? "Balance across your properties. Charges and late fees, minus recorded payments."
+    : "No lot is linked to this login yet.";
 
-  return `${emergencies}
-    <section class="panel">
-      <p class="muted">${esc(association.name)} · ${esc(options.name)}</p>
-      <h1>Your account</h1>
-      <p class="figure">${ledger.length ? moneySpan(total) : ""}</p>
-      <p class="muted">${ledger.length ? "Balance across your properties. Charges and late fees, minus recorded payments." : "No lot is linked to this login yet."}</p>
-      ${late > 0 ? `<p>Outstanding late fees ${moneySpan(late)}</p>` : ""}
+  return `<div class="dash">
+    ${emergencies}
+    <header class="dash-hello">
+      <p class="kicker">${esc(association.name)}</p>
+      <span class="rule dash-rule" aria-hidden="true"></span>
+      <h1>${esc(options.name)}</h1>
+      <p class="muted">${esc(association.legal_name)}</p>
+    </header>
+    <section class="dash-grid">
+      <article class="panel dash-balance">
+        <p class="kicker">Account balance</p>
+        ${ledger.length ? `<p class="balance-figure">${moneySpan(total)}</p>` : ""}
+        <p class="muted">${balanceCopy}</p>
+        ${late > 0 ? `<p>Outstanding late fees ${moneySpan(late)}</p>` : ""}
+      </article>
+      <article class="panel">
+        <h2>Lot dues</h2>
+        ${lots ? `<div class="lots">${lots}</div>` : empty("No lot is linked to this login yet.")}
+        <h3>Upcoming assessments</h3>
+        ${upcoming ? `<ul class="dues-list">${upcoming}</ul>` : empty("No upcoming assessments.")}
+      </article>
     </section>
-    ${lots ? `<section class="grid">${lots}</section>` : ""}
-    <section class="panel">
-      <h2>Upcoming assessments</h2>
-      ${upcoming ? `<table><thead><tr><th>Assessment</th><th>Opens</th><th>Due</th><th>Amount</th><th></th></tr></thead><tbody>${upcoming}</tbody></table>` : empty("No upcoming assessments.")}
+    <section class="dash-grid">
+      <article class="panel">
+        <div class="panel-head"><h2>News</h2><a href="${base}/news">All news</a></div>
+        ${news ? `<ul class="dash-feed">${news}</ul>` : empty("No news yet.")}
+      </article>
+      <article class="panel">
+        <div class="panel-head"><h2>Upcoming events</h2><a href="${base}/calendar">Calendar</a></div>
+        ${events ? `<ul class="dash-feed">${events}</ul>` : empty("No upcoming events.")}
+      </article>
     </section>
     <section class="split">
       <article class="panel">
         <h2>Invoices</h2>
         ${invoices ? `<table><thead><tr><th>Number</th><th>Description</th><th>Due</th><th>Total</th><th>Status</th></tr></thead><tbody>${invoices}</tbody></table>` : empty("No invoices yet.")}
-        <p><a href="/a/${esc(association.slug)}/invoices">Invoice history</a></p>
+        <p><a href="${base}/invoices">Invoice history</a></p>
       </article>
       <article class="panel">
         <h2>Payments</h2>
         ${payments ? `<table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th></tr></thead><tbody>${payments}</tbody></table>` : empty("No recorded payments yet.")}
-        <p><a href="/a/${esc(association.slug)}/payments">Payment history</a></p>
+        <p><a href="${base}/payments">Payment history</a></p>
       </article>
     </section>
     <section class="panel">
       <h2>Personal notices</h2>
       ${notices ? `<ul>${notices}</ul>` : empty("No account messages.")}
-    </section>`;
+    </section>
+  </div>`;
 }
 
 export function invoiceListPage(association: Association, invoices: InvoiceRow[]): string {

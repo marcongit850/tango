@@ -429,6 +429,127 @@ describe("signed-in header", () => {
     expect(inactive.account).not.toContain("Admin");
     expect(inactive.nav).toContain("Resident login");
   });
+
+  it("shows a disabled Ask the portal placeholder on signed-in pages", async () => {
+    const response = await render(context(membership("homeowner", 0)), {
+      title: "Dashboard",
+      active: "dashboard",
+      body: "<p>Hello</p>",
+    });
+    const html = await response.text();
+    const widget = html.slice(html.indexOf('class="ask-portal"'), html.indexOf("</details>") + "</details>".length);
+    expect(widget).toContain("Ask the portal");
+    expect(widget).toContain("Questions about covenants, bylaws, and your lot.");
+    expect(widget).toContain("SUBSCRIPTION REQUIRED");
+    expect(widget).toContain("The assistant is part of a paid subscription. It is not available yet.");
+    expect(widget).toContain("Coming later. This box does not send a message.");
+    expect(widget).toContain("<input");
+    expect(widget).toContain("disabled");
+    expect(widget).not.toContain("<form");
+    expect(widget).not.toContain("\u2014");
+    expect(widget).not.toMatch(/openai|workers\.ai|@cf\/|\/api\/chat/i);
+  });
+
+  it("leaves Ask the portal off pages without an active membership", async () => {
+    const loggedOut = await render(context(null), { title: "Sign in", active: "login", body: "<p>Login</p>" });
+    expect(await loggedOut.text()).not.toContain('class="ask-portal"');
+    const inactive = await render(context(membership("homeowner", 0, "inactive")), {
+      title: "Sign in",
+      active: "login",
+      body: "<p>Login</p>",
+    });
+    expect(await inactive.text()).not.toContain("SUBSCRIPTION REQUIRED");
+  });
+});
+
+describe("owner dashboard", () => {
+  const association: Association = {
+    id: "assoc_tango_mar",
+    slug: "tango-mar",
+    name: "Tango Mar",
+    legal_name: "Tango Mar Property Owners Association",
+    address_line1: "31 Tang O Mar Drive",
+    city: "Miramar Beach",
+    state: "FL",
+    postal_code: "32550",
+    county: "Walton County",
+    timezone: "America/Chicago",
+  };
+
+  it("shows balance, lot dues, news, and upcoming events", () => {
+    const html = dashboardPage({
+      association,
+      name: "Sam Rivera",
+      ledger: [
+        {
+          property_id: "prop_14",
+          lot_number: "14",
+          street_address: "14 Tang O Mar Drive",
+          charges_cents: 120000,
+          late_fee_cents: 0,
+          payment_cents: 120000,
+          past_due: 0,
+          balance_cents: 0,
+          delinquent: false,
+        },
+      ],
+      upcoming: [
+        {
+          id: "assessment_2027_annual",
+          name: "2027 annual assessment",
+          description: "Yearly dues",
+          amount_cents: 125000,
+          due_on: "2027-03-01",
+          opens_on: "2026-10-01",
+          lot_type: null,
+          invoice_count: 0,
+        },
+      ],
+      invoices: [],
+      payments: [],
+      notices: [],
+      emergencies: [],
+      news: [
+        {
+          id: "ann_walkway",
+          kind: "news",
+          title: "Beach walkway washdown",
+          body: "The beach walkway will be rinsed on weekday mornings.",
+          pinned: 1,
+          published_at: "2026-10-01T15:00:00.000Z",
+          expires_at: null,
+        },
+      ],
+      events: [
+        {
+          id: "event_dunes",
+          title: "Dune grass planting",
+          description: "Bring gloves.",
+          location: "Dune crossing at the beach walkway",
+          starts_at: "2026-10-18T14:00:00.000Z",
+          ends_at: "2026-10-18T16:00:00.000Z",
+          kind: "event",
+        },
+      ],
+    });
+    expect(html).toContain('class="dash"');
+    expect(html).toContain("Account balance");
+    expect(html).toContain("Lot dues");
+    expect(html).toContain("Lot 14");
+    expect(html).toContain("Paid");
+    expect(html).toContain("2027 annual assessment");
+    expect(html).toContain("Scheduled");
+    expect(html).toContain(">News<");
+    expect(html).toContain("Beach walkway washdown");
+    expect(html).toContain('href="/a/tango-mar/news/ann_walkway"');
+    expect(html).toContain("Upcoming events");
+    expect(html).toContain("Dune grass planting");
+    expect(html).toContain('href="/a/tango-mar/calendar"');
+    expect(html).toContain("Invoice history");
+    expect(html).toContain("Payment history");
+    expect(html).toContain("Personal notices");
+    expect(html).not.toContain("\u2014");
+  });
 });
 
 describe("admin overview", () => {

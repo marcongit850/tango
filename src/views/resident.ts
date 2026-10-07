@@ -15,7 +15,7 @@ import { groupDocuments, type CategoryGroup, type FolderGroup } from "../lib/cat
 import { clip, paragraphs, esc } from "../lib/html";
 import { formatMoney } from "../lib/money";
 import type { Association } from "../types";
-import { addressLine, confirmDeleteButton, contactPhones, dateCell, dateTimeCell, documentFileLinks, empty, methodLabel, moneySpan, textField, areaField } from "./bits";
+import { addressLine, addressLocality, confirmDeleteButton, contactPhones, dateCell, dateTimeCell, documentFileLinks, empty, mailingAddressHtml, methodLabel, moneySpan, propertyAddressHtml, textField, areaField } from "./bits";
 
 function excerpt(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -64,13 +64,15 @@ export function dashboardPage(options: {
           ? `<p><span class="badge">Paid</span></p>`
           : "";
       const house = row.house_name?.trim() ?? "";
+      const locality = addressLocality(row.city ?? "", row.state ?? "", row.postal_code ?? "");
       const mailing = addressLine(row.mailing_street ?? "", row.mailing_city ?? "", row.mailing_state ?? "", row.mailing_postal_code ?? "");
       return `<div class="lot">
         <div>
           <p class="lot-name"><a href="${base}/lots/${esc(row.property_id)}">Lot ${esc(row.lot_number)}</a></p>
           ${house ? `<p>${esc(house)}</p>` : ""}
           <p class="muted">${esc(row.street_address)}</p>
-          ${mailing ? `<p class="muted">Mailing ${esc(mailing)}</p>` : ""}
+          ${locality ? `<p class="muted">${esc(locality)}</p>` : ""}
+          ${mailing ? `<p class="muted">Mailing address (if different): ${esc(mailing)}</p>` : ""}
           ${status}
         </div>
         <div class="lot-figures">
@@ -219,14 +221,12 @@ export function propertyPage(options: {
 }): string {
   const base = `/a/${esc(options.association.slug)}`;
   const house = options.houseName.trim();
-  const physical = addressLine(options.streetAddress, options.city, options.state, options.postalCode);
-  const mailing = addressLine(options.mailingStreet, options.mailingCity, options.mailingState, options.mailingPostalCode);
   return `<section class="panel">
     <p><a href="${base}/dashboard">Dashboard</a></p>
     <h1>Lot ${esc(options.lotNumber)}</h1>
     ${house ? `<p><strong>${esc(house)}</strong></p>` : ""}
-    <p>Lot address: ${esc(physical)}</p>
-    ${mailing ? `<p>Mailing address: ${esc(mailing)}</p>` : `<p class="muted">Mailing address is the same as the lot.</p>`}
+    ${propertyAddressHtml(options.streetAddress, options.city, options.state, options.postalCode)}
+    ${mailingAddressHtml(options.mailingStreet, options.mailingCity, options.mailingState, options.mailingPostalCode)}
     <h2>Phone numbers</h2>
     ${contactPhones(options.contacts)}
     <p><a href="${base}/invoices">Invoice history</a></p>

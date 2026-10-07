@@ -268,6 +268,9 @@ export type BalanceRow = {
   property_id: string;
   lot_number: string;
   street_address: string;
+  city: string;
+  state: string;
+  postal_code: string;
   house_name?: string;
   mailing_street?: string;
   mailing_city?: string;
@@ -327,6 +330,9 @@ const BALANCE_SQL_TAIL = `
 
 async function balanceSql(db: D1Database): Promise<string> {
   const names = await columnNames(db, "properties");
+  const place = ["city", "state", "postal_code"]
+    .map((column) => (names.has(column) ? `p.${column}` : `'' AS ${column}`))
+    .join(",\n    ");
   const extra = ["house_name", "mailing_street", "mailing_city", "mailing_state", "mailing_postal_code"]
     .map((column) => (names.has(column) ? `p.${column}` : `'' AS ${column}`))
     .join(",\n    ");
@@ -335,6 +341,7 @@ async function balanceSql(db: D1Database): Promise<string> {
     p.id AS property_id,
     p.lot_number,
     p.street_address,
+    ${place},
     ${extra},
     ${BALANCE_SQL_TAIL}`;
 }

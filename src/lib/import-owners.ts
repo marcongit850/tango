@@ -227,9 +227,9 @@ async function upsertProperty(db: D1Database, associationId: string, row: OwnerC
            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
            ON CONFLICT(association_id, lot_number) DO UPDATE SET
              street_address = excluded.street_address,
-             city = excluded.city,
-             state = excluded.state,
-             postal_code = excluded.postal_code,
+             city = CASE WHEN excluded.city != '' THEN excluded.city ELSE properties.city END,
+             state = CASE WHEN excluded.state != '' THEN excluded.state ELSE properties.state END,
+             postal_code = CASE WHEN excluded.postal_code != '' THEN excluded.postal_code ELSE properties.postal_code END,
              status = 'active',
              house_name = CASE WHEN excluded.house_name != '' THEN excluded.house_name ELSE properties.house_name END,
              mailing_street = CASE WHEN excluded.mailing_street != '' THEN excluded.mailing_street ELSE properties.mailing_street END,
@@ -261,9 +261,9 @@ async function upsertProperty(db: D1Database, associationId: string, row: OwnerC
            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
            ON CONFLICT(association_id, lot_number) DO UPDATE SET
              street_address = excluded.street_address,
-             city = excluded.city,
-             state = excluded.state,
-             postal_code = excluded.postal_code,
+             city = CASE WHEN excluded.city != '' THEN excluded.city ELSE properties.city END,
+             state = CASE WHEN excluded.state != '' THEN excluded.state ELSE properties.state END,
+             postal_code = CASE WHEN excluded.postal_code != '' THEN excluded.postal_code ELSE properties.postal_code END,
              status = 'active'
            RETURNING id`,
         )

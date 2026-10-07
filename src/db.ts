@@ -1205,14 +1205,39 @@ export async function deletePersonAccount(
     .first<{ n: number }>();
   const shared = Number(others?.n ?? 0) > 0;
 
+  const filesReady = await messageAttachmentsReady(db);
+  const attachmentDelete = !filesReady
+    ? []
+    : shared
+      ? [
+          db
+            .prepare(
+              `DELETE FROM message_attachments WHERE association_id = ? AND message_id IN (
+                 SELECT id FROM messages WHERE association_id = ? AND from_user_id = ?
+               )`,
+            )
+            .bind(associationId, associationId, userId),
+        ]
+      : [
+          db
+            .prepare(
+              `DELETE FROM message_attachments WHERE message_id IN (
+                 SELECT id FROM messages WHERE from_user_id = ?
+               )`,
+            )
+            .bind(userId),
+        ];
+
   const statements = shared
     ? [
+        ...attachmentDelete,
         db.prepare("DELETE FROM notifications WHERE association_id = ? AND user_id = ?").bind(associationId, userId),
         db.prepare("DELETE FROM messages WHERE association_id = ? AND from_user_id = ?").bind(associationId, userId),
         db.prepare("DELETE FROM property_owners WHERE association_id = ? AND user_id = ?").bind(associationId, userId),
         db.prepare("DELETE FROM memberships WHERE association_id = ? AND user_id = ?").bind(associationId, userId),
       ]
     : [
+        ...attachmentDelete,
         db.prepare("UPDATE payments SET recorded_by_user_id = NULL WHERE recorded_by_user_id = ?").bind(userId),
         db.prepare("UPDATE document_versions SET uploaded_by_user_id = NULL WHERE uploaded_by_user_id = ?").bind(userId),
         db.prepare("UPDATE announcements SET created_by_user_id = NULL WHERE created_by_user_id = ?").bind(userId),
@@ -1715,6 +1740,19 @@ export async function deleteAssessment(
   return { ok: false, reason: paid ? "payments" : "missing" };
 }
 
+export type MessageAttachment = {
+  id: string;
+  filename: string;
+  content_type: string;
+  byte_size: number;
+};
+
+export type MessageFile = {
+  filename: string;
+  content_type: string;
+  r2_key: string;
+};
+
 export type MessageRow = {
   id: string;
   thread_id: string;
@@ -1727,7 +1765,163 @@ export type MessageRow = {
   body: string;
   created_at: string;
   reviewed_at: string | null;
+  attachments?: MessageAttachment[];
 };
+
+export async function messageAttachmentsReady(db: D1Database): Promise<boolean> {
+  const row = await db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'message_attachments'")
+    .first<{ name: string }>();
+  return row?.name === "message_attachments";
+}
+
+export async function insertMessageAttachment(
+  db: D1Database,
+  row: {
+    id: string;
+    associationId: string;
+    messageId: string;
+    filename: string;
+    contentType: string;
+    r2Key: string;
+    byteSize: number;
+    createdAt: string;
+  },
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO message_attachments (
+         id, association_id, message_id, filename, content_type, r2_key, byte_size, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      row.id,
+      row.associationId,
+      row.messageId,
+      row.filename,
+      row.contentType,
+      row.r2Key,
+      row.byteSize,
+      row.createdAt,
+    )
+    .run();
+}
+
+async function deleteMessageAttachmentRows(db: D1Database, sql: string, params: string[]): Promise<void> {
+  if (!(await messageAttachmentsReady(db))) return;
+  await db.prepare(sql).bind(...params).run();
+}
+
+async function attachmentKeys(db: D1Database, sql: string, params: string[]): Promise<string[]> {
+  if (!(await messageAttachmentsReady(db))) return [];
+  const { results } = await db.prepare(sql).bind(...params).all<{ r2_key: string }>();
+  return results.map((row) => row.r2_key).filter((key) => key.length > 0);
+}
+
+export function messageFileKeysForMessage(db: D1Database, associationId: string, messageId: string): Promise<string[]> {
+  return attachmentKeys(
+    db,
+    "SELECT r2_key FROM message_attachments WHERE association_id = ? AND message_id = ?",
+    [associationId, messageId],
+  );
+}
+
+export function messageFileKeysForThread(db: D1Database, associationId: string, threadId: string): Promise<string[]> {
+  return attachmentKeys(
+    db,
+    `SELECT a.r2_key
+     FROM message_attachments a
+     JOIN messages m ON m.id = a.message_id AND m.association_id = a.association_id
+     WHERE a.association_id = ? AND m.thread_id = ?`,
+    [associationId, threadId],
+  );
+}
+
+/** Keys for the files removed with this person. Matches deletePersonAccount's message scope. */
+export async function messageFileKeysForUser(db: D1Database, associationId: string, userId: string): Promise<string[]> {
+  const others = await db
+    .prepare("SELECT COUNT(*) AS n FROM memberships WHERE user_id = ? AND association_id != ?")
+    .bind(userId, associationId)
+    .first<{ n: number }>();
+  const shared = Number(others?.n ?? 0) > 0;
+  if (shared) {
+    return attachmentKeys(
+      db,
+      `SELECT a.r2_key
+       FROM message_attachments a
+       JOIN messages m ON m.id = a.message_id AND m.association_id = a.association_id
+       WHERE m.association_id = ? AND m.from_user_id = ?`,
+      [associationId, userId],
+    );
+  }
+  return attachmentKeys(
+    db,
+    `SELECT a.r2_key
+     FROM message_attachments a
+     JOIN messages m ON m.id = a.message_id AND m.association_id = a.association_id
+     WHERE m.from_user_id = ?`,
+    [userId],
+  );
+}
+
+/**
+ * Staff of this association, or the person who sent the message.
+ * A thread is not shared with the other owners of the lot.
+ */
+export async function messageAttachmentForViewer(
+  db: D1Database,
+  associationId: string,
+  threadId: string,
+  messageId: string,
+  attachmentId: string,
+  viewerUserId: string,
+  staff: boolean,
+): Promise<{ ok: true; file: MessageFile } | { ok: false; reason: "missing" | "forbidden" }> {
+  if (!(await messageAttachmentsReady(db))) return { ok: false, reason: "missing" };
+  const row = await db
+    .prepare(
+      `SELECT a.filename, a.content_type, a.r2_key, m.from_user_id
+       FROM message_attachments a
+       JOIN messages m ON m.id = a.message_id AND m.association_id = a.association_id
+       WHERE a.association_id = ? AND a.id = ? AND a.message_id = ? AND m.thread_id = ?`,
+    )
+    .bind(associationId, attachmentId, messageId, threadId)
+    .first<{ filename: string; content_type: string; r2_key: string; from_user_id: string }>();
+  if (!row?.r2_key || !row.filename) return { ok: false, reason: "missing" };
+  if (staff || row.from_user_id === viewerUserId) {
+    return { ok: true, file: { filename: row.filename, content_type: row.content_type, r2_key: row.r2_key } };
+  }
+  return { ok: false, reason: "forbidden" };
+}
+
+async function attachMessageFiles(db: D1Database, associationId: string, rows: MessageRow[]): Promise<MessageRow[]> {
+  if (rows.length === 0 || !(await messageAttachmentsReady(db))) {
+    return rows.map((row) => ({ ...row, attachments: row.attachments ?? [] }));
+  }
+  const ids = [...new Set(rows.map((row) => row.id))];
+  const placeholders = ids.map(() => "?").join(", ");
+  const { results } = await db
+    .prepare(
+      `SELECT id, message_id, filename, content_type, byte_size
+       FROM message_attachments
+       WHERE association_id = ? AND message_id IN (${placeholders})
+       ORDER BY created_at, id`,
+    )
+    .bind(associationId, ...ids)
+    .all<{ id: string; message_id: string; filename: string; content_type: string; byte_size: number }>();
+  const grouped = new Map<string, MessageAttachment[]>();
+  for (const item of results) {
+    const list = grouped.get(item.message_id) ?? [];
+    list.push({
+      id: item.id,
+      filename: item.filename,
+      content_type: item.content_type,
+      byte_size: Number(item.byte_size),
+    });
+    grouped.set(item.message_id, list);
+  }
+  return rows.map((row) => ({ ...row, attachments: grouped.get(row.id) ?? [] }));
+}
 
 export function messageWaitingOnBoard(
   message: Pick<MessageRow, "from_user_id" | "reviewed_at">,
@@ -1759,7 +1953,7 @@ export async function threadMessages(
     )
     .bind(associationId, threadId)
     .all<MessageRow>();
-  return results;
+  return attachMessageFiles(db, associationId, results);
 }
 
 export async function markThreadReviewed(
@@ -1817,7 +2011,7 @@ export async function threadsForViewer(
     ? statement.bind(associationId, associationId)
     : statement.bind(associationId, associationId, associationId, userId);
   const { results } = await bound.all<MessageRow>();
-  return results;
+  return attachMessageFiles(db, associationId, results);
 }
 
 export function messageThreadHrefs(slug: string, threadId: string): { resident: string; admin: string } {
@@ -1851,6 +2045,13 @@ export async function deleteMessageThread(
   threadId: string,
 ): Promise<boolean> {
   if (!threadId) return false;
+  await deleteMessageAttachmentRows(
+    db,
+    `DELETE FROM message_attachments WHERE association_id = ? AND message_id IN (
+       SELECT id FROM messages WHERE association_id = ? AND thread_id = ?
+     )`,
+    [associationId, associationId, threadId],
+  );
   const result = await db
     .prepare("DELETE FROM messages WHERE association_id = ? AND thread_id = ?")
     .bind(associationId, threadId)
@@ -1868,6 +2069,11 @@ export async function deleteMessage(
   messageId: string,
 ): Promise<boolean> {
   if (!threadId || !messageId) return false;
+  await deleteMessageAttachmentRows(
+    db,
+    "DELETE FROM message_attachments WHERE association_id = ? AND message_id = ?",
+    [associationId, messageId],
+  );
   const result = await db
     .prepare("DELETE FROM messages WHERE association_id = ? AND thread_id = ? AND id = ?")
     .bind(associationId, threadId, messageId)

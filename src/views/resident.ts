@@ -13,6 +13,7 @@ import type {
 } from "../db";
 import { groupDocuments, type CategoryGroup, type FolderGroup } from "../lib/categories";
 import { assessmentDisplayName } from "../lib/dues";
+import { DOCUMENT_FILE_ACCEPT, isImageContentType } from "../lib/files";
 import { clip, paragraphs, esc } from "../lib/html";
 import { formatMoney } from "../lib/money";
 import type { Association } from "../types";
@@ -566,10 +567,11 @@ export function messagesPage(
     </article>
     <article class="panel">
       <h2>Contact the board</h2>
-      <form class="fields" method="post" action="/a/${esc(association.slug)}/messages">
+      <form class="fields" method="post" action="/a/${esc(association.slug)}/messages" enctype="multipart/form-data">
         ${properties.length ? `<label>Lot<select name="property_id"><option value="">No specific lot</option>${lotOptions}</select></label>` : ""}
         ${textField("Subject", "subject", { required: true })}
         ${areaField("Message", "body", "", true)}
+        <label>Attach a file (optional)<input type="file" name="file" multiple accept="${DOCUMENT_FILE_ACCEPT}"></label>
         <button type="submit">Send</button>
       </form>
     </article>
@@ -599,7 +601,8 @@ export function threadPage(
       const remove = action
         ? `<div class="actions">${confirmDeleteButton(action, "Delete reply", "Delete this reply")}</div>`
         : "";
-      return `<article class="card"><p><strong>${esc(message.from_name)}</strong> <span class="muted">${dateTimeCell(message.created_at, association.timezone)}</span></p>${paragraphs(message.body)}${remove}</article>`;
+      const files = messageAttachmentHtml(association.slug, threadId, message, inbox);
+      return `<article class="card"><p><strong>${esc(message.from_name)}</strong> <span class="muted">${dateTimeCell(message.created_at, association.timezone)}</span></p>${paragraphs(message.body)}${files}${remove}</article>`;
     })
     .join("");
   const intro = options.incoming
@@ -620,6 +623,27 @@ export function threadPage(
   return `<section class="panel"><h1>${esc(subject)}</h1>${intro}${threadDelete}</section>
     <section class="stack">${items}</section>
     ${reply}`;
+}
+
+function messageAttachmentHtml(
+  slug: string,
+  threadId: string,
+  message: MessageRow,
+  inbox: "admin" | "resident",
+): string {
+  const files = message.attachments ?? [];
+  if (files.length === 0) return "";
+  const stem =
+    inbox === "admin"
+      ? `/a/${slug}/admin/messages/${threadId}/messages/${message.id}/file`
+      : `/a/${slug}/messages/${threadId}/messages/${message.id}/file`;
+  return files
+    .map((file) => {
+      const href = `${stem}/${file.id}`;
+      const links = documentFileLinks(href, isImageContentType(file.content_type) ? file.content_type : "");
+      return `<p>${esc(file.filename)}</p><p>${links}</p>`;
+    })
+    .join("");
 }
 
 function threadDeleteAction(slug: string, threadId: string, inbox: "admin" | "resident"): string {

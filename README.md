@@ -20,7 +20,7 @@ Ask the portal is a button at the bottom right of signed-in pages. Opening it sh
 - Homeowner dashboard: account balance, lot dues, news, upcoming events, invoices, recorded payments, late fees, and personal notices.
 - Documents in nine categories, with versions. On the Documents page each category is a collapsed folder. A file can sit in the category, or in an optional subfolder such as a year under Meeting Minutes. Categories with no subfolders open straight to their files. Residents see the version the board marks current. Budgets can be board-only. Publishing a file can email a short portal link when Email owners is checked. Board-only files go only to board logins, and the email does not include the file.
 - News, emergency notices, meetings, calendar, FAQs, and board contacts. Posting or saving an announcement or event can email active logins the same way. FAQ and contacts do not.
-- Private resident-to-board messages, plus portal notifications. The resident who started a thread can delete that thread. Board admins can delete a thread or one reply. Deleting a thread removes its portal notifications. A portal notice can include an optional file the owner views or downloads in the portal. Posting a notice to one owner can also email that login when Email owner is checked. The note has the title, a short message, a link to Notices, and the file attached to the email. The box starts unchecked. If Resend is not configured, the notice is still saved and the flash says the email was not sent.
+- Private resident-to-board messages, plus portal notifications. An owner can attach up to 3 files when sending a message. The owner and the board open those files from the message. The resident who started a thread can delete that thread. Board admins can delete a thread or one reply. Deleting a thread removes its portal notifications. A portal notice can include an optional file the owner views or downloads in the portal. Posting a notice to one owner can also email that login when Email owner is checked. The note has the title, a short message, a link to Notices, and the file attached to the email. The box starts unchecked. If Resend is not configured, the notice is still saved and the flash says the email was not sent.
 - Board tools: owners and lots, delinquent accounts, homeowner and board roles with an admin flag, login email edits, deleting a person, CSV import, invoices, annual dues, recorded payments (edit or delete a payment on an invoice), deleting a lot that has no invoices or payments, news editing, documents (visibility and delete), an accountant CSV, join requests, incoming messages (delete a thread or a reply), and an activity log.
 - Public home with resident login and request access.
 
@@ -346,6 +346,31 @@ After it succeeds, use Admin, Owners and lots. The property roster is that page.
 City, state, and ZIP for the physical address are the existing `properties.city`, `properties.state`, and `properties.postal_code` columns from the original schema. No further migration is required to edit them. The lot page shows the street, then city, state, and ZIP on the next line. Mailing address stays labeled "Mailing address (if different)". A blank mailing address means it matches the property address.
 
 Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0010` is already on the remote database.
+
+## Message files (paste this before merge)
+
+`migrations/0012_message_attachments.sql` stores optional files on a message an owner sends to the board. Paste it in the Cloudflare dashboard before you merge the pull request. Marc does not need a terminal.
+
+What it does:
+
+- Adds `message_attachments` for the filename, content type, R2 object key, and size.
+- Existing messages stay as they are. A message can have up to 3 files.
+- The file bytes go in the existing `tango-documents` R2 bucket (`DOCUMENTS`), the same bucket notice files use.
+- Safe to run more than once.
+
+Dashboard steps:
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database**.
+2. Select the database named **tango**.
+3. Open **Console**.
+4. Paste the full contents of `migrations/0012_message_attachments.sql`.
+5. Select **Execute**.
+
+Run that file once, after `0011`. Pasting it again is safe.
+
+Sending a message with a file before this runs asks you to apply the file first. A message without a file still sends. On Messages, Attach a file (optional) takes a PDF, text file, image, or Word document, 8 MB or smaller, up to 3 files. The owner and the board open or download the file from that message. Another owner cannot open it. A new message leaves a portal notice for the board. It does not send an email.
+
+Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0011` is already on the remote database.
 
 ## Second owner on a lot
 

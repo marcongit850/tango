@@ -1,3 +1,5 @@
+import { logError } from "./log";
+
 const ALLOWED_TYPES = new Set([
   "application/pdf",
   "text/plain",
@@ -21,6 +23,10 @@ const EXTENSION_TYPES: Record<string, string> = {
 
 export const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
 export const MAX_CSV_BYTES = 1024 * 1024;
+export const MAX_MESSAGE_FILES = 3;
+
+export const DOCUMENT_FILE_ACCEPT =
+  ".pdf,.txt,.jpg,.jpeg,.png,.webp,.doc,.docx,application/pdf,text/plain,image/jpeg,image/png,image/webp,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 export function safeFilename(name: string): string {
   const base = name.split(/[/\\]/).pop() ?? "document";
@@ -44,10 +50,33 @@ export function contentTypeForUpload(file: File): string | null {
 }
 
 const BROWSER_VIEWABLE = new Set(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
+const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+function baseContentType(contentType: string): string {
+  return contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+}
+
+export function allowedDocumentType(contentType: string): boolean {
+  return ALLOWED_TYPES.has(baseContentType(contentType));
+}
+
+export function isImageContentType(contentType: string): boolean {
+  return IMAGE_TYPES.has(baseContentType(contentType));
+}
+
+export async function deleteStoredFiles(bucket: R2Bucket, keys: string[]): Promise<void> {
+  for (const key of keys) {
+    if (!key) continue;
+    try {
+      await bucket.delete(key);
+    } catch (error) {
+      logError("r2_delete", { message: error instanceof Error ? error.message : "unknown" });
+    }
+  }
+}
 
 export function isBrowserViewable(contentType: string): boolean {
-  const base = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
-  return BROWSER_VIEWABLE.has(base);
+  return BROWSER_VIEWABLE.has(baseContentType(contentType));
 }
 
 function dispositionFilename(filename: string): string {

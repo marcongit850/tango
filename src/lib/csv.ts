@@ -17,6 +17,11 @@ export type OwnerCsvRow = {
   city: string;
   state: string;
   postalCode: string;
+  houseName: string;
+  mailingStreet: string;
+  mailingCity: string;
+  mailingState: string;
+  mailingPostalCode: string;
 };
 
 export type CsvIssue = { line: number; message: string };
@@ -112,6 +117,11 @@ export function parseOwnersCsv(
     const city = cell("city") || defaults.city;
     const state = cell("state") || defaults.state;
     const postalCode = cell("postal_code") || defaults.postalCode;
+    const houseName = cell("house_name");
+    const mailingStreet = cell("mailing_street");
+    const mailingCity = cell("mailing_city");
+    const mailingState = cell("mailing_state");
+    const mailingPostalCode = cell("mailing_postal_code");
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       errors.push({ line, message: "Email is not valid." });
@@ -153,6 +163,11 @@ export function parseOwnersCsv(
       city,
       state,
       postalCode,
+      houseName,
+      mailingStreet,
+      mailingCity,
+      mailingState,
+      mailingPostalCode,
     });
   }
 

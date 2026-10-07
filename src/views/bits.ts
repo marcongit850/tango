@@ -86,3 +86,21 @@ export function selectField(
     .join("");
   return `<label>${esc(label)}<select name="${esc(name)}">${html}</select></label>`;
 }
+
+export function addressLine(street: string, city: string, state: string, postal: string): string {
+  const cityState = [city.trim(), state.trim()].filter(Boolean).join(", ");
+  const locality = [cityState, postal.trim()].filter(Boolean).join(" ");
+  return [street.trim(), locality].filter(Boolean).join(", ");
+}
+
+export function contactPhones(contacts: { name: string; phone: string; isPrimary?: boolean }[]): string {
+  if (contacts.length === 0) return empty("No owner is linked to this lot.");
+  const items = contacts
+    .map((contact) => {
+      const primary = contact.isPrimary ? " (primary)" : "";
+      const phone = contact.phone.trim() || "No phone on file";
+      return `<li>${esc(contact.name)}${primary}: ${esc(phone)}</li>`;
+    })
+    .join("");
+  return `<ul>${items}</ul>`;
+}

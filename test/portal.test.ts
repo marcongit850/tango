@@ -116,7 +116,8 @@ describe("owner csv", () => {
       timezone: "America/Chicago",
     };
     const html = importPage(association);
-    expect(html).toContain("Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>.");
+    expect(html).toContain("Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>, <code>house_name</code>, <code>mailing_street</code>, <code>mailing_city</code>, <code>mailing_state</code>, <code>mailing_postal_code</code>.");
+    expect(html).toContain("Admin notes are not part of this import.");
     expect(html).toContain("A positive starting balance adds one opening invoice per lot (re-import will not double it).");
     expect(html).toContain('<a href="/a/tango-mar/admin/import/template.csv">Download template</a>');
     expect(html).not.toContain("Save the Excel roster");
@@ -142,7 +143,14 @@ describe("owner csv", () => {
       city: "Miramar Beach",
       state: "FL",
       postalCode: "32550",
+      houseName: "MELOMAR",
+      mailingStreet: "100 Main Street",
+      mailingCity: "Destin",
+      mailingState: "FL",
+      mailingPostalCode: "32541",
     });
+    expect(parsed.rows[1].houseName).toBe("AVERITTS FAVORITE");
+    expect(parsed.rows[1].mailingStreet).toBe("");
     expect(parsed.rows[1]).toMatchObject({
       email: "jordan.lee@example.com",
       role: "board",
@@ -1769,6 +1777,11 @@ describe("ledger payment invoices", () => {
       postal_code: "32550",
       status: "active",
       lot_type: "improved",
+      house_name: "",
+      mailing_street: "",
+      mailing_city: "",
+      mailing_state: "",
+      mailing_postal_code: "",
     };
   }
 

@@ -268,6 +268,11 @@ export type BalanceRow = {
   property_id: string;
   lot_number: string;
   street_address: string;
+  house_name?: string;
+  mailing_street?: string;
+  mailing_city?: string;
+  mailing_state?: string;
+  mailing_postal_code?: string;
   charges_cents: number;
   late_fee_cents: number;
   payment_cents: number;
@@ -297,11 +302,7 @@ function mapBalance(row: BalanceQueryRow): BalanceRow {
 // amount stays off the balance until the assessment opens. Recorded payments
 // still count immediately. Past due requires both the issue date and the due
 // date to have passed, so a scheduled future year is never past due.
-const BALANCE_SQL = `
-  SELECT
-    p.id AS property_id,
-    p.lot_number,
-    p.street_address,
+const BALANCE_SQL_TAIL = `
     COALESCE((
       SELECT SUM(amount_cents + late_fee_cents) FROM invoices i
       WHERE i.property_id = p.id AND i.association_id = p.association_id AND i.status != 'void'
@@ -324,15 +325,30 @@ const BALANCE_SQL = `
   FROM properties p
 `;
 
+async function balanceSql(db: D1Database): Promise<string> {
+  const names = await columnNames(db, "properties");
+  const extra = ["house_name", "mailing_street", "mailing_city", "mailing_state", "mailing_postal_code"]
+    .map((column) => (names.has(column) ? `p.${column}` : `'' AS ${column}`))
+    .join(",\n    ");
+  return `
+  SELECT
+    p.id AS property_id,
+    p.lot_number,
+    p.street_address,
+    ${extra},
+    ${BALANCE_SQL_TAIL}`;
+}
+
 export async function ledgerForUser(
   db: D1Database,
   associationId: string,
   userId: string,
   today: string,
 ): Promise<BalanceRow[]> {
+  const sql = await balanceSql(db);
   const { results } = await db
     .prepare(
-      `${BALANCE_SQL}
+      `${sql}
        JOIN property_owners po ON po.property_id = p.id AND po.association_id = p.association_id
        WHERE p.association_id = ? AND po.user_id = ?
        ORDER BY p.lot_number`,
@@ -347,8 +363,9 @@ export async function ledgerForAssociation(
   associationId: string,
   today: string,
 ): Promise<BalanceRow[]> {
+  const sql = await balanceSql(db);
   const { results } = await db
-    .prepare(`${BALANCE_SQL} WHERE p.association_id = ? ORDER BY p.lot_number`)
+    .prepare(`${sql} WHERE p.association_id = ? ORDER BY p.lot_number`)
     .bind(today, today, today, today, associationId)
     .all<BalanceQueryRow>();
   return results.map(mapBalance);
@@ -1034,17 +1051,37 @@ export type PropertyRow = {
   postal_code: string;
   status: string;
   lot_type: LotType;
+  house_name: string;
+  mailing_street: string;
+  mailing_city: string;
+  mailing_state: string;
+  mailing_postal_code: string;
 };
 
-const PROPERTY_COLUMNS = "id, lot_number, street_address, city, state, postal_code, status, lot_type";
-const PROPERTY_COLUMNS_PLAIN =
-  "id, lot_number, street_address, city, state, postal_code, status, 'improved' AS lot_type";
+const PUBLIC_LOT_FIELDS = ["house_name", "mailing_street", "mailing_city", "mailing_state", "mailing_postal_code"] as const;
+
+function selectPropertyColumns(names: Set<string>, prefix = ""): string {
+  const p = prefix ? `${prefix}.` : "";
+  const optional = (column: string, fallback: string) => (names.has(column) ? `${p}${column}` : fallback);
+  const publicFields = PUBLIC_LOT_FIELDS.map((column) => optional(column, `'' AS ${column}`));
+  return [
+    `${p}id`,
+    `${p}lot_number`,
+    `${p}street_address`,
+    `${p}city`,
+    `${p}state`,
+    `${p}postal_code`,
+    `${p}status`,
+    optional("lot_type", "'improved' AS lot_type"),
+    ...publicFields,
+  ].join(", ");
+}
 
 export async function listProperties(db: D1Database, associationId: string): Promise<PropertyRow[]> {
-  const typed = await hasColumn(db, "properties", "lot_type");
+  const names = await columnNames(db, "properties");
   const { results } = await db
     .prepare(
-      `SELECT ${typed ? PROPERTY_COLUMNS : PROPERTY_COLUMNS_PLAIN}
+      `SELECT ${selectPropertyColumns(names)}
        FROM properties WHERE association_id = ? ORDER BY lot_number`,
     )
     .bind(associationId)
@@ -1057,14 +1094,50 @@ export async function propertyInAssociation(
   associationId: string,
   propertyId: string,
 ): Promise<PropertyRow | null> {
-  const typed = await hasColumn(db, "properties", "lot_type");
+  const names = await columnNames(db, "properties");
   return db
     .prepare(
-      `SELECT ${typed ? PROPERTY_COLUMNS : PROPERTY_COLUMNS_PLAIN}
+      `SELECT ${selectPropertyColumns(names)}
        FROM properties WHERE association_id = ? AND id = ?`,
     )
     .bind(associationId, propertyId)
     .first<PropertyRow>();
+}
+
+/** Admin-only text. Do not select this for resident pages. */
+export async function adminNotesForProperty(db: D1Database, associationId: string, propertyId: string): Promise<string> {
+  if (!(await hasColumn(db, "properties", "admin_notes"))) return "";
+  const row = await db
+    .prepare("SELECT admin_notes FROM properties WHERE association_id = ? AND id = ?")
+    .bind(associationId, propertyId)
+    .first<{ admin_notes: string }>();
+  return row?.admin_notes ?? "";
+}
+
+export type PropertyContact = {
+  user_id: string;
+  name: string;
+  email: string;
+  phone: string;
+  is_primary: number;
+};
+
+export async function contactsForProperty(
+  db: D1Database,
+  associationId: string,
+  propertyId: string,
+): Promise<PropertyContact[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT u.id AS user_id, u.name, u.email, u.phone, po.is_primary
+       FROM property_owners po
+       JOIN users u ON u.id = po.user_id
+       WHERE po.association_id = ? AND po.property_id = ?
+       ORDER BY po.is_primary DESC, u.name`,
+    )
+    .bind(associationId, propertyId)
+    .all<PropertyContact>();
+  return results;
 }
 
 /**
@@ -1162,15 +1235,19 @@ export type LotRow = PropertyRow & {
   owner_user_id: string | null;
   owner_name: string | null;
   owner_email: string | null;
+  owner_phone: string | null;
+  admin_notes: string;
 };
 
 export async function listLots(db: D1Database, associationId: string): Promise<LotRow[]> {
-  const typed = await hasColumn(db, "properties", "lot_type");
-  const lotType = typed ? "p.lot_type" : "'improved' AS lot_type";
+  const names = await columnNames(db, "properties");
+  const userColumns = await columnNames(db, "users");
+  const notes = names.has("admin_notes") ? "p.admin_notes" : "'' AS admin_notes";
+  const phone = userColumns.has("phone") ? "u.phone AS owner_phone" : "'' AS owner_phone";
   const { results } = await db
     .prepare(
-      `SELECT p.id, p.lot_number, p.street_address, p.city, p.state, p.postal_code, p.status, ${lotType},
-              u.id AS owner_user_id, u.name AS owner_name, u.email AS owner_email
+      `SELECT ${selectPropertyColumns(names, "p")}, ${notes},
+              u.id AS owner_user_id, u.name AS owner_name, u.email AS owner_email, ${phone}
        FROM properties p
        LEFT JOIN property_owners po
          ON po.id = (
@@ -1200,6 +1277,7 @@ export type OwnerListRow = {
   property_id: string | null;
   lot_number: string | null;
   street_address: string | null;
+  last_login_at?: string | null;
 };
 
 export async function listOwners(db: D1Database, associationId: string): Promise<OwnerListRow[]> {
@@ -1209,7 +1287,7 @@ export async function listOwners(db: D1Database, associationId: string): Promise
   const { results } = await db
     .prepare(
       flagged
-        ? `SELECT u.id AS user_id, u.email, u.name, u.phone, m.role_id, m.is_admin, ${masterSql}, m.status,
+        ? `SELECT u.id AS user_id, u.email, u.name, u.phone, u.last_login_at, m.role_id, m.is_admin, ${masterSql}, m.status,
                   p.id AS property_id, p.lot_number, p.street_address
            FROM memberships m
            JOIN users u ON u.id = m.user_id
@@ -1218,7 +1296,7 @@ export async function listOwners(db: D1Database, associationId: string): Promise
            LEFT JOIN properties p ON p.id = po.property_id AND p.association_id = m.association_id
            WHERE m.association_id = ?
            ORDER BY u.name`
-        : `SELECT u.id AS user_id, u.email, u.name, u.phone, m.role_id,
+        : `SELECT u.id AS user_id, u.email, u.name, u.phone, u.last_login_at, m.role_id,
                   CASE WHEN m.role_id IN ('board', 'officer') THEN 1 ELSE 0 END AS is_admin, ${masterSql}, m.status,
                   p.id AS property_id, p.lot_number, p.street_address
            FROM memberships m

@@ -2,7 +2,7 @@ import { DOCUMENT_CATEGORIES } from "../lib/categories";
 import { zonedIsoDate } from "../lib/dates";
 import { lotTypeLabel } from "../lib/dues";
 import { MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE } from "../lib/access";
-import { esc } from "../lib/html";
+import { esc, paragraphs } from "../lib/html";
 import { formatMoney } from "../lib/money";
 import type { Association, DocumentCategory } from "../types";
 import { messageWaitingOnBoard, type MessageRow } from "../db";
@@ -30,7 +30,9 @@ import {
   categoryCell,
   dateCell,
   dateTimeCell,
+  addressLine,
   confirmDeleteButton,
+  contactPhones,
   documentFileLinks,
   empty,
   methodLabel,
@@ -73,10 +75,75 @@ function moneyLink(href: string, cents: number): string {
   return `<a class="money-link" href="${esc(href)}">${moneySpan(cents)}</a>`;
 }
 
-function ownerBalanceCell(slug: string, owner: { property_id: string | null; balance_cents?: number }): string {
-  if (owner.balance_cents === undefined) return "";
-  if (!owner.property_id) return moneySpan(owner.balance_cents);
-  return moneyLink(`/a/${slug}/admin/ledger/${owner.property_id}`, owner.balance_cents);
+function lotBalanceCell(slug: string, lot: { id: string; balance_cents?: number }): string {
+  if (lot.balance_cents === undefined) return "";
+  return moneyLink(`/a/${slug}/admin/ledger/${lot.id}`, lot.balance_cents);
+}
+
+function accountAccessLabel(owner: OwnerListRow): string {
+  if (owner.is_master === 1) return "Master admin";
+  if (owner.is_admin === 1) return "Edit access";
+  return "No edit access";
+}
+
+function lastLoginLabel(value: string | null | undefined, timeZone: string): string {
+  if (!value) return "Has not signed in";
+  return dateTimeCell(value, timeZone);
+}
+
+function notePreview(notes: string): string {
+  const flat = notes.replace(/\s+/g, " ").trim();
+  if (flat.length <= 80) return flat;
+  return `${flat.slice(0, 77)}...`;
+}
+
+type LotFormValues = {
+  lot_number?: string;
+  street_address?: string;
+  lot_type?: string;
+  status?: string;
+  house_name?: string;
+  mailing_street?: string;
+  mailing_city?: string;
+  mailing_state?: string;
+  mailing_postal_code?: string;
+  admin_notes?: string;
+};
+
+function lotDetailFields(values: LotFormValues, mode: "add" | "edit"): string {
+  const status =
+    mode === "edit"
+      ? selectField(
+          "Status",
+          "status",
+          [
+            { value: "active", label: "Active" },
+            { value: "inactive", label: "Inactive" },
+          ],
+          values.status ?? "active",
+        )
+      : "";
+  return `${textField("Lot number", "lot_number", { value: values.lot_number ?? "", required: true })}
+    ${textField("House name", "house_name", { value: values.house_name ?? "" })}
+    <p class="muted">Name on the lot, such as MELOMAR or AVERITTS FAVORITE.</p>
+    ${textField(mode === "add" ? "Street address" : "Street", "street_address", { value: values.street_address ?? "", required: true })}
+    ${textField("Mailing street", "mailing_street", { value: values.mailing_street ?? "" })}
+    ${textField("Mailing city", "mailing_city", { value: values.mailing_city ?? "" })}
+    ${textField("Mailing state", "mailing_state", { value: values.mailing_state ?? "" })}
+    ${textField("Mailing postal code", "mailing_postal_code", { value: values.mailing_postal_code ?? "" })}
+    <p class="muted">Leave mailing blank when mail goes to the lot address.</p>
+    ${areaField("Admin notes", "admin_notes", values.admin_notes ?? "")}
+    <p class="muted">Admin notes are visible only on admin pages. Owners do not see them.</p>
+    ${selectField(
+      "Type",
+      "lot_type",
+      [
+        { value: "improved", label: "Improved" },
+        { value: "unimproved", label: "Unimproved" },
+      ],
+      values.lot_type ?? "improved",
+    )}
+    ${status}`;
 }
 
 function dollarsInput(cents: number): string {
@@ -110,7 +177,7 @@ export function adminHome(options: {
       ${statCard(formatMoney(options.outstandingCents), "Total Outstanding", `${base}/ledger`)}
       ${statCard(options.lots, "Lots", `${base}/owners#lots`)}
       ${statCard(options.members, "Active logins", `${base}/owners#logins`)}
-      ${statCard(options.delinquent, "Delinquent lots", `${base}/owners?delinquent=1#logins`)}
+      ${statCard(options.delinquent, "Delinquent lots", `${base}/owners?delinquent=1#lots`)}
       ${statCard(options.waiting, "Messages waiting on the board", `${base}/messages`)}
       ${joins}
     </section>
@@ -157,42 +224,34 @@ function statCard(value: number | string, label: string, href: string): string {
 
 export function ownersPage(
   association: Association,
-  lots: LotRow[],
-  owners: (OwnerListRow & { balance_cents?: number; delinquent?: boolean })[],
+  lots: (LotRow & { balance_cents?: number; delinquent?: boolean })[],
+  owners: OwnerListRow[],
   delinquentOnly: boolean,
   canEdit = true,
 ): string {
-  const rows = owners
+  const shownLots = delinquentOnly ? lots.filter((lot) => lot.delinquent) : lots;
+  const loginRows = owners
     .map(
       (owner) => `<tr>
-        <td><a href="/a/${esc(association.slug)}/admin/owners/${esc(owner.user_id)}">${esc(owner.name)}</a><div class="muted">${esc(owner.email)}</div></td>
-        <td>${esc(roleLabel(owner.role_id, owner.is_admin === 1))}${owner.is_master === 1 ? `<div class="muted">Master admin</div>` : ""}</td>
-        <td>${esc(owner.status)}</td>
-        <td>${owner.lot_number ? `Lot ${esc(owner.lot_number)}` : "None"}</td>
-        <td>${ownerBalanceCell(association.slug, owner)}</td>
-        <td>${owner.delinquent ? `<span class="badge late">Past due</span>` : ""}</td>
+        <td><a href="/a/${esc(association.slug)}/admin/owners/${esc(owner.user_id)}">${esc(owner.name)}</a></td>
+        <td>${esc(owner.email)}</td>
+        <td>${esc(accountAccessLabel(owner))}</td>
+        <td>${lastLoginLabel(owner.last_login_at, association.timezone)}</td>
       </tr>`,
     )
     .join("");
   const ownerChoices = owners.map((owner) => ({ value: owner.user_id, label: `${owner.name} (${owner.email})` }));
-  const lotRows = lots
+  const lotRows = shownLots
     .map((lot) => {
       const edit = `/a/${esc(association.slug)}/admin/lots/${esc(lot.id)}`;
+      const mailing = addressLine(lot.mailing_street, lot.mailing_city, lot.mailing_state, lot.mailing_postal_code);
+      const phone = !lot.owner_user_id ? "" : lot.owner_phone?.trim() || "No phone on file";
       const editCell = canEdit
         ? `<td>
           <details>
             <summary>Edit</summary>
             <form class="fields" method="post" action="${edit}">
-              ${textField("Lot number", "lot_number", { value: lot.lot_number, required: true })}
-              ${textField("Street", "street_address", { value: lot.street_address, required: true })}
-              ${selectField("Type", "lot_type", [
-                { value: "improved", label: "Improved" },
-                { value: "unimproved", label: "Unimproved" },
-              ], lot.lot_type)}
-              ${selectField("Status", "status", [
-                { value: "active", label: "Active" },
-                { value: "inactive", label: "Inactive" },
-              ], lot.status)}
+              ${lotDetailFields(lot, "edit")}
               <button class="secondary" type="submit">Save lot</button>
             </form>
             <form class="fields" method="post" action="${edit}/owner">
@@ -203,12 +262,17 @@ export function ownersPage(
         </td>`
         : "";
       return `<tr>
-        <td><a href="/a/${esc(association.slug)}/admin/ledger/${esc(lot.id)}">Lot ${esc(lot.lot_number)}</a></td>
+        <td><a href="/a/${esc(association.slug)}/admin/ledger/${esc(lot.id)}">Lot ${esc(lot.lot_number)}</a>${lot.delinquent ? ` <span class="badge late">Past due</span>` : ""}</td>
+        <td>${esc(lot.house_name)}</td>
         <td>${esc(lot.street_address)}</td>
+        <td>${esc(mailing)}</td>
         <td>${esc(lotTypeLabel(lot.lot_type))}</td>
         <td>${lot.owner_name ? esc(lot.owner_name) : "No owner"}</td>
         <td>${lot.owner_email ? esc(lot.owner_email) : ""}</td>
+        <td>${esc(phone)}</td>
+        <td>${lotBalanceCell(association.slug, lot)}</td>
         <td>${esc(lot.status)}</td>
+        <td>${esc(notePreview(lot.admin_notes))}</td>
         ${editCell}
       </tr>`;
     })
@@ -216,30 +280,28 @@ export function ownersPage(
   const addLot = canEdit
     ? `<h2>Add a lot</h2>
       <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/lots">
-        ${textField("Lot number", "lot_number", { required: true })}
-        ${textField("Street address", "street_address", { required: true })}
-        ${selectField("Type", "lot_type", [
-          { value: "improved", label: "Improved" },
-          { value: "unimproved", label: "Unimproved" },
-        ], "improved")}
+        ${lotDetailFields({}, "add")}
         <button type="submit">Add lot</button>
       </form>`
     : "";
+  const lotTable = lotRows
+    ? `<table><thead><tr><th>Lot</th><th>House name</th><th>Address</th><th>Mailing</th><th>Type</th><th>Primary owner</th><th>Email</th><th>Phone</th><th>Balance</th><th>Status</th><th>Admin notes</th>${canEdit ? "<th></th>" : ""}</tr></thead><tbody>${lotRows}</tbody></table>`
+    : empty(delinquentOnly ? "No past due lots." : "No lots yet.");
   return `${adminNav(association.slug, "owners", canEdit)}
     <section class="panel" id="lots">
       <h1>Owners & lots</h1>
-      <p class="muted">Each lot shows its primary owner. CSV import is still the bulk way to add a roster. Set improved or unimproved here before assigning annual dues.</p>
-      ${lotRows ? `<table><thead><tr><th>Lot</th><th>Address</th><th>Type</th><th>Primary owner</th><th>Email</th><th>Status</th>${canEdit ? "<th></th>" : ""}</tr></thead><tbody>${lotRows}</tbody></table>` : empty("No lots yet.")}
+      <p class="muted">This is the property roster. Each lot shows its house name, mailing address, primary owner, phone, and balance. Open a lot for every linked phone number. Admin notes stay on this page and are not shown to owners. CSV import is still the bulk way to add a roster. Set improved or unimproved here before assigning annual dues.</p>
+      <p class="filters">
+        <a ${delinquentOnly ? "" : `class="active"`} href="/a/${esc(association.slug)}/admin/owners#lots">All lots</a>
+        <a ${delinquentOnly ? `class="active"` : ""} href="/a/${esc(association.slug)}/admin/owners?delinquent=1#lots">Past due only</a>
+      </p>
+      ${lotTable}
       ${addLot}
     </section>
     <section class="panel" id="logins">
-      <h2>${delinquentOnly ? "Delinquent accounts" : "Users"}</h2>
-      <p class="muted">A balance opens that lot's invoices.</p>
-      <p class="filters">
-        <a ${delinquentOnly ? "" : `class="active"`} href="/a/${esc(association.slug)}/admin/owners#logins">Everyone</a>
-        <a ${delinquentOnly ? `class="active"` : ""} href="/a/${esc(association.slug)}/admin/owners?delinquent=1#logins">Past due only</a>
-      </p>
-      ${rows ? `<table><thead><tr><th>Person</th><th>Role</th><th>Status</th><th>Lot</th><th>Balance</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No matching accounts.")}
+      <h2>Users</h2>
+      <p class="muted">Sign-in accounts only. Email, admin access, and last login. Lot details stay in Owners and lots above.</p>
+      ${loginRows ? `<table><thead><tr><th>Person</th><th>Email</th><th>Access</th><th>Last login</th></tr></thead><tbody>${loginRows}</tbody></table>` : empty("No sign-in accounts.")}
     </section>`;
 }
 
@@ -367,7 +429,8 @@ export function importPage(
   return `${adminNav(association.slug, "import", canEdit)}
     <section class="panel">
       <h1>Import owners from CSV</h1>
-      <p>Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>.</p>
+      <p>Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>, <code>house_name</code>, <code>mailing_street</code>, <code>mailing_city</code>, <code>mailing_state</code>, <code>mailing_postal_code</code>.</p>
+      <p><code>house_name</code> is the name on the lot, such as MELOMAR. The mailing columns are for mail that should not go to the lot address. A blank house name or mailing cell keeps the value already stored. Phone is stored on the person and shown when you open the lot. Admin notes are not part of this import.</p>
       <p>A positive starting balance adds one opening invoice per lot (re-import will not double it).</p>
       <p>The admin column is edit access for a homeowner or a board member. Leave it blank to keep an existing flag. A new person with a blank admin cell does not get edit access.</p>
       <p><a href="/a/${esc(association.slug)}/admin/import/template.csv">Download template</a></p>
@@ -473,6 +536,18 @@ export function ledgerLotPage(options: {
   propertyId: string;
   lotNumber: string;
   streetAddress: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  houseName?: string;
+  mailingStreet?: string;
+  mailingCity?: string;
+  mailingState?: string;
+  mailingPostalCode?: string;
+  adminNotes?: string;
+  lotType?: string;
+  status?: string;
+  contacts?: { name: string; phone: string; isPrimary?: boolean }[];
   ownerName: string;
   balance: BalanceRow | null;
   invoices: InvoiceRow[];
@@ -500,7 +575,39 @@ export function ledgerLotPage(options: {
       </tr>`;
     })
     .join("");
-  const who = [options.ownerName, options.streetAddress].filter(Boolean).join(" · ");
+  const houseName = options.houseName?.trim() ?? "";
+  const physical = addressLine(options.streetAddress, options.city ?? "", options.state ?? "", options.postalCode ?? "");
+  const mailing = addressLine(
+    options.mailingStreet ?? "",
+    options.mailingCity ?? "",
+    options.mailingState ?? "",
+    options.mailingPostalCode ?? "",
+  );
+  const notes = options.adminNotes ?? "";
+  const phones = contactPhones(options.contacts ?? (options.ownerName ? [{ name: options.ownerName, phone: "", isPrimary: true }] : []));
+  const profileForm = canEdit
+    ? `<form class="fields" method="post" action="/a/${esc(options.association.slug)}/admin/lots/${esc(options.propertyId)}">
+        <input type="hidden" name="return_to" value="ledger">
+        ${lotDetailFields(
+          {
+            lot_number: options.lotNumber,
+            street_address: options.streetAddress,
+            house_name: houseName,
+            mailing_street: options.mailingStreet ?? "",
+            mailing_city: options.mailingCity ?? "",
+            mailing_state: options.mailingState ?? "",
+            mailing_postal_code: options.mailingPostalCode ?? "",
+            admin_notes: notes,
+            lot_type: options.lotType ?? "improved",
+            status: options.status ?? "active",
+          },
+          "edit",
+        )}
+        <button type="submit">Save lot</button>
+      </form>`
+    : `<h2>Admin notes</h2>
+       <p class="muted">Only admins can see this. Owners do not see it on their pages.</p>
+       ${notes ? paragraphs(notes) : `<p class="muted">No admin notes.</p>`}`;
   const balance = options.balance
     ? `<p>Balance ${moneySpan(options.balance.balance_cents)}${options.balance.delinquent ? ` <span class="badge late">Past due</span>` : ""}</p>`
     : "";
@@ -528,7 +635,12 @@ export function ledgerLotPage(options: {
     <section class="panel">
       <p><a href="${base}/ledger">Assessments and balances</a></p>
       <h1>Lot ${esc(options.lotNumber)}</h1>
-      ${who ? `<p>${esc(who)}</p>` : ""}
+      ${houseName ? `<p><strong>${esc(houseName)}</strong></p>` : ""}
+      <p>Lot address: ${esc(physical)}</p>
+      ${mailing ? `<p>Mailing address: ${esc(mailing)}</p>` : `<p class="muted">Mailing address is the same as the lot.</p>`}
+      <h2>Phone numbers</h2>
+      ${phones}
+      ${profileForm}
       ${balance}
       ${scheduledNote}
       <p class="muted">Click an amount to edit or delete that invoice. Delete stays blocked when a payment is recorded on that invoice. Delete the payment on the invoice page first.</p>

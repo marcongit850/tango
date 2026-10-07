@@ -394,6 +394,11 @@ describe("master admin protection", () => {
             city: "Miramar Beach",
             state: "FL",
             postalCode: "32550",
+            houseName: "",
+            mailingStreet: "",
+            mailingCity: "",
+            mailingState: "",
+            mailingPostalCode: "",
           },
         ],
       );

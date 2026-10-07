@@ -27,6 +27,8 @@ import {
   listEvents,
   listFaqs,
   listJoinRequests,
+  adminNotesForProperty,
+  contactsForProperty,
   listLots,
   listOwners,
   listProperties,
@@ -159,16 +161,18 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       listLots(c.env.DB, association.id),
     ]);
     const byProperty = new Map(ledger.map((row) => [row.property_id, row]));
-    const decorated = owners
-      .map((owner) => {
-        const balance = owner.property_id ? byProperty.get(owner.property_id) : undefined;
-        return { ...owner, balance_cents: balance?.balance_cents, delinquent: balance?.delinquent ?? false };
-      })
-      .filter((owner) => !delinquentOnly || owner.delinquent);
+    const decoratedLots = lots.map((lot) => {
+      const balance = byProperty.get(lot.id);
+      return {
+        ...lot,
+        balance_cents: balance?.balance_cents ?? 0,
+        delinquent: balance?.delinquent ?? false,
+      };
+    });
     return render(c, {
-      title: delinquentOnly ? "Delinquent accounts" : "Owners & lots",
+      title: delinquentOnly ? "Past due lots" : "Owners & lots",
       active: "admin",
-      body: ownersPage(association, lots, decorated, delinquentOnly, canEditAdmin(membership)),
+      body: ownersPage(association, decoratedLots, owners, delinquentOnly, canEditAdmin(membership)),
     });
   });
 
@@ -493,6 +497,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const lotNumber = textValue(fields, "lot_number", 40);
     const street = textValue(fields, "street_address", 200);
     const lotType = textValue(fields, "lot_type", 20) || "improved";
+    const details = lotDetailsFromForm(fields);
     if (!lotNumber || !street || !isLotType(lotType)) return redirectTo(c, back, "Lot number, street address, and type are required.", "warn");
     const existing = await c.env.DB
       .prepare("SELECT id FROM properties WHERE association_id = ? AND lot_number = ?")
@@ -503,21 +508,53 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     try {
       await c.env.DB
         .prepare(
-          `INSERT INTO properties (id, association_id, lot_number, street_address, city, state, postal_code, status, lot_type, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+          `INSERT INTO properties (
+             id, association_id, lot_number, street_address, city, state, postal_code, status, lot_type,
+             house_name, mailing_street, mailing_city, mailing_state, mailing_postal_code, admin_notes, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(id, association.id, lotNumber, street, association.city, association.state, association.postal_code, lotType, new Date().toISOString())
+        .bind(
+          id,
+          association.id,
+          lotNumber,
+          street,
+          association.city,
+          association.state,
+          association.postal_code,
+          lotType,
+          details.houseName,
+          details.mailingStreet,
+          details.mailingCity,
+          details.mailingState,
+          details.mailingPostalCode,
+          details.adminNotes,
+          new Date().toISOString(),
+        )
         .run();
     } catch (error) {
       if (!isMissingColumn(error)) throw error;
-      await c.env.DB
-        .prepare(
-          `INSERT INTO properties (id, association_id, lot_number, street_address, city, state, postal_code, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
-        )
-        .bind(id, association.id, lotNumber, street, association.city, association.state, association.postal_code, new Date().toISOString())
-        .run();
-      return redirectTo(c, back, `Lot ${lotNumber} added. Apply the admin migration in D1 before setting lot type.`, "warn");
+      try {
+        await c.env.DB
+          .prepare(
+            `INSERT INTO properties (id, association_id, lot_number, street_address, city, state, postal_code, status, lot_type, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+          )
+          .bind(id, association.id, lotNumber, street, association.city, association.state, association.postal_code, lotType, new Date().toISOString())
+          .run();
+      } catch (fallback) {
+        if (!isMissingColumn(fallback)) throw fallback;
+        await c.env.DB
+          .prepare(
+            `INSERT INTO properties (id, association_id, lot_number, street_address, city, state, postal_code, status, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+          )
+          .bind(id, association.id, lotNumber, street, association.city, association.state, association.postal_code, new Date().toISOString())
+          .run();
+        return redirectTo(c, back, `Lot ${lotNumber} added. Apply the admin migration in D1 before setting lot type.`, "warn");
+      }
+      if (lotDetailsEntered(details)) {
+        return redirectTo(c, back, `Lot ${lotNumber} added. Apply the lot details migration in D1 before saving house name, mailing address, or admin notes.`, "warn");
+      }
     }
     await writeAudit(c.env.DB, {
       associationId: association.id,
@@ -533,13 +570,14 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   app.post("/a/:slug/admin/lots/:propertyId", async (c) => {
     const { association, user } = requireEditor(c);
     const fields = await readForm(c);
-    const back = `/a/${association.slug}/admin/owners#lots`;
     const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
     if (!property) throw new NotFoundError();
     const lotNumber = textValue(fields, "lot_number", 40);
     const street = textValue(fields, "street_address", 200);
     const status = textValue(fields, "status", 20);
     const lotType = textValue(fields, "lot_type", 20);
+    const details = lotDetailsFromForm(fields);
+    const back = lotReturnPath(association.slug, property.id, textValue(fields, "return_to", 20));
     if (!lotNumber || !street || (status !== "active" && status !== "inactive") || !isLotType(lotType)) {
       return redirectTo(c, back, "Check the lot number, address, type, and status.", "warn");
     }
@@ -550,12 +588,41 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     if (duplicate) return redirectTo(c, back, "That lot number already exists.", "warn");
     try {
       await c.env.DB
-        .prepare("UPDATE properties SET lot_number = ?, street_address = ?, status = ?, lot_type = ? WHERE association_id = ? AND id = ?")
-        .bind(lotNumber, street, status, lotType, association.id, property.id)
+        .prepare(
+          `UPDATE properties SET
+             lot_number = ?, street_address = ?, status = ?, lot_type = ?,
+             house_name = ?, mailing_street = ?, mailing_city = ?, mailing_state = ?, mailing_postal_code = ?, admin_notes = ?
+           WHERE association_id = ? AND id = ?`,
+        )
+        .bind(
+          lotNumber,
+          street,
+          status,
+          lotType,
+          details.houseName,
+          details.mailingStreet,
+          details.mailingCity,
+          details.mailingState,
+          details.mailingPostalCode,
+          details.adminNotes,
+          association.id,
+          property.id,
+        )
         .run();
     } catch (error) {
       if (!isMissingColumn(error)) throw error;
-      return redirectTo(c, back, "Apply the admin migration in D1, then try again. The steps are in the README under Admin improvements.", "warn");
+      try {
+        await c.env.DB
+          .prepare("UPDATE properties SET lot_number = ?, street_address = ?, status = ?, lot_type = ? WHERE association_id = ? AND id = ?")
+          .bind(lotNumber, street, status, lotType, association.id, property.id)
+          .run();
+      } catch (fallback) {
+        if (!isMissingColumn(fallback)) throw fallback;
+        return redirectTo(c, back, "Apply the admin migration in D1, then try again. The steps are in the README under Admin improvements.", "warn");
+      }
+      if (lotDetailsEntered(details)) {
+        return redirectTo(c, back, "Apply the lot details migration in D1, then try again. House name, mailing address, and admin notes were not saved.", "warn");
+      }
     }
     await writeAudit(c.env.DB, {
       associationId: association.id,
@@ -689,17 +756,18 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
     if (!property) throw new NotFoundError();
     const today = todayIso(association.timezone);
-    const [ledger, owners, invoices, paymentCount] = await Promise.all([
+    const [ledger, invoices, paymentCount, contacts, adminNotes] = await Promise.all([
       ledgerForAssociation(c.env.DB, association.id, today),
-      listOwners(c.env.DB, association.id),
       invoicesForProperty(c.env.DB, association.id, property.id),
       c.env.DB
         .prepare("SELECT COUNT(*) AS n FROM payments WHERE association_id = ? AND property_id = ?")
         .bind(association.id, property.id)
         .first<{ n: number }>(),
+      contactsForProperty(c.env.DB, association.id, property.id),
+      adminNotesForProperty(c.env.DB, association.id, property.id),
     ]);
-    const owner = owners.find((row) => row.property_id === property.id);
     const balance = ledger.find((row) => row.property_id === property.id) ?? null;
+    const primary = contacts.find((contact) => Number(contact.is_primary) === 1) ?? contacts[0];
     return render(c, {
       title: `Lot ${property.lot_number}`,
       active: "admin",
@@ -708,7 +776,23 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         propertyId: property.id,
         lotNumber: property.lot_number,
         streetAddress: property.street_address,
-        ownerName: owner?.name ?? "",
+        city: property.city,
+        state: property.state,
+        postalCode: property.postal_code,
+        houseName: property.house_name,
+        mailingStreet: property.mailing_street,
+        mailingCity: property.mailing_city,
+        mailingState: property.mailing_state,
+        mailingPostalCode: property.mailing_postal_code,
+        adminNotes,
+        lotType: property.lot_type,
+        status: property.status,
+        contacts: contacts.map((contact) => ({
+          name: contact.name,
+          phone: contact.phone,
+          isPrimary: Number(contact.is_primary) === 1,
+        })),
+        ownerName: primary?.name ?? "",
         balance,
         invoices,
         paymentCount: Number(paymentCount?.n ?? 0),
@@ -2238,6 +2322,35 @@ async function maybeEmailOwners(
     logError("owner_notice_email", { message: error instanceof Error ? error.message : "unknown" });
     return { message: `${input.saved} Email was not sent.`, tone: "warn", detailNote: "Email was not sent." };
   }
+}
+
+type LotDetails = {
+  houseName: string;
+  mailingStreet: string;
+  mailingCity: string;
+  mailingState: string;
+  mailingPostalCode: string;
+  adminNotes: string;
+};
+
+function lotDetailsFromForm(fields: Record<string, string | File>): LotDetails {
+  return {
+    houseName: textValue(fields, "house_name", 80),
+    mailingStreet: textValue(fields, "mailing_street", 200),
+    mailingCity: textValue(fields, "mailing_city", 80),
+    mailingState: textValue(fields, "mailing_state", 40),
+    mailingPostalCode: textValue(fields, "mailing_postal_code", 20),
+    adminNotes: textValue(fields, "admin_notes", 4000),
+  };
+}
+
+function lotDetailsEntered(details: LotDetails): boolean {
+  return Object.values(details).some((value) => value !== "");
+}
+
+function lotReturnPath(slug: string, propertyId: string, returnTo: string): string {
+  if (returnTo === "ledger") return ledgerPropertyPath(slug, propertyId);
+  return `/a/${slug}/admin/owners#lots`;
 }
 
 function ownerPath(slug: string, userId: string): string {

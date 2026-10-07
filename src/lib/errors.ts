@@ -24,7 +24,7 @@ export function isCheckConstraint(error: unknown): boolean {
 
 export function isMissingColumn(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /no such column/i.test(message);
+  return /no such column/i.test(message) || /no column named/i.test(message);
 }
 
 export function isUniqueConstraint(error: unknown): boolean {

@@ -14,7 +14,7 @@ This is the Phase 0 foundation and Phase 1 scaffold: magic-link sign-in, a D1 da
 - Homeowner dashboard: balance, upcoming assessments, invoices, recorded payments, late fees, and personal notices.
 - Documents in eight categories, with versions. Residents see the version the board marks current. Budgets can be board-only. Publishing a file can email a short portal link when Email owners is checked. Board-only files go only to board logins, and the email does not include the file.
 - News, emergency notices, meetings, calendar, FAQs, and board contacts. Posting or saving an announcement or event can email active logins the same way. FAQ and contacts do not.
-- Private resident-to-board messages, plus portal notifications. Posting a notice to one owner can also email that login when Email owner is checked. The note has the title, a short message, and a link to Notices. A file on the notice is attached to that email. The box starts unchecked. If Resend is not configured, the notice is still saved and the flash says the email was not sent.
+- Private resident-to-board messages, plus portal notifications. A portal notice can include an optional file the owner views or downloads in the portal. Posting a notice to one owner can also email that login when Email owner is checked. The note has the title, a short message, a link to Notices, and the file attached to the email. The box starts unchecked. If Resend is not configured, the notice is still saved and the flash says the email was not sent.
 - Board tools: owners and lots, delinquent accounts, homeowner and board roles with an admin flag, login email edits, CSV import, invoices, annual dues, recorded payments, news editing, documents (visibility and delete), an accountant CSV, join requests, incoming messages, and an activity log.
 - Public home with resident login and request access.
 
@@ -168,6 +168,30 @@ If this Worker is deployed before the SQL runs, current board members can still 
 
 Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0004` is already on the remote database.
 
+## Portal notice files (paste this before merge)
+
+`migrations/0006_notice_attachments.sql` stores an optional file on a portal notice. Paste it in the Cloudflare dashboard before you merge the pull request. Marc does not need a terminal.
+
+What it does:
+
+- Adds filename, content type, R2 object key, and size on `notifications`.
+- Existing notices stay as they are. The new columns start empty.
+- The file bytes go in the existing `tango-documents` R2 bucket (`DOCUMENTS`), the same bucket documents use.
+
+Dashboard steps:
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database**.
+2. Select the database named **tango**.
+3. Open **Console**.
+4. Paste the full contents of `migrations/0006_notice_attachments.sql`.
+5. Select **Execute**.
+
+Run that file once, after `0005`. If the console says a column already exists, this file was already applied.
+
+Posting a notice with a file before this runs asks you to apply the file first. A notice without a file still posts. On the owner page, the file is optional (PDF, text, image, or Word, 8 MB or smaller). The owner can view or download it from Notices and from the notice on their dashboard. If Email owner is checked, the email includes a link to Notices and attaches that file.
+
+Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0005` is already on the remote database.
+
 ## Create the R2 bucket
 
 Document bytes live in R2. The database stores the version metadata and the object key.
@@ -237,7 +261,7 @@ Migrations live in `migrations/`.
 - `documents` and `document_versions` (`current_version_id` is what residents see; `visibility` is `residents` or `board`)
 - `announcements`, `events`, `faqs`, `board_contacts`
 - `messages` (private threads to the board)
-- `notifications` (portal notices)
+- `notifications` (portal notices, with an optional file in R2)
 - `audit_log` (shown in the portal as Activity)
 - `magic_links`, `sessions`
 - `join_requests` (public request to join: pending, reviewed, approved, or declined)

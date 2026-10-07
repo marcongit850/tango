@@ -39,7 +39,7 @@ import { parseOwnersCsv } from "../lib/csv";
 import { formatAddress, formatDateTime, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../lib/dates";
 import {
   deliverOwnerEmails,
-  fileToResendAttachment,
+  resendAttachment,
   loginAudienceForVisibility,
   ownerEmailFlash,
   ownerNoticeEmail,
@@ -51,7 +51,7 @@ import {
   type ResendAttachment,
 } from "../lib/email";
 import { approvalSummary, approveJoinRequest, welcomeEmail } from "../lib/join-approve";
-import { applyDocumentResponseHeaders, contentTypeForUpload, MAX_CSV_BYTES, MAX_DOCUMENT_BYTES, safeFilename } from "../lib/files";
+import { applyDocumentResponseHeaders, contentTypeForUpload, MAX_CSV_BYTES, MAX_DOCUMENT_BYTES, noticeFileProblem, safeFilename } from "../lib/files";
 import { importOwners } from "../lib/import-owners";
 import { csvText, formatDollarsPlain, formatMoney, parseMoneyToCents } from "../lib/money";
 import { ensureSeedFiles } from "../lib/seed-files";
@@ -260,12 +260,56 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const { association, user } = requireStaff(c);
     const fields = await readForm(c);
     const ownerId = c.req.param("userId");
+    const back = ownerPath(association.slug, ownerId);
     const title = textValue(fields, "title", 200);
     const body = textValue(fields, "body", 5000);
-    if (!title || !body) return redirectTo(c, ownerPath(association.slug, ownerId), "Add a title and a message.", "warn");
+    if (!title || !body) return redirectTo(c, back, "Add a title and a message.", "warn");
+    const upload = noticeUpload(fields);
+    if (upload) {
+      const problem = noticeFileProblem(upload);
+      if (problem) return redirectTo(c, back, problem, "warn");
+    }
     const emailOwner = fields.email_owner === "1";
-    const attachment = emailOwner ? await fileToResendAttachment(noticeUpload(fields)) : null;
-    await notify(c.env.DB, { associationId: association.id, userId: ownerId, kind: "account", title, body, href: `/a/${association.slug}/notices` });
+    const noticeId = crypto.randomUUID();
+    const filename = upload ? safeFilename(upload.name) : "";
+    const contentType = upload ? contentTypeForUpload(upload) : null;
+    const bytes = upload ? new Uint8Array(await upload.arrayBuffer()) : null;
+    const r2Key = upload && filename ? `${association.id}/notices/${noticeId}/${filename}` : "";
+    if (upload && bytes && contentType && r2Key) {
+      await c.env.DOCUMENTS.put(r2Key, bytes, { httpMetadata: { contentType } });
+    }
+    try {
+      await notify(c.env.DB, {
+        id: noticeId,
+        associationId: association.id,
+        userId: ownerId,
+        kind: "account",
+        title,
+        body,
+        href: `/a/${association.slug}/notices`,
+        attachment:
+          upload && bytes && contentType && r2Key
+            ? { filename, contentType, r2Key, byteSize: bytes.byteLength }
+            : undefined,
+      });
+    } catch (error) {
+      if (r2Key) {
+        try {
+          await c.env.DOCUMENTS.delete(r2Key);
+        } catch (deleteError) {
+          logError("notice_r2_delete", { message: deleteError instanceof Error ? deleteError.message : "unknown" });
+        }
+      }
+      if (isMissingColumn(error)) {
+        return redirectTo(
+          c,
+          back,
+          "Apply the notice file migration in D1, then try again. The steps are in the README under Portal notice files.",
+          "warn",
+        );
+      }
+      throw error;
+    }
     const mailed = await maybeEmailOneOwner(c, {
       requested: emailOwner,
       association,
@@ -273,7 +317,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       title,
       summary: body,
       saved: "Notice posted to their portal.",
-      attachment,
+      attachment: emailOwner && bytes && contentType && filename ? resendAttachment(filename, contentType, bytes) : null,
     });
     await writeAudit(c.env.DB, {
       associationId: association.id,
@@ -281,9 +325,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       action: "account_notice",
       entityType: "user",
       entityId: ownerId,
-      detail: withEmailNote(title, mailed.detailNote),
+      detail: withEmailNote(filename ? `${title} (${filename})` : title, mailed.detailNote),
     });
-    return redirectTo(c, ownerPath(association.slug, ownerId), mailed.message, mailed.tone);
+    return redirectTo(c, back, mailed.message, mailed.tone);
   });
 
   app.post("/a/:slug/admin/owners/:userId/remind", async (c) => {

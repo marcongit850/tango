@@ -28,6 +28,12 @@ export function safeFilename(name: string): string {
   return cleaned.slice(0, 80) || "document";
 }
 
+export function noticeFileProblem(file: File): string | null {
+  if (!contentTypeForUpload(file)) return "Upload a PDF, text file, image, or Word document.";
+  if (file.size > MAX_DOCUMENT_BYTES) return "Files must be 8 MB or smaller.";
+  return null;
+}
+
 export function contentTypeForUpload(file: File): string | null {
   const reported = file.type.split(";")[0].trim().toLowerCase();
   if (ALLOWED_TYPES.has(reported)) return reported === "text/plain" ? "text/plain; charset=utf-8" : reported;

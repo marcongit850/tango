@@ -39,6 +39,7 @@ import { parseOwnersCsv } from "../lib/csv";
 import { formatAddress, formatDateTime, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../lib/dates";
 import {
   deliverOwnerEmails,
+  fileToResendAttachment,
   loginAudienceForVisibility,
   ownerEmailFlash,
   ownerNoticeEmail,
@@ -47,6 +48,7 @@ import {
   uniqueLoginEmails,
   type LoginAudience,
   type OwnerNoticeKind,
+  type ResendAttachment,
 } from "../lib/email";
 import { approvalSummary, approveJoinRequest, welcomeEmail } from "../lib/join-approve";
 import { applyDocumentResponseHeaders, contentTypeForUpload, MAX_CSV_BYTES, MAX_DOCUMENT_BYTES, safeFilename } from "../lib/files";
@@ -261,16 +263,27 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const title = textValue(fields, "title", 200);
     const body = textValue(fields, "body", 5000);
     if (!title || !body) return redirectTo(c, ownerPath(association.slug, ownerId), "Add a title and a message.", "warn");
+    const emailOwner = fields.email_owner === "1";
+    const attachment = emailOwner ? await fileToResendAttachment(noticeUpload(fields)) : null;
     await notify(c.env.DB, { associationId: association.id, userId: ownerId, kind: "account", title, body, href: `/a/${association.slug}/notices` });
+    const mailed = await maybeEmailOneOwner(c, {
+      requested: emailOwner,
+      association,
+      ownerId,
+      title,
+      summary: body,
+      saved: "Notice posted to their portal.",
+      attachment,
+    });
     await writeAudit(c.env.DB, {
       associationId: association.id,
       actorUserId: user.id,
       action: "account_notice",
       entityType: "user",
       entityId: ownerId,
-      detail: title,
+      detail: withEmailNote(title, mailed.detailNote),
     });
-    return redirectTo(c, ownerPath(association.slug, ownerId), "Notice posted to their portal.");
+    return redirectTo(c, ownerPath(association.slug, ownerId), mailed.message, mailed.tone);
   });
 
   app.post("/a/:slug/admin/owners/:userId/remind", async (c) => {
@@ -1566,6 +1579,77 @@ function withEmailNote(detail: string, note: string): string {
 
 function eventSummary(startsAt: string, location: string, description: string, timeZone: string): string {
   return [formatDateTime(startsAt, timeZone), location, description].filter((part) => part.trim()).join(". ");
+}
+
+function noticeUpload(fields: Record<string, string | File>): File | null {
+  for (const name of ["file", "attachment"]) {
+    const file = fileValue(fields, name);
+    if (file && file.size > 0) return file;
+  }
+  return null;
+}
+
+async function maybeEmailOneOwner(
+  c: AppContext,
+  input: {
+    requested: boolean;
+    association: Association;
+    ownerId: string;
+    title: string;
+    summary: string;
+    saved: string;
+    attachment: ResendAttachment | null;
+  },
+): Promise<{ message: string; tone: "ok" | "warn"; detailNote: string }> {
+  if (!input.requested) return { message: input.saved, tone: "ok", detailNote: "" };
+  try {
+    const row = await c.env.DB
+      .prepare(
+        `SELECT u.id, u.email
+         FROM memberships m
+         JOIN users u ON u.id = m.user_id
+         WHERE m.association_id = ? AND u.id = ?`,
+      )
+      .bind(input.association.id, input.ownerId)
+      .first<{ id: string; email: string }>();
+    const recipients = uniqueLoginEmails(row ? [row] : []);
+    const letter = ownerNoticeEmail({
+      associationName: input.association.name,
+      slug: input.association.slug,
+      kind: "account",
+      title: input.title,
+      summary: input.summary,
+      attachmentName: input.attachment?.filename,
+    });
+    const delivery = await deliverOwnerEmails({
+      apiKey: resendApiKey(c.env),
+      from: c.env.EMAIL_FROM,
+      recipients,
+      subject: letter.subject,
+      text: letter.text,
+      attachments: input.attachment ? [input.attachment] : undefined,
+    });
+    const flash = ownerEmailFlash({
+      saved: input.saved,
+      audience: "owners",
+      recipients: recipients.length,
+      delivery,
+    });
+    logInfo("owner_notice_email", {
+      associationId: input.association.id,
+      kind: "account",
+      audience: "owners",
+      recipients: recipients.length,
+      sent: delivery.sent,
+      failed: delivery.failed,
+      skipped: delivery.skipped,
+      attached: Boolean(input.attachment),
+    });
+    return { message: flash.message, tone: flash.tone, detailNote: flash.note };
+  } catch (error) {
+    logError("owner_notice_email", { message: error instanceof Error ? error.message : "unknown" });
+    return { message: `${input.saved} Email was not sent.`, tone: "warn", detailNote: "Email was not sent." };
+  }
 }
 
 async function maybeEmailOwners(

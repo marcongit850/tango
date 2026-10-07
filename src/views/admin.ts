@@ -90,7 +90,7 @@ export function adminHome(options: {
       ${joins}
     </section>
     <section class="panel">
-      <h2>Roles</h2>
+      <h2>Access</h2>
       <p>Homeowners see their lots. Board members can be given Admin access, which opens these tools. Keep at least one admin.</p>
       <p><a href="${base}/export.csv">Export ledger for the accountant</a></p>
     </section>

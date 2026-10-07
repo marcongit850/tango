@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { canViewPropertyFinancials, isAdmin, keepsAnAdmin, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
 import { annualDues, defaultDuesYear, lotsToInvoice } from "../src/lib/dues";
 import { landingAccount, loggedOutNav, render } from "../src/views/layout";
-import { documentDetailPage, documentsAdminPage, ledgerPage, newsAdminPage, ownerDetailPage, paymentInvoiceVisible } from "../src/views/admin";
+import { adminHome, documentDetailPage, documentsAdminPage, ledgerPage, newsAdminPage, ownerDetailPage, paymentInvoiceVisible } from "../src/views/admin";
 import { newsEdit } from "../src/routes/admin";
 import type { AnnouncementRow, DocumentRow, EventRow, NoticeRow, PropertyRow, VersionRow } from "../src/db";
 import { documentContentDisposition, isBrowserViewable } from "../src/lib/files";
@@ -421,6 +421,43 @@ describe("signed-in header", () => {
     expect(inactive.nav).not.toContain("Admin");
     expect(inactive.account).not.toContain("Admin");
     expect(inactive.nav).toContain("Resident login");
+  });
+});
+
+describe("admin overview", () => {
+  const association: Association = {
+    id: "assoc_tango_mar",
+    slug: "tango-mar",
+    name: "Tango Mar",
+    legal_name: "Tango Mar Property Owners Association",
+    address_line1: "31 Tang O Mar Drive",
+    city: "Miramar Beach",
+    state: "FL",
+    postal_code: "32550",
+    county: "Walton County",
+    timezone: "America/Chicago",
+  };
+
+  it("labels the access blurb Access", () => {
+    const html = adminHome({
+      association,
+      lots: 12,
+      members: 8,
+      delinquent: 1,
+      waiting: 0,
+      pendingJoins: null,
+      audit: [],
+    });
+    const blurb =
+      "Homeowners see their lots. Board members can be given Admin access, which opens these tools. Keep at least one admin.";
+    expect(html).toContain("<h1>Board admin</h1>");
+    expect(html).toContain("<h2>Access</h2>");
+    expect(html).toContain(blurb);
+    expect(html).not.toContain("<h2>Roles</h2>");
+    expect(html.indexOf("<h1>Board admin</h1>")).toBeLessThan(html.indexOf("<h2>Access</h2>"));
+    expect(html.indexOf("<h2>Access</h2>")).toBeLessThan(html.indexOf(blurb));
+    expect(html.indexOf(blurb)).toBeLessThan(html.indexOf("Export ledger for the accountant"));
+    expect(html.indexOf("Export ledger for the accountant")).toBeLessThan(html.indexOf("<h2>Recent activity</h2>"));
   });
 });
 

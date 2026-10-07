@@ -34,6 +34,9 @@ import {
   listOwners,
   listProperties,
   markThreadReviewed,
+  messageFileKeysForMessage,
+  messageFileKeysForThread,
+  messageFileKeysForUser,
   messageWaitingOnBoard,
   notify,
   paymentsForInvoice,
@@ -74,7 +77,7 @@ import {
   type ResendAttachment,
 } from "../lib/email";
 import { approvalSummary, approveJoinRequest, welcomeEmail } from "../lib/join-approve";
-import { applyDocumentResponseHeaders, contentTypeForUpload, MAX_CSV_BYTES, MAX_DOCUMENT_BYTES, noticeFileProblem, safeFilename } from "../lib/files";
+import { applyDocumentResponseHeaders, contentTypeForUpload, deleteStoredFiles, MAX_CSV_BYTES, MAX_DOCUMENT_BYTES, noticeFileProblem, safeFilename } from "../lib/files";
 import { ensureHomeownerAccount, isValidEmail, linkLotOwner, unlinkLotOwner } from "../lib/homeowner-account";
 import { importOwners } from "../lib/import-owners";
 import { csvText, formatDollarsPlain, formatMoney, parseMoneyToCents } from "../lib/money";
@@ -101,7 +104,7 @@ import {
 } from "../views/admin";
 import { render } from "../views/layout";
 import { canEditAdmin } from "../lib/access";
-import { fileValue, readForm, redirectTo, requireEditor, requireStaff, textValue, type AppContext } from "./common";
+import { fileValue, readForm, redirectTo, requireEditor, requireStaff, streamMessageAttachment, textValue, type AppContext, type FormFields } from "./common";
 
 const ROLES = new Set<MembershipRole>(["homeowner", "board"]);
 const STATUSES = new Set<MembershipStatus>(["invited", "active", "inactive"]);
@@ -481,7 +484,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     ) {
       return redirectTo(c, back, "Keep at least one person with edit access.", "warn");
     }
+    const fileKeys = await messageFileKeysForUser(c.env.DB, association.id, owner.user_id);
     const removed = await deletePersonAccount(c.env.DB, association.id, owner.user_id);
+    if (removed === "removed" || removed === "unlinked") await deleteStoredFiles(c.env.DOCUMENTS, fileKeys);
     if (removed === "master") return redirectTo(c, back, MASTER_ADMIN_DELETE_MESSAGE, "warn");
     if (removed === "missing") throw new NotFoundError();
     await writeAudit(c.env.DB, {
@@ -2124,6 +2129,17 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     return render(c, { title: "Messages", active: "admin", body: adminMessagesPage(association, threads, staffIds, canEditAdmin(membership)) });
   });
 
+  app.get("/a/:slug/admin/messages/:threadId/messages/:messageId/file/:attachmentId", async (c) => {
+    requireStaff(c);
+    return streamMessageAttachment(
+      c,
+      c.req.param("threadId"),
+      c.req.param("messageId"),
+      c.req.param("attachmentId"),
+      true,
+    );
+  });
+
   app.get("/a/:slug/admin/messages/:threadId", async (c) => {
     const { association, membership } = requireStaff(c);
     const threadId = c.req.param("threadId");
@@ -2184,7 +2200,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, threadPath, "Confirm the delete first.", "warn");
     const messages = await threadMessages(c.env.DB, association.id, threadId);
     if (messages.length === 0) return redirectTo(c, list, "That thread is already gone.", "warn");
+    const fileKeys = await messageFileKeysForThread(c.env.DB, association.id, threadId);
     const removed = await deleteMessageThread(c.env.DB, association.id, association.slug, threadId);
+    if (removed) await deleteStoredFiles(c.env.DOCUMENTS, fileKeys);
     if (!removed) return redirectTo(c, list, "That thread is already gone.", "warn");
     await writeAudit(c.env.DB, {
       associationId: association.id,
@@ -2208,7 +2226,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const messages = await threadMessages(c.env.DB, association.id, threadId);
     const target = messages.find((message) => message.id === messageId);
     if (!target) return redirectTo(c, messages.length === 0 ? list : threadPath, "That reply is already gone.", "warn");
+    const fileKeys = await messageFileKeysForMessage(c.env.DB, association.id, messageId);
     const removed = await deleteMessage(c.env.DB, association.id, association.slug, threadId, messageId);
+    if (removed) await deleteStoredFiles(c.env.DOCUMENTS, fileKeys);
     if (!removed) return redirectTo(c, threadPath, "That reply is already gone.", "warn");
     const remaining = await threadMessages(c.env.DB, association.id, threadId);
     await writeAudit(c.env.DB, {
@@ -2266,7 +2286,7 @@ export function newsEdit(
 }
 
 function readAnnouncement(
-  fields: Record<string, string | File>,
+  fields: FormFields,
   timeZone: string,
 ):
   | { ok: true; kind: "news" | "meeting" | "emergency"; title: string; body: string; pinned: number; expiresAt: string | null }
@@ -2288,7 +2308,7 @@ function readAnnouncement(
 }
 
 function readEvent(
-  fields: Record<string, string | File>,
+  fields: FormFields,
   timeZone: string,
 ):
   | { ok: true; kind: "event" | "meeting" | "emergency"; title: string; description: string; location: string; startsAt: string; endsAt: string | null }
@@ -2314,7 +2334,7 @@ function eventSummary(startsAt: string, location: string, description: string, t
   return [formatDateTime(startsAt, timeZone), location, description].filter((part) => part.trim()).join(". ");
 }
 
-function noticeUpload(fields: Record<string, string | File>): File | null {
+function noticeUpload(fields: FormFields): File | null {
   for (const name of ["file", "attachment"]) {
     const file = fileValue(fields, name);
     if (file && file.size > 0) return file;
@@ -2447,7 +2467,7 @@ type LotDetails = {
   adminNotes: string;
 };
 
-function lotDetailsFromForm(fields: Record<string, string | File>): LotDetails {
+function lotDetailsFromForm(fields: FormFields): LotDetails {
   return {
     houseName: textValue(fields, "house_name", 80),
     mailingStreet: textValue(fields, "mailing_street", 200),

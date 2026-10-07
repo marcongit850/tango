@@ -1,4 +1,5 @@
 import { DOCUMENT_CATEGORIES } from "../lib/categories";
+import { DOCUMENT_FILE_ACCEPT } from "../lib/files";
 import { zonedIsoDate } from "../lib/dates";
 import { lotTypeLabel } from "../lib/dues";
 import { MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE } from "../lib/access";
@@ -432,7 +433,7 @@ export function ownerDetailPage(options: {
         <form class="fields" method="post" action="${esc(base)}/notice" enctype="multipart/form-data">
           ${textField("Title", "title", { required: true })}
           ${areaField("Message", "body", "", true)}
-          <label>File (optional)<input type="file" name="file" accept=".pdf,.txt,.jpg,.jpeg,.png,.webp,.doc,.docx,application/pdf,text/plain,image/jpeg,image/png,image/webp,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label>
+          <label>File (optional)<input type="file" name="file" accept="${DOCUMENT_FILE_ACCEPT}"></label>
           <p class="muted">PDF, text, image, or Word. 8 MB or smaller. The owner can view or download it on their notices.</p>
           ${emailOwnersField("Email owner", "email_owner")}
           <p class="muted">Sends one email to this owner with a link to the notice. A file on the form is attached to that email.</p>

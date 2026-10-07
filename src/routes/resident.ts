@@ -1,11 +1,11 @@
 import type { Hono } from "hono";
-import { canEditAdmin, canViewPropertyFinancials, isAdmin, isBoardMember } from "../lib/access";
+import { canEditAdmin, canViewAdmin, canViewPropertyFinancials, isAdmin, isBoardMember } from "../lib/access";
 import { timeZoneLabel, todayIso } from "../lib/dates";
 import { resendApiKey, sendResendEmail, SUPPORT_INBOX, supportEmailText } from "../lib/email";
-import { ForbiddenError, NotFoundError } from "../lib/errors";
+import { ForbiddenError, isMissingTable, NotFoundError } from "../lib/errors";
 import { logError, logInfo } from "../lib/log";
 import { ensureSeedFiles } from "../lib/seed-files";
-import { applyDocumentResponseHeaders } from "../lib/files";
+import { applyDocumentResponseHeaders, contentTypeForUpload, deleteStoredFiles, MAX_MESSAGE_FILES, noticeFileProblem, safeFilename } from "../lib/files";
 import {
   contactsForProperty,
   invoiceById,
@@ -16,6 +16,10 @@ import {
   listEvents,
   listFaqs,
   noticeFileForUser,
+  insertMessageAttachment,
+  messageAttachmentsReady,
+  messageFileKeysForMessage,
+  messageFileKeysForThread,
   deleteMessage,
   deleteMessageThread,
   notificationsForUser,
@@ -53,7 +57,10 @@ import {
   supportPage,
   threadPage,
 } from "../views/resident";
-import { readForm, redirectTo, requireEditor, requireMember, textValue, type AppContext } from "./common";
+import { fileValues, readForm, redirectTo, requireEditor, requireMember, streamMessageAttachment, textValue, type AppContext } from "./common";
+
+const MESSAGE_FILES_UNAVAILABLE =
+  "Apply the message file migration in D1, then try again. The steps are in the README under Message files.";
 
 export function registerResidentRoutes(app: Hono<AppBindings>): void {
   app.get("/a/:slug/dashboard", async (c) => {
@@ -369,11 +376,21 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     const subject = textValue(fields, "subject", 200);
     const body = textValue(fields, "body", 5000);
     const propertyId = textValue(fields, "property_id", 80);
-    if (!subject || !body) return redirectTo(c, `/a/${association.slug}/messages`, "Add a subject and a message.", "warn");
+    const listPath = `/a/${association.slug}/messages`;
+    if (!subject || !body) return redirectTo(c, listPath, "Add a subject and a message.", "warn");
     if (propertyId) {
       const property = await propertyInAssociation(c.env.DB, association.id, propertyId);
       if (!property) throw new NotFoundError();
       if (!isAdmin(membership)) await assertPropertyAccess(c, association.id, propertyId);
+    }
+    const uploads = fileValues(fields, "file");
+    if (uploads.length > MAX_MESSAGE_FILES) return redirectTo(c, listPath, "Attach up to 3 files.", "warn");
+    for (const upload of uploads) {
+      const problem = noticeFileProblem(upload);
+      if (problem) return redirectTo(c, listPath, problem, "warn");
+    }
+    if (uploads.length > 0 && !(await messageAttachmentsReady(c.env.DB))) {
+      return redirectTo(c, listPath, MESSAGE_FILES_UNAVAILABLE, "warn");
     }
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -384,6 +401,36 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
       )
       .bind(id, association.id, id, user.id, propertyId || null, subject, body, now)
       .run();
+    const stored: string[] = [];
+    const filenames: string[] = [];
+    try {
+      for (const [index, upload] of uploads.entries()) {
+        const attachmentId = crypto.randomUUID();
+        const filename = safeFilename(upload.name);
+        const contentType = contentTypeForUpload(upload);
+        if (!contentType) throw new Error("file type");
+        const bytes = new Uint8Array(await upload.arrayBuffer());
+        const r2Key = `${association.id}/messages/${id}/${attachmentId}/${filename}`;
+        await c.env.DOCUMENTS.put(r2Key, bytes, { httpMetadata: { contentType } });
+        stored.push(r2Key);
+        await insertMessageAttachment(c.env.DB, {
+          id: attachmentId,
+          associationId: association.id,
+          messageId: id,
+          filename,
+          contentType,
+          r2Key,
+          byteSize: bytes.byteLength,
+          createdAt: new Date(Date.parse(now) + index).toISOString(),
+        });
+        filenames.push(filename);
+      }
+    } catch (error) {
+      await deleteStoredFiles(c.env.DOCUMENTS, stored);
+      await c.env.DB.prepare("DELETE FROM messages WHERE association_id = ? AND id = ?").bind(association.id, id).run();
+      if (isMissingTable(error)) return redirectTo(c, listPath, MESSAGE_FILES_UNAVAILABLE, "warn");
+      throw error;
+    }
     const staff = await staffUserIds(c.env.DB, association.id);
     for (const staffId of staff) {
       if (staffId === user.id) continue;
@@ -402,8 +449,20 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
       action: "message_create",
       entityType: "message",
       entityId: id,
+      detail: filenames.join(", "),
     });
     return redirectTo(c, `/a/${association.slug}/messages/${id}`, "Message sent to the board.");
+  });
+
+  app.get("/a/:slug/messages/:threadId/messages/:messageId/file/:attachmentId", async (c) => {
+    const { membership } = requireMember(c);
+    return streamMessageAttachment(
+      c,
+      c.req.param("threadId"),
+      c.req.param("messageId"),
+      c.req.param("attachmentId"),
+      canViewAdmin(membership),
+    );
   });
 
   app.get("/a/:slug/messages/:threadId", async (c) => {
@@ -478,7 +537,9 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     if (!isAdmin(membership) && !userStartedThread(messages, user.id)) {
       return redirectTo(c, threadPath, "You can delete a thread you started.", "warn");
     }
+    const fileKeys = await messageFileKeysForThread(c.env.DB, association.id, threadId);
     const removed = await deleteMessageThread(c.env.DB, association.id, association.slug, threadId);
+    if (removed) await deleteStoredFiles(c.env.DOCUMENTS, fileKeys);
     if (!removed) return redirectTo(c, list, "That thread is already gone.", "warn");
     await writeAudit(c.env.DB, {
       associationId: association.id,
@@ -511,7 +572,9 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     if (!isAdmin(membership) && ownRemaining === 0 && messages.length > 1) {
       return redirectTo(c, threadPath, "Delete the thread to remove the conversation.", "warn");
     }
+    const fileKeys = await messageFileKeysForMessage(c.env.DB, association.id, messageId);
     const removed = await deleteMessage(c.env.DB, association.id, association.slug, threadId, messageId);
+    if (removed) await deleteStoredFiles(c.env.DOCUMENTS, fileKeys);
     if (!removed) return redirectTo(c, threadPath, "That reply is already gone.", "warn");
     const remaining = await threadMessages(c.env.DB, association.id, threadId);
     await writeAudit(c.env.DB, {

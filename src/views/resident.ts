@@ -12,6 +12,7 @@ import type {
   MessageRow,
 } from "../db";
 import { groupDocuments, type CategoryGroup, type FolderGroup } from "../lib/categories";
+import { assessmentDisplayName } from "../lib/dues";
 import { clip, paragraphs, esc } from "../lib/html";
 import { formatMoney } from "../lib/money";
 import type { Association } from "../types";
@@ -91,7 +92,7 @@ export function dashboardPage(options: {
       const when = notYetDue ? " Not due yet." : "";
       return `<li>
         <div>
-          <strong>${esc(row.name)}</strong>
+          <strong>${esc(assessmentDisplayName(row.name))}</strong>
           <p class="muted">${opens}Due ${due}.${when}</p>
         </div>
         <div class="dues-amount">
@@ -131,7 +132,7 @@ export function dashboardPage(options: {
   const invoices = options.invoices
     .slice(0, 6)
     .map(
-      (row) => `<tr><td><a href="${base}/invoices/${esc(row.id)}">${esc(row.invoice_number)}</a></td><td>${esc(row.description)}</td><td>${dateCell(row.due_on, association.timezone)}</td><td>${moneySpan(row.amount_cents + row.late_fee_cents)}</td><td>${esc(row.status)}</td></tr>`,
+      (row) => `<tr><td><a href="${base}/invoices/${esc(row.id)}">${esc(row.invoice_number)}</a></td><td>${esc(assessmentDisplayName(row.description))}</td><td>${dateCell(row.due_on, association.timezone)}</td><td>${moneySpan(row.amount_cents + row.late_fee_cents)}</td><td>${esc(row.status)}</td></tr>`,
     )
     .join("");
   const payments = options.payments
@@ -239,7 +240,7 @@ export function invoiceListPage(association: Association, invoices: InvoiceRow[]
       (row) => `<tr>
         <td><a href="/a/${esc(association.slug)}/invoices/${esc(row.id)}">${esc(row.invoice_number)}</a></td>
         <td>Lot ${esc(row.lot_number)}</td>
-        <td>${esc(row.description)}</td>
+        <td>${esc(assessmentDisplayName(row.description))}</td>
         <td>${dateCell(row.issued_on, association.timezone)}</td>
         <td>${dateCell(row.due_on, association.timezone)}</td>
         <td>${moneySpan(row.amount_cents)}</td>
@@ -266,7 +267,7 @@ export function invoiceDetailPage(association: Association, invoice: InvoiceRow,
   const remainingLine = scheduled ? "" : `<p>Remaining on this invoice ${moneySpan(remaining)}</p>`;
   return `<section class="panel">
     <h1>${esc(invoice.invoice_number)}</h1>
-    <p>${esc(invoice.description)}</p>
+    <p>${esc(assessmentDisplayName(invoice.description))}</p>
     <p>Lot ${esc(invoice.lot_number)}</p>
     ${timing}
     <p>Amount ${amount} · Late fee ${moneySpan(invoice.late_fee_cents)} · Paid on this invoice ${moneySpan(Number(invoice.paid_cents))}</p>

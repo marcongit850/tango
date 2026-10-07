@@ -543,7 +543,13 @@ describe("assigning a future assessment", () => {
       assessmentId: "assessment_2027_improved",
       today: "2026-10-07",
     });
-    expect(assigned).toMatchObject({ created: 3, issuedOn: "2027-01-01", name: "2027 annual assessment (improved lots)" });
+    expect(assigned).toMatchObject({ created: 3, issuedOn: "2027-01-01", name: "2027 annual assessment" });
+    expect(sqlite.prepare("SELECT name FROM assessments WHERE id = 'assessment_2027_improved'").get()).toEqual({
+      name: "2027 annual assessment (improved lots)",
+    });
+    expect(
+      sqlite.prepare("SELECT description FROM invoices WHERE assessment_id = 'assessment_2027_improved' AND property_id = 'prop_14'").get(),
+    ).toEqual({ description: "2027 annual assessment" });
     expect(
       sqlite.prepare("SELECT issued_on, due_on, status FROM invoices WHERE assessment_id = 'assessment_2027_improved' AND property_id = 'prop_14'").get(),
     ).toEqual({ issued_on: "2027-01-01", due_on: "2027-03-01", status: "open" });
@@ -605,7 +611,9 @@ function upcomingDashboard(today: string, invoiceCount: number): string {
 describe("upcoming assessment copy", () => {
   it("stays Scheduled before the open date even when invoice rows exist", () => {
     const html = upcomingDashboard("2026-10-07", 1);
-    expect(html).toContain("2027 annual assessment (improved lots)");
+    expect(html).toContain("2027 annual assessment");
+    expect(html).not.toContain("(improved lots)");
+    expect(html).not.toContain("(unimproved lots)");
     expect(html).toContain("Opens January 1, 2027. Due March 1, 2027. Not due yet.");
     expect(html).toContain("Scheduled");
     expect(html).not.toContain("Invoiced");
@@ -651,6 +659,8 @@ describe("upcoming assessment copy", () => {
       },
       "2026-10-07",
     );
+    expect(detail).toContain("2027 annual assessment");
+    expect(detail).not.toContain("(improved lots)");
     expect(detail).toContain("Scheduled. Not owed until January 1, 2027.");
     expect(detail).toContain(">scheduled<");
     expect(detail).not.toContain("Remaining on this invoice");
@@ -696,7 +706,7 @@ describe("assign flash", () => {
     expect(response.status).toBe(303);
     const flash = decodeURIComponent(response.headers.get("Set-Cookie") ?? "");
     expect(flash).toContain(
-      "ok:Assigned 2099 annual assessment (improved lots) to 3 lots. 0 already had it. Those invoices are scheduled and do not count toward balances until 2099-01-01.",
+      "ok:Assigned 2099 annual assessment to 3 lots. 0 already had it. Those invoices are scheduled and do not count toward balances until 2099-01-01.",
     );
     sqlite.close();
   });

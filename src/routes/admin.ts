@@ -56,7 +56,7 @@ import {
   normalizeFolder,
   placeDocumentFolder,
 } from "../lib/categories";
-import { annualDues, defaultDuesYear, isLotType } from "../lib/dues";
+import { annualDues, assessmentDisplayName, defaultDuesYear, isLotType } from "../lib/dues";
 import { parseOwnersCsv } from "../lib/csv";
 import { OWNER_IMPORT_TEMPLATE } from "../lib/owner-import-template";
 import { formatAddress, formatDateTime, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../lib/dates";
@@ -849,7 +849,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         invoices: invoices.map((invoice) => ({
           id: invoice.id,
           propertyId: invoice.property_id,
-          label: `Lot ${invoice.lot_number} · ${invoice.invoice_number} · ${invoice.description}`,
+          label: `Lot ${invoice.lot_number} · ${invoice.invoice_number} · ${assessmentDisplayName(invoice.description)}`,
         })),
         assessments,
         duesReady,
@@ -1182,8 +1182,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         .prepare("SELECT id FROM assessments WHERE association_id = ? AND due_on = ? AND lot_type = ?")
         .bind(association.id, dues.dueOn, dues.lotType)
         .first<{ id: string }>();
+      const shown = `${dues.name} (${lotType} lots)`;
       if (found) {
-        existing.push(dues.name);
+        existing.push(shown);
         continue;
       }
       const id = crypto.randomUUID();
@@ -1194,7 +1195,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         )
         .bind(id, association.id, dues.name, dues.description, dues.amountCents, dues.dueOn, dues.opensOn, dues.lotType, new Date().toISOString())
         .run();
-      created.push(dues.name);
+      created.push(shown);
       await writeAudit(c.env.DB, {
         associationId: association.id,
         actorUserId: user.id,
@@ -1272,7 +1273,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     return redirectTo(
       c,
       back,
-      `Assigned ${result.name} to ${result.created} lots. ${result.already} already had it.${scheduled}`,
+      `Assigned ${assessmentDisplayName(result.name)} to ${result.created} lots. ${result.already} already had it.${scheduled}`,
     );
   });
 

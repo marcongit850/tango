@@ -24,6 +24,11 @@ export function lotTypeLabel(lotType: string | null | undefined): string {
   return "All lots";
 }
 
+/** Owner and admin lists show the year. Lot type stays on the Annual dues setup rows. */
+export function assessmentDisplayName(name: string): string {
+  return name.replace(/ \((?:improved|unimproved) lots\)$/, "");
+}
+
 export type AnnualDuesOptions = {
   amountCents: number;
   opensOn: string;
@@ -40,7 +45,7 @@ export function annualDues(year: number, lotType: LotType, options?: AnnualDuesO
   const dueOn = options?.dueOn ?? `${year}-03-01`;
   const standardDates = opensOn === `${year}-01-01` && dueOn === `${year}-03-01`;
   return {
-    name: `${year} annual assessment (${label} lots)`,
+    name: `${year} annual assessment`,
     description: standardDates
       ? `HOA dues for ${label} lots. Open January 1 and due March 1.`
       : `HOA dues for ${label} lots.`,
@@ -81,11 +86,12 @@ function latestLotAmount(rows: readonly DuesAmountRow[], lotType: LotType): numb
     if (row.lot_type !== lotType) return [];
     const year = assessmentYear(row.name, row.due_on);
     if (year === null) return [];
+    const title = row.name.trim();
     return [
       {
         year,
         dueOn: row.due_on,
-        annual: row.name.trim() === `${year} annual assessment (${lotType} lots)`,
+        annual: title === `${year} annual assessment` || title === `${year} annual assessment (${lotType} lots)`,
         cents: row.amount_cents,
       },
     ];

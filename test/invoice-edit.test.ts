@@ -146,6 +146,10 @@ describe("ledger invoice edit", () => {
       expect(html).toContain('name="due_on"');
       expect(html).toContain('value="2026-03-01"');
       expect(html).toContain("1042");
+      expect(html).toContain('type="checkbox" name="confirm" value="yes" required');
+      expect(html).toContain("Delete this payment");
+      expect(html).toContain('action="/a/tango-mar/admin/invoices/invoice_sam_2026/payments/payment_sam_2026/delete"');
+      expect(html).not.toContain("confirm(");
       expect(html).toContain("A payment is recorded on this invoice, so delete stays blocked.");
       expect(html).not.toContain('action="/a/tango-mar/admin/invoices/invoice_sam_2026/delete"');
     } finally {
@@ -377,6 +381,144 @@ describe("ledger invoice edit", () => {
         env,
       );
       expect(board.status).toBe(403);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("deletes the lot 14 payment, refreshes status, then lets the invoice be deleted", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const token = await signIn(sqlite, "user_jordan");
+    sqlite
+      .prepare(
+        `INSERT INTO payments (
+           id, association_id, property_id, invoice_id, amount_cents, method, reference, paid_on, notes, recorded_by_user_id, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        "payment_sam_partial",
+        "assoc_tango_mar",
+        "prop_14",
+        "invoice_sam_2026",
+        10000,
+        "cash",
+        "",
+        "2026-02-21",
+        "",
+        "user_jordan",
+        "2026-02-21T18:00:00.000Z",
+      );
+    try {
+      const removed = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_sam_2026/payments/payment_sam_2026/delete",
+        post(token, { confirm: "yes" }),
+        env,
+      );
+      expect(removed.status).toBe(303);
+      expect(removed.headers.get("Location")).toBe("/a/tango-mar/admin/invoices/invoice_sam_2026");
+      expect(decodeURIComponent(removed.headers.get("Set-Cookie") ?? "")).toContain("Payment deleted.");
+      expect(sqlite.prepare("SELECT id FROM payments WHERE id = 'payment_sam_2026'").get()).toBeUndefined();
+      expect(sqlite.prepare("SELECT status FROM invoices WHERE id = 'invoice_sam_2026'").get()).toEqual({ status: "partial" });
+      expect(sqlite.prepare("SELECT action, actor_user_id, entity_type, entity_id, detail FROM audit_log WHERE action = 'payment_delete'").get()).toEqual({
+        action: "payment_delete",
+        actor_user_id: "user_jordan",
+        entity_type: "payment",
+        entity_id: "payment_sam_2026",
+        detail: "Lot 14 · 2026-14-ANNUAL · $1,200.00 · check 1042",
+      });
+
+      const stillBlocked = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_sam_2026/delete",
+        post(token, { confirm: "yes" }),
+        env,
+      );
+      expect(stillBlocked.status).toBe(303);
+      expect(decodeURIComponent(stillBlocked.headers.get("Set-Cookie") ?? "")).toContain(
+        "That invoice was not deleted because a payment is recorded on it.",
+      );
+      expect(sqlite.prepare("SELECT id FROM invoices WHERE id = 'invoice_sam_2026'").get()).toEqual({ id: "invoice_sam_2026" });
+
+      const cleared = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_sam_2026/payments/payment_sam_partial/delete",
+        post(token, { confirm: "yes" }),
+        env,
+      );
+      expect(cleared.status).toBe(303);
+      expect(sqlite.prepare("SELECT COUNT(*) AS n FROM payments WHERE invoice_id = 'invoice_sam_2026'").get()).toEqual({ n: 0 });
+      expect(sqlite.prepare("SELECT status FROM invoices WHERE id = 'invoice_sam_2026'").get()).toEqual({ status: "open" });
+
+      const invoice = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_sam_2026/delete",
+        post(token, { confirm: "yes" }),
+        env,
+      );
+      expect(invoice.status).toBe(303);
+      expect(invoice.headers.get("Location")).toBe("/a/tango-mar/admin/ledger/prop_14");
+      expect(sqlite.prepare("SELECT id FROM invoices WHERE id = 'invoice_sam_2026'").get()).toBeUndefined();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("keeps the payment when delete is not confirmed", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const token = await signIn(sqlite, "user_jordan");
+    try {
+      const blocked = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_sam_2026/payments/payment_sam_2026/delete",
+        post(token, {}),
+        env,
+      );
+      expect(blocked.status).toBe(303);
+      expect(blocked.headers.get("Location")).toBe("/a/tango-mar/admin/invoices/invoice_sam_2026");
+      expect(decodeURIComponent(blocked.headers.get("Set-Cookie") ?? "")).toContain("Confirm the delete first.");
+      expect(sqlite.prepare("SELECT id, amount_cents FROM payments WHERE id = 'payment_sam_2026'").get()).toEqual({
+        id: "payment_sam_2026",
+        amount_cents: 120000,
+      });
+      expect(sqlite.prepare("SELECT status FROM invoices WHERE id = 'invoice_sam_2026'").get()).toEqual({ status: "paid" });
+      expect(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'payment_delete'").get()).toEqual({ n: 0 });
+
+      const otherInvoice = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_casey_open/payments/payment_sam_2026/delete",
+        post(token, { confirm: "yes" }),
+        env,
+      );
+      expect(otherInvoice.status).toBe(404);
+      expect(sqlite.prepare("SELECT id FROM payments WHERE id = 'payment_sam_2026'").get()).toEqual({ id: "payment_sam_2026" });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("refuses payment delete for anyone who is not a board admin", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const owner = await signIn(sqlite, "user_sam");
+    const admin = await signIn(sqlite, "user_jordan");
+    try {
+      const resident = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_sam_2026/payments/payment_sam_2026/delete",
+        post(owner, { confirm: "yes" }),
+        env,
+      );
+      expect(resident.status).toBe(403);
+      expect(sqlite.prepare("SELECT id FROM payments WHERE id = 'payment_sam_2026'").get()).toEqual({ id: "payment_sam_2026" });
+      expect(sqlite.prepare("SELECT status FROM invoices WHERE id = 'invoice_sam_2026'").get()).toEqual({ status: "paid" });
+
+      sqlite.prepare("UPDATE memberships SET is_admin = 0 WHERE user_id = 'user_jordan'").run();
+      const board = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_sam_2026/payments/payment_sam_2026/delete",
+        post(admin, { confirm: "yes" }),
+        env,
+      );
+      expect(board.status).toBe(403);
+      expect(sqlite.prepare("SELECT id FROM payments WHERE id = 'payment_sam_2026'").get()).toEqual({ id: "payment_sam_2026" });
     } finally {
       sqlite.close();
     }

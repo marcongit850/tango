@@ -1,5 +1,6 @@
 import { issueOpenAssessmentInvoices, listAssociations, writeAudit } from "../db";
 import { todayIso } from "./dates";
+import { assessmentDisplayName } from "./dues";
 import { logError, logInfo } from "./log";
 
 /** Creates invoices for every association whose assessments are open on `now` in that association's time zone. */
@@ -21,7 +22,7 @@ export async function runDueAssessmentInvoices(db: D1Database, now: Date): Promi
             action: "assessment_assign",
             entityType: "assessment",
             entityId: row.assessmentId,
-            detail: `Automatic on ${today}: ${row.name}: ${row.created} invoices, ${row.already} already assigned.`,
+            detail: `Automatic on ${today}: ${assessmentDisplayName(row.name)}: ${row.created} invoices, ${row.already} already assigned.`,
           });
         } catch (error) {
           logError("assessment_invoice_audit", {

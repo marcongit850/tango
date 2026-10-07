@@ -1,6 +1,6 @@
 import { DOCUMENT_CATEGORIES } from "../lib/categories";
 import { zonedIsoDate } from "../lib/dates";
-import { latestDuesAmounts, lotTypeLabel } from "../lib/dues";
+import { assessmentDisplayName, latestDuesAmounts, lotTypeLabel } from "../lib/dues";
 import { MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE } from "../lib/access";
 import { esc, paragraphs } from "../lib/html";
 import { formatDollarsPlain, formatMoney } from "../lib/money";
@@ -625,7 +625,7 @@ export function ledgerLotPage(options: {
       const status = scheduledInvoice(invoice) ? "scheduled" : invoice.status;
       return `<tr>
         <td><a href="${esc(href)}">${esc(invoice.invoice_number)}</a></td>
-        <td>${esc(invoice.description)}</td>
+        <td>${esc(assessmentDisplayName(invoice.description))}</td>
         <td>${dateCell(invoice.due_on, options.association.timezone)}</td>
         <td>${moneyLink(href, Number(invoice.amount_cents))}</td>
         <td>${moneyLink(href, Number(invoice.late_fee_cents))}</td>
@@ -747,7 +747,7 @@ export function invoiceAdminPage(options: {
   const editForm = canEdit
     ? `<h2>Edit invoice</h2>
       <form class="fields" method="post" action="${base}/invoices/${esc(invoice.id)}">
-        ${textField("Description", "description", { value: invoice.description, required: true })}
+        ${textField("Description", "description", { value: assessmentDisplayName(invoice.description), required: true })}
         ${textField("Amount", "amount", { value: dollarsInput(invoice.amount_cents), required: true })}
         ${textField("Late fee", "late_fee", { value: dollarsInput(invoice.late_fee_cents) })}
         ${textField("Issued", "issued_on", { type: "date", value: invoice.issued_on, required: true })}

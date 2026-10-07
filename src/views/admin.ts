@@ -91,7 +91,7 @@ export function adminHome(options: {
     </section>
     <section class="panel">
       <h2>Roles</h2>
-      <p>Homeowner sees only their lots. Board member is the other role. Admin access is a flag on a board member, and it is what opens these tools. Keep at least one active admin. Public is the logged-out visitor and is not assigned on a roster.</p>
+      <p>Homeowners see their lots. Board members can be given Admin access, which opens these tools. Keep at least one admin.</p>
       <p><a href="${base}/export.csv">Export ledger for the accountant</a></p>
     </section>
     <section class="panel"><h2>Recent activity</h2>${auditTable(options.association, options.audit.slice(0, 8))}</section>`;

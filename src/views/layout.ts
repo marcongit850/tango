@@ -154,9 +154,146 @@ form.fields { display: grid; gap: 0.75rem; }
 .badge { display: inline-block; border-radius: 0; padding: 0.05rem 0.5rem; background: #e7eeed; color: var(--gulf-dark); font-size: 0.82rem; }
 .badge.late { background: var(--emergency); color: var(--late); }
 .devbox { border: 1px dashed var(--gulf); border-radius: 0; padding: 0.8rem 1rem; background: #f3faf8; }
-body.landing { background: var(--sand); }
-body.landing main { padding: 0 0 2.5rem; }
+body.landing { background: #f7f4ef; }
+body.landing main { padding: 0; }
 body.landing .shore + .wrap { padding-top: 1.5rem; }
+.home-need, .home-welcome { background: #f7f4ef; color: #1a2744; }
+.home-need { padding: 3.25rem 0 1.25rem; text-align: center; }
+.home-need h2 {
+  font-size: clamp(2rem, 4.2vw, 2.75rem);
+  color: #1a2744;
+  margin: 0;
+}
+.home-need .rule { margin: 0.85rem auto 1rem; }
+.home-lead {
+  max-width: 44rem;
+  margin: 0 auto 2rem;
+  color: #4a5963;
+  font-size: 1.02rem;
+}
+.home-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.15rem;
+  text-align: center;
+}
+.home-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  background: #fff;
+  border-radius: 0.85rem;
+  padding: 1.85rem 1.35rem 1.6rem;
+  box-shadow: 0 8px 22px rgba(28, 40, 48, 0.07);
+}
+.home-icon {
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 1.05rem;
+  color: #1c3558;
+}
+.home-icon svg { width: 2rem; height: 2rem; display: block; }
+.home-card-megaphone .home-icon { background: #d7e7f8; }
+.home-card-document .home-icon { background: #dff3e4; }
+.home-card-person .home-icon { background: #f8ead9; }
+.home-card-envelope .home-icon { background: #d9e8f6; }
+.home-card h3 {
+  font-family: var(--sans);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  font-size: 1.125rem;
+  line-height: 1.25;
+  text-transform: uppercase;
+  color: #1a2744;
+  margin: 0 0 0.7rem;
+}
+.home-card p { flex: 1; margin: 0 0 1.15rem; color: #4e5c66; font-size: 0.98rem; }
+.home-card a {
+  color: #1c3558;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+.home-welcome { padding: 2.25rem 0 3.25rem; background: #f7f4ef; }
+.home-welcome-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 28rem);
+  gap: 2.75rem;
+  align-items: center;
+}
+.home-kicker {
+  margin: 0 0 0.4rem;
+  color: #c6a15a;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.home-welcome h2 {
+  font-size: clamp(3.15rem, 6vw, 4.35rem);
+  color: #1a2744;
+  margin: 0 0 0.75rem;
+  line-height: 1.05;
+}
+.home-welcome-copy > p:last-child {
+  margin: 0;
+  max-width: 36rem;
+  color: #3d4a56;
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+.home-beach-frame {
+  align-self: center;
+  justify-self: center;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: 1.15rem;
+  overflow: hidden;
+  position: relative;
+}
+.home-beach {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+.home-demo { padding: 0 0 2.5rem; }
+.home-footer { color: #5d6c74; font-size: 0.88rem; padding: 0.5rem 0 2rem; background: #f7f4ef; }
+.home-footer-inner {
+  width: min(1080px, calc(100% - 2rem));
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 1.25rem 2rem;
+  align-items: center;
+}
+.home-footer-brand {
+  display: grid;
+  justify-items: center;
+  text-decoration: none;
+  color: #5d6c74;
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+.home-footer-brand img { width: 8.5rem; height: auto; display: block; }
+.home-footer nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.35rem 1.15rem; }
+.home-footer nav a { color: #1a2744; text-decoration: none; }
+.home-footer nav a:hover, .home-footer nav a:focus { text-decoration: underline; }
+.home-footer-end { text-align: right; }
+.home-footer-end p { margin: 0.15rem 0; }
+.home-footer-end a { color: #5d6c74; text-decoration: none; }
+.home-footer-end a:hover, .home-footer-end a:focus { text-decoration: underline; }
 .topbar {
   position: absolute;
   z-index: 3;
@@ -289,6 +426,10 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
   .shore-inner { grid-template-columns: 1fr; width: min(40rem, 100%); justify-items: center; }
   .shore-video { justify-self: center; margin-top: 0.35rem; }
   .shore-video video { height: auto; width: min(15rem, 68vw); }
+  .home-cards { grid-template-columns: 1fr; }
+  .home-welcome-inner { grid-template-columns: 1fr; gap: 1.5rem; }
+  .home-footer-inner { grid-template-columns: 1fr; justify-items: center; }
+  .home-footer-end { text-align: center; }
 }
 .kicker {
   margin: 0 0 0.3rem;
@@ -420,6 +561,29 @@ export function siteFooter(supportHref: string): string {
   return `<footer class="site-footer wrap"><p class="footer-links">${links.join("")}</p></footer>`;
 }
 
+function landingFooter(): string {
+  const base = `/a/${HOME_SLUG}`;
+  return `<footer class="home-footer">
+    <div class="home-footer-inner">
+      <a class="home-footer-brand" href="/">
+        <img src="/tango-mar-mark.png" alt="Tango Mar" width="1143" height="789">
+        <span>Miramar Beach, Florida</span>
+      </a>
+      <nav aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="${base}/dashboard">Dashboard</a>
+        <a href="${base}/documents">Documents</a>
+        <a href="${base}/faq">FAQs</a>
+        <a href="${base}/messages">Contact</a>
+      </nav>
+      <div class="home-footer-end">
+        <p><a href="/privacy">Privacy Policy</a> | <a href="/terms">Terms of Use</a></p>
+        <p>© 2026 Tango Mar Property Owners Association</p>
+      </div>
+    </div>
+  </footer>`;
+}
+
 function memberSupportHref(slug: string, membership: { status?: string | null } | null | undefined): string {
   if (!membership || membership.status === "inactive") return "";
   return `/a/${slug}/support`;
@@ -502,7 +666,7 @@ function shell(options: {
   <a class="skip" href="#content">Skip to content</a>
   ${topbar}
   <main id="content">${options.body}</main>
-  ${siteFooter(options.supportHref ?? "")}
+  ${landingFooter()}
 </body>
 </html>`;
   }

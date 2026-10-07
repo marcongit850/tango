@@ -6,9 +6,87 @@ export type HomePortal = {
   adminHref: string | null;
 };
 
+const PORTAL = "/a/tango-mar";
+
+function homeIcon(kind: "megaphone" | "document" | "person" | "envelope"): string {
+  const common = `viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"`;
+  if (kind === "megaphone") {
+    return `<svg ${common}><path d="M5 9.5v5h2.2L12 18V6L7.2 9.5H5z"/><path d="M15 9.5a3.2 3.2 0 0 1 0 5"/><path d="M17.2 7.2a6 6 0 0 1 0 9.6"/></svg>`;
+  }
+  if (kind === "document") {
+    return `<svg ${common}><path d="M7 3.5h6.2L18 8.2V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z"/><path d="M13 3.5V8.5h5"/><path d="M9 12.5h6M9 16h6"/></svg>`;
+  }
+  if (kind === "person") {
+    return `<svg ${common}><circle cx="12" cy="8" r="3"/><path d="M6 19.2c.8-3 2.9-4.5 6-4.5s5.2 1.5 6 4.5"/></svg>`;
+  }
+  return `<svg ${common}><rect x="3.5" y="6" width="17" height="12" rx="1.6"/><path d="M4 7.2 12 13l8-5.8"/></svg>`;
+}
+
+function homeCard(kind: "megaphone" | "document" | "person" | "envelope", title: string, text: string, href: string, label: string): string {
+  return `<article class="home-card home-card-${kind}">
+      <div class="home-icon">${homeIcon(kind)}</div>
+      <h3>${title}</h3>
+      <p>${text}</p>
+      <a href="${href}">${label} <span aria-hidden="true">→</span></a>
+    </article>`;
+}
+
+function homeBelow(): string {
+  const cards = [
+    homeCard(
+      "megaphone",
+      "COMMUNITY UPDATES",
+      "Stay up to date on neighborhood announcements, meetings, projects, and important notices.",
+      `${PORTAL}/news`,
+      "View Updates",
+    ),
+    homeCard(
+      "document",
+      "DOCUMENTS &amp; FORMS",
+      "Access covenants, bylaws, association records, forms, meeting documents, and other homeowner resources.",
+      `${PORTAL}/documents`,
+      "View Documents",
+    ),
+    homeCard(
+      "person",
+      "YOUR ACCOUNT",
+      "View your property information, association account details, and available payment options.",
+      `${PORTAL}/dashboard`,
+      "Manage Account",
+    ),
+    homeCard(
+      "envelope",
+      "CONTACT THE ASSOCIATION",
+      "Have a question or need assistance? Send a request directly through your homeowner portal.",
+      `${PORTAL}/messages`,
+      "Contact Us",
+    ),
+  ].join("");
+  return `<section class="home-need" aria-labelledby="home-need-title">
+      <div class="wrap">
+        <h2 id="home-need-title">Everything You Need, All in One Place</h2>
+        <span class="rule" aria-hidden="true"></span>
+        <p class="home-lead">Whether you're looking for association documents, the latest neighborhood updates, account information, or a way to contact the association, the Tango Mar homeowner portal makes it easy to find what you need.</p>
+        <div class="home-cards">${cards}</div>
+      </div>
+    </section>
+    <section class="home-welcome" aria-labelledby="home-welcome-title">
+      <div class="wrap home-welcome-inner">
+        <div class="home-welcome-copy">
+          <p class="home-kicker">Welcome Home</p>
+          <h2 id="home-welcome-title">Tango Mar</h2>
+          <p>This website serves as the central online resource for Tango Mar property owners, providing convenient access to association information, community documents, neighborhood updates, and homeowner resources.</p>
+        </div>
+        <div class="home-beach-frame">
+          <img class="home-beach" src="/tango-mar-dunes.webp" alt="Sea oats and a dune fence above the gulf at Tango Mar" width="832" height="428">
+        </div>
+      </div>
+    </section>`;
+}
+
 export function homePage(showDemo: boolean, portal: HomePortal | null = null): string {
   const demo = showDemo
-    ? `<div class="wrap"><section class="devbox">
+    ? `<div class="wrap home-demo"><section class="devbox">
         <h2>Local demo roster</h2>
         <p>These people are fictional. Request a magic link, then use the link shown on the next screen when email is not configured.</p>
         <ul>
@@ -45,6 +123,7 @@ export function homePage(showDemo: boolean, portal: HomePortal | null = null): s
         </figure>
       </div>
     </section>
+    ${homeBelow()}
     ${demo}`;
 }
 

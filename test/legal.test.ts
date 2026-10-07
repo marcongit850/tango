@@ -61,8 +61,14 @@ describe("legal pages", () => {
     const home = await app.request("http://localhost/", {}, env);
     expect(home.status).toBe(200);
     const homeHtml = await home.text();
-    expect(homeHtml).toContain('<footer class="site-footer wrap"><p class="footer-links"><a href="/privacy">Privacy Policy</a><a href="/terms">Terms of Use</a></p></footer>');
+    expect(homeHtml).toContain('<footer class="home-footer">');
+    expect(homeHtml).toContain('href="/privacy">Privacy Policy</a>');
+    expect(homeHtml).toContain('href="/terms">Terms of Use</a>');
+    expect(homeHtml).toContain("© 2026 Tango Mar Property Owners Association");
+    expect(homeHtml).toContain('href="/a/tango-mar/faq">FAQs</a>');
+    expect(homeHtml).not.toContain('<footer class="site-footer wrap">');
     expect(homeHtml).not.toContain(">Support</a>");
+    expect(homeHtml).not.toContain("A beach neighborhood in Miramar Beach, Walton County, Florida.");
     expect(homeHtml).toContain(".panel.legal {\n  border-radius: 0;");
 
     const privacy = await app.request("http://localhost/privacy", {}, env);

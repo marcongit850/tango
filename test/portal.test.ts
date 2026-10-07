@@ -464,6 +464,9 @@ describe("signed-in header", () => {
     expect(html).toContain('class="dash"');
     expect(html).toContain("SUBSCRIPTION REQUIRED");
     expect(html).toContain(".site-header .account { padding-right: 1rem; }");
+    expect(html).toContain("font-family: var(--sans)");
+    expect(html).toContain("font-variant-numeric: tabular-nums lining-nums");
+    expect(html).not.toMatch(/\.balance-figure \{[^}]*var\(--serif\)/);
   });
 
   it("leaves Ask the portal off pages without an active membership", async () => {

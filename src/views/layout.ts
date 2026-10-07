@@ -262,11 +262,13 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
   background: linear-gradient(180deg, rgba(226, 242, 239, 0.98), rgba(255, 253, 248, 0.96));
 }
 .balance-figure {
-  font-family: var(--serif);
+  font-family: var(--sans);
+  font-variant-numeric: tabular-nums lining-nums;
   font-size: clamp(2.5rem, 5vw, 3.3rem);
   line-height: 1;
   margin: 0.35rem 0 0.55rem;
 }
+.balance-figure .money { font-variant-numeric: tabular-nums lining-nums; }
 .dash-balance .money.settled { color: var(--gulf-dark); }
 .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
 .panel-head h2 { margin: 0; }

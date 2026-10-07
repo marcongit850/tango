@@ -10,6 +10,8 @@ import {
   deleteJoinRequest,
   deleteMessage,
   deleteMessageThread,
+  deletePersonAccount,
+  deletePropertyIfClear,
   documentVersions,
   duesColumnsReady,
   invoiceById,
@@ -417,6 +419,40 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     return redirectTo(c, ownerPath(association.slug, owner.user_id), message, sent ? "ok" : "warn");
   });
 
+  app.post("/a/:slug/admin/owners/:userId/delete", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const owner = (await listOwners(c.env.DB, association.id)).find((row) => row.user_id === c.req.param("userId"));
+    if (!owner) throw new NotFoundError();
+    const back = ownerPath(association.slug, owner.user_id);
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, back, "Confirm the delete first.", "warn");
+    const currentlyAdmin = owner.role_id === "board" && owner.is_admin === 1 && owner.status === "active";
+    if (
+      !keepsAnAdmin({
+        activeAdminCount: await countActiveAdmins(c.env.DB, association.id),
+        currentlyAdmin,
+        nextAdmin: false,
+      })
+    ) {
+      return redirectTo(c, back, "Keep at least one person with admin access.", "warn");
+    }
+    const removed = await deletePersonAccount(c.env.DB, association.id, owner.user_id);
+    if (removed === "missing") throw new NotFoundError();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id === owner.user_id ? null : user.id,
+      action: "user_delete",
+      entityType: "user",
+      entityId: owner.user_id,
+      detail: `${owner.name} (${owner.email})`,
+    });
+    const message =
+      removed === "unlinked"
+        ? `${owner.name} was removed from this association. The login is still used elsewhere.`
+        : `${owner.name} deleted.`;
+    return redirectTo(c, `/a/${association.slug}/admin/owners#logins`, message);
+  });
+
   app.get("/a/:slug/admin/lots", (c) => {
     const { association } = requireStaff(c);
     return redirectTo(c, `/a/${association.slug}/admin/owners#lots`);
@@ -613,10 +649,14 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
     if (!property) throw new NotFoundError();
     const today = todayIso(association.timezone);
-    const [ledger, owners, invoices] = await Promise.all([
+    const [ledger, owners, invoices, paymentCount] = await Promise.all([
       ledgerForAssociation(c.env.DB, association.id, today),
       listOwners(c.env.DB, association.id),
       invoicesForProperty(c.env.DB, association.id, property.id),
+      c.env.DB
+        .prepare("SELECT COUNT(*) AS n FROM payments WHERE association_id = ? AND property_id = ?")
+        .bind(association.id, property.id)
+        .first<{ n: number }>(),
     ]);
     const owner = owners.find((row) => row.property_id === property.id);
     const balance = ledger.find((row) => row.property_id === property.id) ?? null;
@@ -625,13 +665,38 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       active: "admin",
       body: ledgerLotPage({
         association,
+        propertyId: property.id,
         lotNumber: property.lot_number,
         streetAddress: property.street_address,
         ownerName: owner?.name ?? "",
         balance,
         invoices,
+        paymentCount: Number(paymentCount?.n ?? 0),
       }),
     });
+  });
+
+  app.post("/a/:slug/admin/ledger/:propertyId/delete", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
+    if (!property) throw new NotFoundError();
+    const back = ledgerPropertyPath(association.slug, property.id);
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, back, "Confirm the delete first.", "warn");
+    const result = await deletePropertyIfClear(c.env.DB, association.id, property.id);
+    if (result === "missing") throw new NotFoundError();
+    if (result === "blocked") {
+      return redirectTo(c, back, "This lot still has invoices or payments. Clear those before deleting the lot.", "warn");
+    }
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "lot_delete",
+      entityType: "property",
+      entityId: property.id,
+      detail: `Lot ${property.lot_number}`,
+    });
+    return redirectTo(c, `/a/${association.slug}/admin/ledger`, `Lot ${property.lot_number} deleted.`);
   });
 
   app.get("/a/:slug/admin/invoices/:invoiceId", async (c) => {
@@ -2035,6 +2100,10 @@ async function maybeEmailOwners(
 
 function ownerPath(slug: string, userId: string): string {
   return `/a/${slug}/admin/owners/${userId}`;
+}
+
+function ledgerPropertyPath(slug: string, propertyId: string): string {
+  return `/a/${slug}/admin/ledger/${propertyId}`;
 }
 
 function documentPath(slug: string, documentId: string): string {

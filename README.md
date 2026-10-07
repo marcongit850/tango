@@ -15,7 +15,7 @@ This is the Phase 0 foundation and Phase 1 scaffold: magic-link sign-in, a D1 da
 - Documents in eight categories, with versions. Residents see the version the board marks current. Budgets can be board-only. Publishing a file can email a short portal link when Email owners is checked. Board-only files go only to board logins, and the email does not include the file.
 - News, emergency notices, meetings, calendar, FAQs, and board contacts. Posting or saving an announcement or event can email active logins the same way. FAQ and contacts do not.
 - Private resident-to-board messages, plus portal notifications. The resident who started a thread can delete that thread. Board admins can delete a thread or one reply. Deleting a thread removes its portal notifications. A portal notice can include an optional file the owner views or downloads in the portal. Posting a notice to one owner can also email that login when Email owner is checked. The note has the title, a short message, a link to Notices, and the file attached to the email. The box starts unchecked. If Resend is not configured, the notice is still saved and the flash says the email was not sent.
-- Board tools: owners and lots, delinquent accounts, homeowner and board roles with an admin flag, login email edits, CSV import, invoices, annual dues, recorded payments (delete a payment on an invoice), news editing, documents (visibility and delete), an accountant CSV, join requests, incoming messages (delete a thread or a reply), and an activity log.
+- Board tools: owners and lots, delinquent accounts, homeowner and board roles with an admin flag, login email edits, deleting a person, CSV import, invoices, annual dues, recorded payments (delete a payment on an invoice), deleting a lot that has no invoices or payments, news editing, documents (visibility and delete), an accountant CSV, join requests, incoming messages (delete a thread or a reply), and an activity log.
 - Public home with resident login and request access.
 
 ## Not in this phase
@@ -225,6 +225,14 @@ Run that file once, after `0006`. If the console says a column already exists, t
 On Admin, Messages, **Mark reviewed** is on the thread and on the inbox row. Until this file runs, the waiting count still works and Mark reviewed asks you to apply it first.
 
 Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0006` is already on the remote database.
+
+## Delete a person or a lot
+
+Board admins can remove a person or a lot. No extra database migration is required.
+
+Open the person from Admin, Users, for example [https://mytangomar.com/a/tango-mar/admin/owners](https://mytangomar.com/a/tango-mar/admin/owners). Check **Delete this person**, then submit. That removes the login, sessions, magic links, membership, lot links, notices, and messages they sent. Lots and their invoices stay. The portal keeps at least one active admin. If that login is also a member of another association, only this association's membership is removed and the account stays.
+
+Open a lot from the ledger, for example [https://mytangomar.com/a/tango-mar/admin/ledger](https://mytangomar.com/a/tango-mar/admin/ledger) and then the lot. Check **Delete this lot**, then submit. The lot and its owner links are removed when it has no invoices and no payments. A lot that still has either stays in place, and the page says to clear those first. Invoices on that page still open for edit, and a payment on an invoice is deleted from the invoice page first.
 
 ## Create the R2 bucket
 

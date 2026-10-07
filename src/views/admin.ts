@@ -142,7 +142,7 @@ export function ownersPage(
     .map((lot) => {
       const edit = `/a/${esc(association.slug)}/admin/lots/${esc(lot.id)}`;
       return `<tr>
-        <td>Lot ${esc(lot.lot_number)}</td>
+        <td><a href="/a/${esc(association.slug)}/admin/ledger/${esc(lot.id)}">Lot ${esc(lot.lot_number)}</a></td>
         <td>${esc(lot.street_address)}</td>
         <td>${esc(lotTypeLabel(lot.lot_type))}</td>
         <td>${lot.owner_name ? esc(lot.owner_name) : "No owner"}</td>
@@ -276,6 +276,11 @@ export function ownerDetailPage(options: {
         <p class="muted">Sends one email to this owner when Resend is configured, and always leaves a portal notice. This is not a neighborhood blast.</p>
         <form method="post" action="${esc(base)}/remind"><button type="submit">Send reminder</button></form>
       </article>
+    </section>
+    <section class="panel" id="delete">
+      <h2>Delete person</h2>
+      <p class="muted">This removes the login, sessions, and membership. Messages they sent are removed. Lots and their invoices stay. Keep at least one active admin.</p>
+      ${confirmDeleteButton(`${base}/delete`, "Delete person", "Delete this person")}
     </section>`;
 }
 
@@ -388,11 +393,13 @@ export function ledgerPage(options: {
 
 export function ledgerLotPage(options: {
   association: Association;
+  propertyId: string;
   lotNumber: string;
   streetAddress: string;
   ownerName: string;
   balance: BalanceRow | null;
   invoices: InvoiceRow[];
+  paymentCount: number;
 }): string {
   const base = `/a/${esc(options.association.slug)}/admin`;
   const rows = options.invoices
@@ -413,6 +420,14 @@ export function ledgerLotPage(options: {
   const balance = options.balance
     ? `<p>Balance ${moneySpan(options.balance.balance_cents)}${options.balance.delinquent ? ` <span class="badge late">Past due</span>` : ""}</p>`
     : "";
+  const blocked = options.invoices.length > 0 || options.paymentCount > 0;
+  const remove = blocked
+    ? `<p>This lot still has invoices or payments. Clear those before deleting the lot.</p>`
+    : confirmDeleteButton(
+        `/a/${options.association.slug}/admin/ledger/${options.propertyId}/delete`,
+        "Delete lot",
+        "Delete this lot",
+      );
   return `${adminNav(options.association.slug, "ledger")}
     <section class="panel">
       <p><a href="${base}/ledger">Assessments and balances</a></p>
@@ -425,6 +440,11 @@ export function ledgerLotPage(options: {
           ? `<table><thead><tr><th>Invoice</th><th>Description</th><th>Due</th><th>Amount</th><th>Late fee</th><th>Paid</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`
           : empty("No invoices on this lot.")
       }
+    </section>
+    <section class="panel" id="delete">
+      <h2>Delete lot</h2>
+      <p class="muted">This removes the lot and its owner links. Invoices and payments have to be cleared first.</p>
+      ${remove}
     </section>`;
 }
 

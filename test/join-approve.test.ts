@@ -647,6 +647,287 @@ describe("owner name and phone", () => {
   });
 });
 
+describe("delete a person or a lot", () => {
+  function portalEnv(db: D1Database): Env {
+    return {
+      DB: db,
+      APP_ENV: "production",
+      EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+      DOCUMENTS: {} as R2Bucket,
+    } as Env;
+  }
+
+  async function signIn(sqlite: DatabaseSync, userId: string): Promise<string> {
+    const token = `session-${userId}`;
+    sqlite
+      .prepare("INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(`sess_${userId}_${crypto.randomUUID()}`, userId, await sha256Hex(token), "2099-01-01T00:00:00.000Z", "2026-10-06T00:00:00.000Z");
+    return token;
+  }
+
+  function post(token: string, body: Record<string, string>): RequestInit {
+    return {
+      method: "POST",
+      headers: {
+        Cookie: `tango_session=${token}`,
+        Origin: "http://localhost",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams(body),
+    };
+  }
+
+  it("requires confirm, refuses a homeowner, keeps the last admin, and deletes a person", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    sqlite
+      .prepare(
+        `INSERT INTO magic_links (id, email, association_id, token_hash, redirect_path, expires_at, created_at)
+         VALUES ('ml_casey', 'casey.nguyen@example.com', ?, 'hash', '', '2099-01-01T00:00:00.000Z', '2026-10-06T00:00:00.000Z')`,
+      )
+      .run(ASSOCIATION);
+    const adminToken = await signIn(sqlite, "user_jordan");
+    const ownerToken = await signIn(sqlite, "user_sam");
+    await signIn(sqlite, "user_casey");
+    try {
+      const page = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_casey",
+        { headers: { Cookie: `tango_session=${adminToken}` } },
+        env,
+      );
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain('action="/a/tango-mar/admin/owners/user_casey/delete"');
+      expect(html).toContain('type="checkbox" name="confirm" value="yes"');
+      expect(html).not.toContain("onsubmit=");
+
+      const unconfirmed = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_casey/delete",
+        post(adminToken, {}),
+        env,
+      );
+      expect(unconfirmed.status).toBe(303);
+      expect(decodeURIComponent(unconfirmed.headers.get("Set-Cookie") ?? "")).toContain("warn:Confirm the delete first.");
+      expect(sqlite.prepare("SELECT id FROM users WHERE id = 'user_casey'").get()).toEqual({ id: "user_casey" });
+
+      const refused = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_casey/delete",
+        post(ownerToken, { confirm: "yes" }),
+        env,
+      );
+      expect(refused.status).toBe(403);
+      expect(sqlite.prepare("SELECT id FROM users WHERE id = 'user_casey'").get()).toEqual({ id: "user_casey" });
+
+      const lastAdmin = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_jordan/delete",
+        post(adminToken, { confirm: "yes" }),
+        env,
+      );
+      expect(lastAdmin.status).toBe(303);
+      expect(decodeURIComponent(lastAdmin.headers.get("Set-Cookie") ?? "")).toContain(
+        "warn:Keep at least one person with admin access.",
+      );
+      expect(sqlite.prepare("SELECT id FROM users WHERE id = 'user_jordan'").get()).toEqual({ id: "user_jordan" });
+
+      const removed = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_casey/delete",
+        post(adminToken, { confirm: "yes" }),
+        env,
+      );
+      expect(removed.status).toBe(303);
+      expect(removed.headers.get("Location")).toBe("/a/tango-mar/admin/owners#logins");
+      expect(decodeURIComponent(removed.headers.get("Set-Cookie") ?? "")).toContain("ok:Casey Nguyen deleted.");
+      expect(sqlite.prepare("SELECT id FROM users WHERE id = 'user_casey'").get()).toBeUndefined();
+      expect(sqlite.prepare("SELECT id FROM memberships WHERE user_id = 'user_casey'").get()).toBeUndefined();
+      expect(sqlite.prepare("SELECT id FROM property_owners WHERE user_id = 'user_casey'").get()).toBeUndefined();
+      expect(sqlite.prepare("SELECT id FROM sessions WHERE user_id = 'user_casey'").get()).toBeUndefined();
+      expect(sqlite.prepare("SELECT id FROM magic_links WHERE email = 'casey.nguyen@example.com'").get()).toBeUndefined();
+      expect(sqlite.prepare("SELECT id FROM notifications WHERE user_id = 'user_casey'").get()).toBeUndefined();
+      expect(sqlite.prepare("SELECT id FROM messages WHERE from_user_id = 'user_casey'").get()).toBeUndefined();
+      expect(sqlite.prepare("SELECT id FROM properties WHERE id = 'prop_27'").get()).toEqual({ id: "prop_27" });
+      expect(count(sqlite, "SELECT COUNT(*) AS n FROM invoices WHERE property_id = 'prop_27'")).toBe(2);
+      expect(sqlite.prepare("SELECT recorded_by_user_id FROM payments WHERE id = 'payment_sam_2026'").get()).toEqual({
+        recorded_by_user_id: "user_jordan",
+      });
+      expect(sqlite.prepare("SELECT id FROM notifications WHERE id = 'note_jordan_message'").get()).toEqual({
+        id: "note_jordan_message",
+      });
+      expect(
+        sqlite.prepare("SELECT action, actor_user_id, entity_type, entity_id, detail FROM audit_log WHERE action = 'user_delete'").get(),
+      ).toEqual({
+        action: "user_delete",
+        actor_user_id: "user_jordan",
+        entity_type: "user",
+        entity_id: "user_casey",
+        detail: "Casey Nguyen (casey.nguyen@example.com)",
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("keeps a login that still belongs to another association", async () => {
+    const { sqlite, db } = openPortal();
+    sqlite
+      .prepare(
+        `INSERT INTO associations (id, slug, name, legal_name, created_at)
+         VALUES ('assoc_other', 'other', 'Other', 'Other Association', '2026-10-06T00:00:00Z')`,
+      )
+      .run();
+    sqlite
+      .prepare(
+        `INSERT INTO memberships (id, association_id, user_id, role_id, is_admin, status, created_at)
+         VALUES ('mem_casey_other', 'assoc_other', 'user_casey', 'homeowner', 0, 'active', '2026-10-06T00:00:00Z')`,
+      )
+      .run();
+    const app = createApp();
+    const token = await signIn(sqlite, "user_jordan");
+    await signIn(sqlite, "user_casey");
+    try {
+      const removed = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_casey/delete",
+        post(token, { confirm: "yes" }),
+        portalEnv(db),
+      );
+      expect(removed.status).toBe(303);
+      expect(decodeURIComponent(removed.headers.get("Set-Cookie") ?? "")).toContain(
+        "ok:Casey Nguyen was removed from this association. The login is still used elsewhere.",
+      );
+      expect(sqlite.prepare("SELECT id FROM users WHERE id = 'user_casey'").get()).toEqual({ id: "user_casey" });
+      expect(sqlite.prepare("SELECT user_id FROM sessions WHERE user_id = 'user_casey'").get()).toEqual({
+        user_id: "user_casey",
+      });
+      expect(sqlite.prepare("SELECT association_id FROM memberships WHERE user_id = 'user_casey'").get()).toEqual({
+        association_id: "assoc_other",
+      });
+      expect(sqlite.prepare("SELECT id FROM property_owners WHERE user_id = 'user_casey' AND association_id = ?").get(ASSOCIATION)).toBeUndefined();
+      expect(sqlite.prepare("SELECT id FROM messages WHERE id = 'msg_casey_1'").get()).toBeUndefined();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("blocks a lot that still has a ledger and deletes one that is clear", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    sqlite.exec(`
+      INSERT INTO properties (id, association_id, lot_number, street_address, city, state, postal_code, status, lot_type, created_at)
+      VALUES
+        ('prop_empty', '${ASSOCIATION}', '99', '99 Tang O Mar Drive', 'Miramar Beach', 'FL', '32550', 'active', 'improved', '2026-10-06T00:00:00Z'),
+        ('prop_pay', '${ASSOCIATION}', '98', '98 Tang O Mar Drive', 'Miramar Beach', 'FL', '32550', 'active', 'unimproved', '2026-10-06T00:00:00Z');
+      INSERT INTO property_owners (id, association_id, property_id, user_id, is_primary, created_at)
+      VALUES ('own_empty', '${ASSOCIATION}', 'prop_empty', 'user_sam', 0, '2026-10-06T00:00:00Z');
+      INSERT INTO payments (
+        id, association_id, property_id, invoice_id, amount_cents, method, reference, paid_on, notes, recorded_by_user_id, created_at
+      ) VALUES (
+        'payment_only', '${ASSOCIATION}', 'prop_pay', NULL, 1000, 'cash', 'petty', '2026-10-01', '', 'user_jordan', '2026-10-01T00:00:00Z'
+      );
+      INSERT INTO messages (id, association_id, thread_id, parent_id, from_user_id, property_id, subject, body, created_at)
+      VALUES (
+        'msg_empty', '${ASSOCIATION}', 'msg_empty', NULL, 'user_jordan', 'prop_empty', 'Empty lot', 'Note', '2026-10-06T00:00:00Z'
+      );
+    `);
+    const adminToken = await signIn(sqlite, "user_jordan");
+    const ownerToken = await signIn(sqlite, "user_sam");
+    try {
+      const ledger = await app.request(
+        "http://localhost/a/tango-mar/admin/ledger",
+        { headers: { Cookie: `tango_session=${adminToken}` } },
+        env,
+      );
+      expect(await ledger.text()).toContain('href="/a/tango-mar/admin/ledger/prop_14"');
+
+      const blockedPage = await app.request(
+        "http://localhost/a/tango-mar/admin/ledger/prop_14",
+        { headers: { Cookie: `tango_session=${adminToken}` } },
+        env,
+      );
+      expect(blockedPage.status).toBe(200);
+      const blockedHtml = await blockedPage.text();
+      expect(blockedHtml).toContain("This lot still has invoices or payments. Clear those before deleting the lot.");
+      expect(blockedHtml).not.toContain('action="/a/tango-mar/admin/ledger/prop_14/delete"');
+      expect(blockedHtml).toContain('href="/a/tango-mar/admin/invoices/invoice_sam_2026"');
+      expect(blockedHtml).toContain("Sam Rivera");
+
+      const blocked = await app.request(
+        "http://localhost/a/tango-mar/admin/ledger/prop_14/delete",
+        post(adminToken, { confirm: "yes" }),
+        env,
+      );
+      expect(blocked.status).toBe(303);
+      expect(decodeURIComponent(blocked.headers.get("Set-Cookie") ?? "")).toContain(
+        "warn:This lot still has invoices or payments. Clear those before deleting the lot.",
+      );
+      expect(sqlite.prepare("SELECT id FROM properties WHERE id = 'prop_14'").get()).toEqual({ id: "prop_14" });
+      expect(sqlite.prepare("SELECT user_id FROM property_owners WHERE property_id = 'prop_14'").get()).toEqual({
+        user_id: "user_sam",
+      });
+
+      const paymentOnly = await app.request(
+        "http://localhost/a/tango-mar/admin/ledger/prop_pay/delete",
+        post(adminToken, { confirm: "yes" }),
+        env,
+      );
+      expect(paymentOnly.status).toBe(303);
+      expect(sqlite.prepare("SELECT id FROM properties WHERE id = 'prop_pay'").get()).toEqual({ id: "prop_pay" });
+      expect(sqlite.prepare("SELECT id FROM payments WHERE id = 'payment_only'").get()).toEqual({ id: "payment_only" });
+
+      const clearPage = await app.request(
+        "http://localhost/a/tango-mar/admin/ledger/prop_empty",
+        { headers: { Cookie: `tango_session=${adminToken}` } },
+        env,
+      );
+      const clearHtml = await clearPage.text();
+      expect(clearHtml).toContain('action="/a/tango-mar/admin/ledger/prop_empty/delete"');
+      expect(clearHtml).toContain('type="checkbox" name="confirm" value="yes"');
+      expect(clearHtml).not.toContain("onsubmit=");
+      expect(clearHtml).toContain("No invoices on this lot.");
+
+      const unconfirmed = await app.request(
+        "http://localhost/a/tango-mar/admin/ledger/prop_empty/delete",
+        post(adminToken, {}),
+        env,
+      );
+      expect(unconfirmed.status).toBe(303);
+      expect(decodeURIComponent(unconfirmed.headers.get("Set-Cookie") ?? "")).toContain("warn:Confirm the delete first.");
+      expect(sqlite.prepare("SELECT id FROM properties WHERE id = 'prop_empty'").get()).toEqual({ id: "prop_empty" });
+
+      const refused = await app.request(
+        "http://localhost/a/tango-mar/admin/ledger/prop_empty/delete",
+        post(ownerToken, { confirm: "yes" }),
+        env,
+      );
+      expect(refused.status).toBe(403);
+      expect(sqlite.prepare("SELECT id FROM properties WHERE id = 'prop_empty'").get()).toEqual({ id: "prop_empty" });
+
+      const removed = await app.request(
+        "http://localhost/a/tango-mar/admin/ledger/prop_empty/delete",
+        post(adminToken, { confirm: "yes" }),
+        env,
+      );
+      expect(removed.status).toBe(303);
+      expect(removed.headers.get("Location")).toBe("/a/tango-mar/admin/ledger");
+      expect(decodeURIComponent(removed.headers.get("Set-Cookie") ?? "")).toContain("ok:Lot 99 deleted.");
+      expect(sqlite.prepare("SELECT id FROM properties WHERE id = 'prop_empty'").get()).toBeUndefined();
+      expect(sqlite.prepare("SELECT id FROM property_owners WHERE property_id = 'prop_empty'").get()).toBeUndefined();
+      expect(sqlite.prepare("SELECT property_id FROM messages WHERE id = 'msg_empty'").get()).toEqual({ property_id: null });
+      expect(
+        sqlite.prepare("SELECT action, actor_user_id, entity_type, entity_id, detail FROM audit_log WHERE action = 'lot_delete'").get(),
+      ).toEqual({
+        action: "lot_delete",
+        actor_user_id: "user_jordan",
+        entity_type: "property",
+        entity_id: "prop_empty",
+        detail: "Lot 99",
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
 describe("pending join requests and notices", () => {
   const association: Association = {
     id: ASSOCIATION,

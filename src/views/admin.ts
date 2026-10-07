@@ -488,7 +488,7 @@ export function newsAdminPage(options: {
   return `${adminNav(association.slug, "news")}
     ${editing ? `<section class="panel" id="edit">${newsEditForm(association, editing)}</section>` : ""}
     <section class="panel">
-      <h1>News, calendar, FAQ, contacts</h1>
+      <h1>News, calendar, FAQ, Board Contact</h1>
       <h2>Announcements</h2>
       ${
         announcements
@@ -503,7 +503,7 @@ export function newsAdminPage(options: {
       }
       <h2>FAQs</h2>
       ${faqs ? `<table><thead><tr><th>Question</th><th></th></tr></thead><tbody>${faqs}</tbody></table>` : empty("No FAQs.")}
-      <h2>Contacts</h2>
+      <h2>Board Contact</h2>
       ${
         contacts
           ? `<table><thead><tr><th>Name</th><th>Role</th><th></th></tr></thead><tbody>${contacts}</tbody></table>`
@@ -514,7 +514,7 @@ export function newsAdminPage(options: {
       <article class="panel"><h2>Add announcement</h2>${announcementForm(base, association, null)}</article>
       <article class="panel"><h2>Add event</h2>${eventForm(base, null)}</article>
       <article class="panel"><h2>Add FAQ</h2>${faqForm(base, null)}</article>
-      <article class="panel"><h2>Add contact</h2>${contactForm(base, null)}</article>
+      <article class="panel"><h2>Add Board Contact</h2>${contactForm(base, null)}</article>
     </section>`;
 }
 
@@ -581,7 +581,7 @@ function contactForm(base: string, row: ContactRow | null): string {
       ${textField("Role", "role_title", { value: row?.role_title ?? "", required: true })}
       ${textField("Email", "email", { type: "email", value: row?.email ?? "" })}
       ${textField("Phone", "phone", { value: row?.phone ?? "" })}
-      <button type="submit">${row ? "Save contact" : "Add contact"}</button>
+      <button type="submit">${row ? "Save contact" : "Add Board Contact"}</button>
     </form>`;
 }
 

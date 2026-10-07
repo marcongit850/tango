@@ -458,6 +458,13 @@ describe("news admin", () => {
     expect(html).toContain('href="/a/tango-mar/admin/news?edit=event&amp;id=ev-1#edit"');
     expect(html).toContain('href="/a/tango-mar/admin/news?edit=faq&amp;id=faq-1#edit"');
     expect(html).toContain('href="/a/tango-mar/admin/news?edit=contact&amp;id=c-1#edit"');
+    expect(html).toContain("<h1>News, calendar, FAQ, Board Contact</h1>");
+    expect(html).toContain("<h2>Board Contact</h2>");
+    expect(html).toContain("<h2>Add Board Contact</h2>");
+    expect(html).toContain(">Add Board Contact<");
+    expect(html).not.toContain("<h2>Contacts</h2>");
+    expect(html).not.toContain("<h2>Add contact</h2>");
+    expect(html).not.toContain(">Add contact<");
     expect(html).toContain(">Edit<");
     expect(html).toContain("Delete this announcement? This cannot be undone.");
     expect(html).toContain('name="confirm" value="yes"');

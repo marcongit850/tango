@@ -26,6 +26,7 @@ import {
   categoryCell,
   dateCell,
   dateTimeCell,
+  confirmDeleteButton,
   documentFileLinks,
   empty,
   moneySpan,
@@ -661,21 +662,23 @@ export function adminMessagesPage(association: Association, threads: MessageRow[
   const staff = new Set(staffIds);
   const listPath = `/a/${association.slug}/admin/messages`;
   const rows = threads
-    .map(
-      (thread) => `<tr>
+    .map((thread) => {
+      const remove = confirmDeleteButton(`${listPath}/${thread.thread_id}/delete`, "Delete");
+      return `<tr>
         <td><a href="${esc(listPath)}/${esc(thread.thread_id)}">${esc(thread.subject)}</a></td>
         <td>${esc(thread.from_name)}</td>
         <td>${thread.lot_number ? `Lot ${esc(thread.lot_number)}` : ""}</td>
         <td>${dateTimeCell(thread.created_at, association.timezone)}</td>
         <td>${messageReviewCell(association.slug, thread, staff, listPath)}</td>
-      </tr>`,
-    )
+        <td>${remove}</td>
+      </tr>`;
+    })
     .join("");
   return `${adminNav(association.slug, "messages")}
     <section class="panel">
       <h1>Messages</h1>
       <p class="muted">Incoming from owners. These notes are private to the board. Other owners cannot read them. Mark reviewed clears a thread from Messages waiting on the board without sending a reply.</p>
-      ${rows ? `<table><thead><tr><th>Subject</th><th>Latest from</th><th>Lot</th><th>When</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No incoming messages.")}
+      ${rows ? `<table><thead><tr><th>Subject</th><th>Latest from</th><th>Lot</th><th>When</th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No incoming messages.")}
     </section>`;
 }
 
@@ -692,6 +695,9 @@ export function adminThreadPage(
   return `${adminNav(association.slug, "messages")}${review}${threadPage(association, subject, messages, {
     incoming: true,
     next: threadPath,
+    allowThreadDelete: true,
+    replyDelete: "all",
+    inbox: "admin",
   })}`;
 }
 

@@ -62,6 +62,15 @@ export function areaField(label: string, name: string, value = "", required = fa
   return `<label>${esc(label)}<textarea name="${esc(name)}" ${required ? "required" : ""}>${esc(value)}</textarea></label>`;
 }
 
+/**
+ * Required checkbox, same as document and assessment deletes.
+ * The portal content security policy blocks inline confirm(), so the checkbox is the confirm step the browser enforces.
+ * The server still rejects the post unless confirm=yes.
+ */
+export function confirmDeleteButton(action: string, label: string, confirmLabel = "Confirm"): string {
+  return `<form method="post" action="${esc(action)}"><label><input type="checkbox" name="confirm" value="yes" required> ${esc(confirmLabel)}</label><button class="secondary" type="submit">${esc(label)}</button></form>`;
+}
+
 export function selectField(
   label: string,
   name: string,

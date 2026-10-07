@@ -13,7 +13,7 @@ import type {
 } from "../db";
 import { paragraphs, esc } from "../lib/html";
 import type { Association } from "../types";
-import { categoryCell, dateCell, dateTimeCell, documentFileLinks, empty, methodLabel, moneySpan, textField, areaField } from "./bits";
+import { categoryCell, confirmDeleteButton, dateCell, dateTimeCell, documentFileLinks, empty, methodLabel, moneySpan, textField, areaField } from "./bits";
 
 export function dashboardPage(options: {
   association: Association;
@@ -287,9 +287,10 @@ export function messagesPage(
   adminInboxHref = "",
 ): string {
   const rows = threads
-    .map(
-      (thread) => `<tr><td><a href="/a/${esc(association.slug)}/messages/${esc(thread.thread_id)}">${esc(thread.subject)}</a></td><td>${esc(thread.from_name)}</td><td>${dateTimeCell(thread.created_at, association.timezone)}</td></tr>`,
-    )
+    .map((thread) => {
+      const remove = confirmDeleteButton(`/a/${association.slug}/messages/${thread.thread_id}/delete`, "Delete");
+      return `<tr><td><a href="/a/${esc(association.slug)}/messages/${esc(thread.thread_id)}">${esc(thread.subject)}</a></td><td>${esc(thread.from_name)}</td><td>${dateTimeCell(thread.created_at, association.timezone)}</td><td>${remove}</td></tr>`;
+    })
     .join("");
   const lotOptions = properties
     .map((property) => `<option value="${esc(property.id)}">Lot ${esc(property.lot_number)}</option>`)
@@ -299,7 +300,7 @@ export function messagesPage(
       <h1>Messages</h1>
       <p class="muted">Private notes to the board. Other residents cannot read them.</p>
       ${adminInboxHref ? `<p class="muted">Incoming from owners is listed under <a href="${esc(adminInboxHref)}">Admin, Messages</a>.</p>` : ""}
-      ${rows ? `<table><thead><tr><th>Subject</th><th>Latest from</th><th>When</th></tr></thead><tbody>${rows}</tbody></table>` : empty("No messages yet.")}
+      ${rows ? `<table><thead><tr><th>Subject</th><th>Latest from</th><th>When</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No messages yet.")}
     </article>
     <article class="panel">
       <h2>Contact the board</h2>
@@ -317,23 +318,59 @@ export function threadPage(
   association: Association,
   subject: string,
   messages: MessageRow[],
-  options: { incoming?: boolean; next?: string } = {},
+  options: {
+    incoming?: boolean;
+    next?: string;
+    allowThreadDelete?: boolean;
+    replyDelete?: "all" | "own";
+    viewerUserId?: string;
+    inbox?: "admin" | "resident";
+  } = {},
 ): string {
   const threadId = messages[0]?.thread_id ?? "";
+  const inbox = options.inbox ?? "resident";
+  const ownCount = messages.filter((message) => message.from_user_id === options.viewerUserId).length;
   const items = messages
-    .map(
-      (message) => `<article class="card"><p><strong>${esc(message.from_name)}</strong> <span class="muted">${dateTimeCell(message.created_at, association.timezone)}</span></p>${paragraphs(message.body)}</article>`,
-    )
+    .map((message) => {
+      const action = replyDeleteAction(association.slug, threadId, message, inbox, options.replyDelete, options.viewerUserId, messages.length, ownCount);
+      const remove = action
+        ? `<div class="actions">${confirmDeleteButton(action, "Delete reply", "Delete this reply")}</div>`
+        : "";
+      return `<article class="card"><p><strong>${esc(message.from_name)}</strong> <span class="muted">${dateTimeCell(message.created_at, association.timezone)}</span></p>${paragraphs(message.body)}${remove}</article>`;
+    })
     .join("");
   const intro = options.incoming
     ? `<p class="muted">Incoming from owners. Only people with admin access can read the board side of this thread.</p>`
     : "";
+  const threadDelete = options.allowThreadDelete
+    ? `<div class="actions">${confirmDeleteButton(threadDeleteAction(association.slug, threadId, inbox), "Delete thread", "Delete this message thread")}</div>`
+    : "";
   const next = options.next ? `<input type="hidden" name="next" value="${esc(options.next)}">` : "";
-  return `<section class="panel"><h1>${esc(subject)}</h1>${intro}</section>
+  return `<section class="panel"><h1>${esc(subject)}</h1>${intro}${threadDelete}</section>
     <section class="stack">${items}</section>
     <form class="panel fields" method="post" action="/a/${esc(association.slug)}/messages/${esc(threadId)}/reply">
       ${next}
       ${areaField("Reply", "body", "", true)}
       <button type="submit">Send reply</button>
     </form>`;
+}
+
+function threadDeleteAction(slug: string, threadId: string, inbox: "admin" | "resident"): string {
+  return inbox === "admin" ? `/a/${slug}/admin/messages/${threadId}/delete` : `/a/${slug}/messages/${threadId}/delete`;
+}
+
+function replyDeleteAction(
+  slug: string,
+  threadId: string,
+  message: MessageRow,
+  inbox: "admin" | "resident",
+  replyDelete: "all" | "own" | undefined,
+  viewerUserId: string | undefined,
+  threadLength: number,
+  ownCount: number,
+): string {
+  if (!replyDelete || threadLength < 2) return "";
+  if (replyDelete === "own" && (message.from_user_id !== viewerUserId || ownCount < 2)) return "";
+  const stem = inbox === "admin" ? `/a/${slug}/admin/messages/${threadId}` : `/a/${slug}/messages/${threadId}`;
+  return `${stem}/messages/${message.id}/delete`;
 }

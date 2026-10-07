@@ -632,9 +632,10 @@ function paymentEditForm(slug: string, invoiceId: string, payment: InvoicePaymen
   </form>`;
 }
 
-function folderField(value = ""): string {
-  return `${textField("Year or subfolder", "folder", { value })}
-    <p class="muted">Optional. Leave blank to put the file directly in the category. Meeting Minutes can use a year such as 2024. A slash adds a folder inside that folder, such as 2024/January.</p>`;
+function folderField(folder = "", documentDate = ""): string {
+  return `${textField("Date", "document_date", { type: "date", value: documentDate })}
+    ${textField("Year or subfolder", "folder", { value: folder })}
+    <p class="muted">Optional. Leave blank to put the file directly in the category. On Meeting Minutes, Budgets, and Insurance, a date files the document in that year. A slash adds a folder inside that year, such as 2024/January.</p>`;
 }
 
 export function documentsAdminPage(association: Association, documents: DocumentRow[], canEdit = true): string {
@@ -642,6 +643,7 @@ export function documentsAdminPage(association: Association, documents: Document
     .map(
       (doc) => `<tr>
         <td>${categoryCell(doc.category)}</td>
+        <td>${doc.document_date ? dateCell(doc.document_date, association.timezone) : ""}</td>
         <td>${esc(doc.folder ?? "")}</td>
         <td><a href="/a/${esc(association.slug)}/admin/documents/${esc(doc.id)}">${esc(doc.title)}</a></td>
         <td>${esc(visibilityLabel(doc.visibility))}</td>
@@ -671,8 +673,8 @@ export function documentsAdminPage(association: Association, documents: Document
     <section class="split">
       <article class="panel">
         <h1>Documents</h1>
-        <p class="muted">Residents see the version marked current. Choose board-only for budgets and other financial reports. Leave the year or subfolder blank to keep a file in the category.</p>
-        ${rows ? `<table><thead><tr><th>Category</th><th>Subfolder</th><th>Title</th><th>Visibility</th><th>Current</th></tr></thead><tbody>${rows}</tbody></table>` : empty("No documents yet.")}
+        <p class="muted">Residents see the version marked current. Choose board-only for budgets and other financial reports. A date on Meeting Minutes, Budgets, or Insurance files that document in the year's folder. Leave the year or subfolder blank to keep a file in the category.</p>
+        ${rows ? `<table><thead><tr><th>Category</th><th>Date</th><th>Subfolder</th><th>Title</th><th>Visibility</th><th>Current</th></tr></thead><tbody>${rows}</tbody></table>` : empty("No documents yet.")}
       </article>
       ${publish}
     </section>`;
@@ -680,7 +682,15 @@ export function documentsAdminPage(association: Association, documents: Document
 
 export function documentDetailPage(
   association: Association,
-  document: { id: string; title: string; category: DocumentCategory; visibility: string; current_version_id: string | null; folder?: string | null },
+  document: {
+    id: string;
+    title: string;
+    category: DocumentCategory;
+    visibility: string;
+    current_version_id: string | null;
+    folder?: string | null;
+    document_date?: string | null;
+  },
   versions: VersionRow[],
   canEdit = true,
 ): string {
@@ -699,7 +709,7 @@ export function documentDetailPage(
   const visibility = canEdit
     ? `<form class="fields" method="post" action="/a/${esc(association.slug)}/admin/documents/${esc(document.id)}/visibility">
         ${selectField("Category", "category", DOCUMENT_CATEGORIES.map((item) => ({ value: item.id, label: item.label })), document.category)}
-        ${folderField(document.folder ?? "")}
+        ${folderField(document.folder ?? "", document.document_date ?? "")}
         ${selectField("Who can see it", "visibility", [
           { value: "residents", label: "Owners and residents" },
           { value: "board", label: "Board only" },
@@ -730,7 +740,7 @@ export function documentDetailPage(
   return `${adminNav(association.slug, "documents", canEdit)}
     <section class="panel">
       <h1>${esc(document.title)}</h1>
-      <p>${categoryCell(document.category)}${document.folder?.trim() ? ` · ${esc(document.folder.trim())}` : ""} · ${esc(visibilityLabel(document.visibility))}</p>
+      <p>${categoryCell(document.category)}${document.document_date ? ` · ${dateCell(document.document_date, association.timezone)}` : ""}${document.folder?.trim() ? ` · ${esc(document.folder.trim())}` : ""} · ${esc(visibilityLabel(document.visibility))}</p>
       ${visibility}
       ${rows ? `<table><thead><tr><th>Version</th><th>File</th><th>Notes</th><th>Uploaded</th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table>` : ""}
     </section>

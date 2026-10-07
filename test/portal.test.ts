@@ -1169,6 +1169,7 @@ describe("document viewing", () => {
     expect(adminList).toContain('<option value="budgets" >Budgets</option>');
     expect(adminList).toContain('<option value="insurance_docs" >Insurance</option>');
     expect(adminList).toContain('<option value="insurance" >Other</option>');
+    expect(adminList).toContain('name="document_date"');
     expect(adminList).toContain('name="folder"');
     expect(adminList).toContain("Leave blank to put the file directly in the category.");
     expect(adminList).not.toContain("\u2014");
@@ -1250,6 +1251,8 @@ describe("document viewing", () => {
     expect(form).toContain('<option value="budgets" >Budgets</option>');
     expect(form).toContain('<option value="insurance_docs" >Insurance</option>');
     expect(form).toContain('<option value="minutes" selected>Meeting Minutes / Agendas</option>');
+    expect(form).toContain('name="document_date"');
+    expect(form).toContain('type="date"');
     expect(form).toContain('name="folder"');
     expect(form).toContain('value="2024"');
     expect(form).toContain("Optional. Leave blank");

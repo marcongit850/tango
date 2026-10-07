@@ -13,6 +13,7 @@ import {
   deletePersonAccount,
   deletePropertyIfClear,
   documentVersions,
+  ensureDocumentColumns,
   duesColumnsReady,
   invoiceById,
   invoicesForProperty,
@@ -44,7 +45,14 @@ import {
 } from "../db";
 import { activeAdminContacts, keepsAnAdmin, MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE, masterKeepsAdminWrites } from "../lib/access";
 import { changeLoginEmail } from "../lib/login-email";
-import { categoryLabel, isDocumentCategory, isLegacyDocumentCategory, normalizeFolder } from "../lib/categories";
+import {
+  categoryLabel,
+  isDocumentCategory,
+  isLegacyDocumentCategory,
+  normalizeDocumentDate,
+  normalizeFolder,
+  placeDocumentFolder,
+} from "../lib/categories";
 import { annualDues, defaultDuesYear, isLotType } from "../lib/dues";
 import { parseOwnersCsv } from "../lib/csv";
 import { OWNER_IMPORT_TEMPLATE } from "../lib/owner-import-template";
@@ -1189,12 +1197,15 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const category = textValue(fields, "category", 40);
     const visibility = textValue(fields, "visibility", 20);
     const notes = textValue(fields, "notes", 1000);
+    const documentDate = normalizeDocumentDate(textValue(fields, "document_date", 20));
     const folder = normalizeFolder(textValue(fields, "folder", 120));
     const file = fileValue(fields, "file");
+    if (!documentDate.ok) return redirectTo(c, `/a/${association.slug}/admin/documents`, documentDate.error, "warn");
     if (!folder.ok) return redirectTo(c, `/a/${association.slug}/admin/documents`, folder.error, "warn");
     if (!title || !isDocumentCategory(category) || (visibility !== "residents" && visibility !== "board") || !file) {
       return redirectTo(c, `/a/${association.slug}/admin/documents`, "Title, category, visibility, and a file are required.", "warn");
     }
+    const placed = placeDocumentFolder(category, folder.folder, documentDate.date);
     const stored = await storeVersion(c, {
       associationId: association.id,
       documentId: crypto.randomUUID(),
@@ -1205,7 +1216,8 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       title,
       category,
       visibility,
-      folder: folder.folder,
+      folder: placed,
+      documentDate: documentDate.date,
       create: true,
     });
     if (stored.error) return redirectTo(c, `/a/${association.slug}/admin/documents`, stored.error, "warn");
@@ -1310,30 +1322,34 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const back = documentPath(association.slug, document.id);
     const visibility = textValue(fields, "visibility", 20);
     const category = textValue(fields, "category", 40);
+    const documentDate = normalizeDocumentDate(textValue(fields, "document_date", 20));
     const folder = normalizeFolder(textValue(fields, "folder", 120));
+    if (!documentDate.ok) return redirectTo(c, back, documentDate.error, "warn");
     if (!folder.ok) return redirectTo(c, back, folder.error, "warn");
     if (!isDocumentCategory(category)) return redirectTo(c, back, "Choose a category.", "warn");
     if (visibility !== "residents" && visibility !== "board") {
       return redirectTo(c, back, "Choose owners and residents, or board only.", "warn");
     }
+    const placed = placeDocumentFolder(category, folder.folder, documentDate.date);
     try {
+      await ensureDocumentColumns(c.env.DB);
       await c.env.DB
-        .prepare("UPDATE documents SET category = ?, visibility = ?, folder = ? WHERE association_id = ? AND id = ?")
-        .bind(category, visibility, folder.folder, association.id, document.id)
+        .prepare("UPDATE documents SET category = ?, visibility = ?, folder = ?, document_date = ? WHERE association_id = ? AND id = ?")
+        .bind(category, visibility, placed, documentDate.date, association.id, document.id)
         .run();
     } catch (error) {
-      if (isMissingColumn(error) && folder.folder === "" && isLegacyDocumentCategory(category)) {
+      if (isMissingColumn(error) && placed === "" && documentDate.date === "" && isLegacyDocumentCategory(category)) {
         await c.env.DB
           .prepare("UPDATE documents SET category = ?, visibility = ? WHERE association_id = ? AND id = ?")
           .bind(category, visibility, association.id, document.id)
           .run();
       } else if (isMissingColumn(error) || isCheckConstraint(error)) {
-        return redirectTo(c, back, DOCUMENT_FOLDER_MIGRATION, "warn");
+        return redirectTo(c, back, isCheckConstraint(error) ? DOCUMENT_FOLDER_MIGRATION : DOCUMENT_DATE_MIGRATION, "warn");
       } else {
         throw error;
       }
     }
-    const place = folder.folder ? `${categoryLabel(category)} / ${folder.folder}` : categoryLabel(category);
+    const place = placed ? `${categoryLabel(category)} / ${placed}` : categoryLabel(category);
     const who = visibility === "board" ? "Board only" : "Owners and residents";
     await writeAudit(c.env.DB, {
       associationId: association.id,
@@ -1341,7 +1357,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       action: "document_visibility",
       entityType: "document",
       entityId: document.id,
-      detail: `${place}. ${who}.`,
+      detail: `${place}. ${documentDate.date ? `Date ${documentDate.date}. ` : ""}${who}.`,
     });
     return redirectTo(c, back, "Saved.");
   });
@@ -2238,6 +2254,8 @@ function documentPath(slug: string, documentId: string): string {
 
 const DOCUMENT_FOLDER_MIGRATION =
   "Apply the document folder migration in D1, then try again. The steps are in the README under Document folders.";
+const DOCUMENT_DATE_MIGRATION =
+  "Apply the document date migration in D1, then try again. The steps are in the README under Document date.";
 
 type LoadedDocument = {
   id: string;
@@ -2246,25 +2264,29 @@ type LoadedDocument = {
   visibility: "residents" | "board";
   current_version_id: string | null;
   folder: string;
+  document_date: string;
 };
 
 async function loadDocument(c: AppContext, associationId: string, documentId: string): Promise<LoadedDocument> {
+  await ensureDocumentColumns(c.env.DB);
   try {
     const document = await c.env.DB
-      .prepare("SELECT id, title, category, visibility, current_version_id, folder FROM documents WHERE association_id = ? AND id = ?")
+      .prepare(
+        "SELECT id, title, category, visibility, current_version_id, folder, document_date FROM documents WHERE association_id = ? AND id = ?",
+      )
       .bind(associationId, documentId)
       .first<LoadedDocument>();
     if (!document) throw new NotFoundError();
-    return { ...document, folder: document.folder ?? "" };
+    return { ...document, folder: document.folder ?? "", document_date: document.document_date ?? "" };
   } catch (error) {
     if (!isMissingColumn(error)) throw error;
   }
   const document = await c.env.DB
     .prepare("SELECT id, title, category, visibility, current_version_id FROM documents WHERE association_id = ? AND id = ?")
     .bind(associationId, documentId)
-    .first<Omit<LoadedDocument, "folder">>();
+    .first<Omit<LoadedDocument, "folder" | "document_date">>();
   if (!document) throw new NotFoundError();
-  return { ...document, folder: "" };
+  return { ...document, folder: "", document_date: "" };
 }
 
 async function storeVersion(
@@ -2280,6 +2302,7 @@ async function storeVersion(
     category: DocumentCategory;
     visibility: "residents" | "board";
     folder?: string;
+    documentDate?: string;
     create: boolean;
   },
 ): Promise<{ documentId: string; error?: string }> {
@@ -2291,10 +2314,11 @@ async function storeVersion(
   await c.env.DOCUMENTS.put(key, await input.file.arrayBuffer(), { httpMetadata: { contentType } });
   const now = new Date().toISOString();
   const folder = input.folder ?? "";
+  const documentDate = input.documentDate ?? "";
   let created = false;
   try {
     if (input.create) {
-      await insertDocument(c, { ...input, folder, versionId, now });
+      await insertDocument(c, { ...input, folder, documentDate, versionId, now });
       created = true;
     }
     await c.env.DB
@@ -2336,8 +2360,14 @@ async function storeVersion(
         logError("document_insert_cleanup", { message: deleteError instanceof Error ? deleteError.message : "unknown" });
       }
     }
-    if (isMissingColumn(error) || isCheckConstraint(error)) {
+    if (isCheckConstraint(error)) {
       return { documentId: input.documentId, error: DOCUMENT_FOLDER_MIGRATION };
+    }
+    if (isMissingColumn(error)) {
+      return {
+        documentId: input.documentId,
+        error: input.documentDate ? DOCUMENT_DATE_MIGRATION : DOCUMENT_FOLDER_MIGRATION,
+      };
     }
     throw error;
   }
@@ -2355,18 +2385,30 @@ async function insertDocument(
     category: DocumentCategory;
     visibility: "residents" | "board";
     folder: string;
+    documentDate: string;
   },
 ): Promise<void> {
   try {
+    await ensureDocumentColumns(c.env.DB);
     await c.env.DB
       .prepare(
-        `INSERT INTO documents (id, association_id, category, title, visibility, current_version_id, folder, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO documents (id, association_id, category, title, visibility, current_version_id, folder, document_date, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(input.documentId, input.associationId, input.category, input.title, input.visibility, input.versionId, input.folder, input.now)
+      .bind(
+        input.documentId,
+        input.associationId,
+        input.category,
+        input.title,
+        input.visibility,
+        input.versionId,
+        input.folder,
+        input.documentDate,
+        input.now,
+      )
       .run();
   } catch (error) {
-    if (isMissingColumn(error) && input.folder === "" && isLegacyDocumentCategory(input.category)) {
+    if (isMissingColumn(error) && input.folder === "" && input.documentDate === "" && isLegacyDocumentCategory(input.category)) {
       await c.env.DB
         .prepare(
           `INSERT INTO documents (id, association_id, category, title, visibility, current_version_id, created_at)

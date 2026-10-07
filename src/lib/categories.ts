@@ -1,3 +1,4 @@
+import { isIsoDate } from "./dates";
 import type { DocumentCategory } from "../types";
 
 export const DOCUMENT_CATEGORIES: readonly { id: DocumentCategory; label: string }[] = [
@@ -25,6 +26,37 @@ const LEGACY_DOCUMENT_CATEGORIES = new Set<string>([
 ]);
 
 const FOLDER_SEGMENT = /^[A-Za-z0-9](?:[A-Za-z0-9 .'_-]{0,38}[A-Za-z0-9])?$/;
+
+/** Categories that file a dated document under that year. Others stay flat. */
+const YEAR_FOLDER_CATEGORIES = new Set<string>(["minutes", "budgets", "insurance_docs"]);
+
+export function categoryUsesYearFolders(category: string): boolean {
+  return YEAR_FOLDER_CATEGORIES.has(category);
+}
+
+export function normalizeDocumentDate(raw: string): { ok: true; date: string } | { ok: false; error: string } {
+  const date = raw.trim();
+  if (!date) return { ok: true, date: "" };
+  if (!isIsoDate(date)) return { ok: false, error: "Enter a valid date, or leave it blank." };
+  return { ok: true, date };
+}
+
+/**
+ * Meeting Minutes, Budgets, and Insurance use the document date's year as the folder.
+ * A typed subfolder such as January stays under that year. Other categories keep the typed folder.
+ */
+export function placeDocumentFolder(category: string, folder: string, documentDate: string): string {
+  if (!categoryUsesYearFolders(category) || !isIsoDate(documentDate)) return folder;
+  const year = documentDate.slice(0, 4);
+  if (!folder) return year;
+  const parts = folder.split("/");
+  if (parts[0] === year) return folder;
+  if (/^\d{4}$/.test(parts[0] ?? "")) {
+    parts[0] = year;
+    return parts.join("/");
+  }
+  return `${year}/${folder}`;
+}
 
 export function categoryLabel(category: string): string {
   return DOCUMENT_CATEGORIES.find((item) => item.id === category)?.label ?? category;

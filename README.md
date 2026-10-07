@@ -12,15 +12,15 @@ This is the Phase 0 foundation and Phase 1 scaffold: magic-link sign-in, a D1 da
 
 - Magic-link email login. No passwords.
 - Homeowner dashboard: balance, upcoming assessments, invoices, recorded payments, late fees, and personal notices.
-- Documents in eight categories, with versions. Residents see the version the board marks current. Budgets can be board-only.
-- News, emergency notices, meetings, calendar, FAQs, and board contacts.
+- Documents in eight categories, with versions. Residents see the version the board marks current. Budgets can be board-only. Publishing a file can email a short portal link when Email owners is checked. Board-only files go only to board logins, and the email does not include the file.
+- News, emergency notices, meetings, calendar, FAQs, and board contacts. Posting or saving an announcement or event can email active logins the same way. FAQ and contacts do not.
 - Private resident-to-board messages, plus portal notifications.
 - Board tools: owners and lots, delinquent accounts, homeowner and board roles with an admin flag, login email edits, CSV import, invoices, annual dues, recorded payments, news editing, documents (visibility and delete), an accountant CSV, join requests, incoming messages, and an activity log.
 - Public home with resident login and request access.
 
 ## Not in this phase
 
-Moderated forum, online card or ACH payments, ARC requests, SMS, an AI covenant assistant, and email blasts. A board officer can email one owner a balance reminder. That is a single message, not a blast. The request to join form stores a note for the board. It does not create a login until a board member approves it.
+Moderated forum, online card or ACH payments, ARC requests, SMS, and an AI covenant assistant. A board officer can email one owner a balance reminder. Email owners on an announcement, event, or document starts unchecked, so a save does not email anyone unless the board checks it. The request to join form stores a note for the board. It does not create a login until a board member approves it.
 
 ## Stack
 

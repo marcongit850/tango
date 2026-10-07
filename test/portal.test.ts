@@ -1,8 +1,10 @@
+import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { canViewPropertyFinancials, isAdmin, keepsAnAdmin, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
 import { annualDues, defaultDuesYear, lotsToInvoice } from "../src/lib/dues";
 import { landingAccount, loggedOutNav } from "../src/views/layout";
-import { documentDetailPage, newsAdminPage, ownerDetailPage } from "../src/views/admin";
+import { documentDetailPage, documentsAdminPage, newsAdminPage, ownerDetailPage } from "../src/views/admin";
 import { newsEdit } from "../src/routes/admin";
 import type { AnnouncementRow, DocumentRow, EventRow, VersionRow } from "../src/db";
 import { documentContentDisposition, isBrowserViewable } from "../src/lib/files";
@@ -14,6 +16,8 @@ import { parseCsv, parseOwnersCsv } from "../src/lib/csv";
 import { isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../src/lib/dates";
 import { balanceCents, csvText, formatMoney, invoiceStatus, isDelinquent, parseMoneyToCents } from "../src/lib/money";
 import { sha256Hex } from "../src/lib/tokens";
+import { deliverOwnerEmails, loginAudienceForVisibility, ownerEmailFlash, ownerNoticeEmail, uniqueLoginEmails } from "../src/lib/email";
+import { activeLoginEmails } from "../src/db";
 
 describe("money", () => {
   it("parses dollar amounts from a spreadsheet", () => {
@@ -392,6 +396,10 @@ describe("news admin", () => {
     expect(html).toContain("Save announcement");
     expect(html).toContain("Cancel");
     expect(html).toContain(">Post<");
+    expect(formByAction(html, "/a/tango-mar/admin/announcements/ann-1")).toContain(
+      '<input type="checkbox" name="email_owners" value="1"> Email owners',
+    );
+    expect(formByAction(html, "/a/tango-mar/admin/announcements/ann-1")).not.toMatch(/name="email_owners"[^>]*checked/);
   });
 
   it("matches the edit query to the saved row", () => {
@@ -515,6 +523,289 @@ describe("document viewing", () => {
     );
   });
 });
+
+describe("email owners", () => {
+  const association: Association = {
+    id: "assoc_tango_mar",
+    slug: "tango-mar",
+    name: "Tango Mar",
+    legal_name: "Tango Mar Property Owners Association",
+    address_line1: "31 Tang O Mar Drive",
+    city: "Miramar Beach",
+    state: "FL",
+    postal_code: "32550",
+    county: "Walton County",
+    timezone: "America/Chicago",
+  };
+
+  it("leaves Email owners unchecked on announcement and event forms, and off FAQ and contacts", () => {
+    const html = newsAdminPage({
+      association,
+      announcements: [],
+      events: [],
+      faqs: [{ id: "faq-1", question: "Where is the gate?", answer: "North side.", sort_order: 1 }],
+      contacts: [{ id: "c-1", name: "Ada Board", role_title: "President", email: "ada@example.com", phone: "", sort_order: 1 }],
+      editing: { kind: "faq", row: { id: "faq-1", question: "Where is the gate?", answer: "North side.", sort_order: 1 } },
+    });
+    for (const action of ["/a/tango-mar/admin/announcements", "/a/tango-mar/admin/events"]) {
+      const form = formByAction(html, action);
+      expect(form).toContain('<input type="checkbox" name="email_owners" value="1"> Email owners');
+      expect(form).not.toMatch(/name="email_owners"[^>]*checked/);
+    }
+    expect(formByAction(html, "/a/tango-mar/admin/faqs/faq-1")).not.toContain("email_owners");
+    expect(formByAction(html, "/a/tango-mar/admin/faqs")).not.toContain("email_owners");
+    expect(formByAction(html, "/a/tango-mar/admin/contacts")).not.toContain("email_owners");
+    const eventEdit = newsAdminPage({
+      association,
+      announcements: [],
+      events: [
+        {
+          id: "ev-1",
+          title: "Board meeting",
+          description: "Agenda",
+          location: "Clubhouse",
+          starts_at: "2026-11-08T16:00:00.000Z",
+          ends_at: null,
+          kind: "meeting",
+        },
+      ],
+      faqs: [],
+      contacts: [],
+      editing: {
+        kind: "event",
+        row: {
+          id: "ev-1",
+          title: "Board meeting",
+          description: "Agenda",
+          location: "Clubhouse",
+          starts_at: "2026-11-08T16:00:00.000Z",
+          ends_at: null,
+          kind: "meeting",
+        },
+        startsLocal: "2026-11-08T10:00",
+        endsLocal: "",
+      },
+    });
+    const eventForm = formByAction(eventEdit, "/a/tango-mar/admin/events/ev-1");
+    expect(eventForm).toContain('<input type="checkbox" name="email_owners" value="1"> Email owners');
+    expect(eventForm).not.toMatch(/name="email_owners"[^>]*checked/);
+  });
+
+  it("puts an unchecked Email owners box on document publish and version upload", () => {
+    const list = documentsAdminPage(association, []);
+    const publish = formByAction(list, "/a/tango-mar/admin/documents");
+    expect(publish).toContain('<input type="checkbox" name="email_owners" value="1"> Email owners');
+    expect(publish).not.toMatch(/name="email_owners"[^>]*checked/);
+
+    const version: VersionRow = {
+      id: "ver-pdf",
+      document_id: "doc-pdf",
+      version_number: 1,
+      r2_key: "assoc/doc/v1-covenants.pdf",
+      filename: "covenants.pdf",
+      content_type: "application/pdf",
+      byte_size: 10,
+      notes: "",
+      created_at: "2026-10-01T15:00:00.000Z",
+    };
+    for (const visibility of ["residents", "board"] as const) {
+      const html = documentDetailPage(
+        association,
+        { id: "doc-pdf", title: "Covenants", category: "covenants", visibility, current_version_id: "ver-pdf" },
+        [version],
+      );
+      const form = formByAction(html, "/a/tango-mar/admin/documents/doc-pdf/versions");
+      expect(form).toContain('<input type="checkbox" name="email_owners" value="1"> Email owners');
+      expect(form).not.toMatch(/name="email_owners"[^>]*checked/);
+      expect(formByAction(html, "/a/tango-mar/admin/documents/doc-pdf/visibility")).not.toContain("email_owners");
+      expect(formByAction(html, "/a/tango-mar/admin/documents/doc-pdf/delete")).not.toContain("email_owners");
+    }
+  });
+
+  it("writes a short portal link and does not attach a file", () => {
+    const letter = ownerNoticeEmail({
+      associationName: "Tango Mar",
+      slug: "tango-mar",
+      kind: "announcement",
+      title: "Beach\ncleanup",
+      summary: "Bring bags.",
+      itemId: "ann-1",
+    });
+    expect(letter.subject).toBe("Tango Mar: Beach cleanup");
+    expect(letter.subject).not.toContain("\n");
+    expect(letter.text).toContain("Bring bags.");
+    expect(letter.href).toBe("https://mytangomar.com/a/tango-mar/news/ann-1");
+    expect(letter.text).toContain(letter.href);
+    expect(letter.text).not.toContain("\u2014");
+
+    expect(
+      ownerNoticeEmail({
+        associationName: "Tango Mar",
+        slug: "tango-mar",
+        kind: "event",
+        title: "Board meeting",
+        summary: "November 8 at the clubhouse",
+      }).href,
+    ).toBe("https://mytangomar.com/a/tango-mar/calendar");
+
+    const doc = ownerNoticeEmail({
+      associationName: "Tango Mar",
+      slug: "tango-mar",
+      kind: "document",
+      title: "Covenants",
+      summary: "Updated rules.",
+    });
+    expect(doc.href).toBe("https://mytangomar.com/a/tango-mar/documents");
+    expect(doc.text).not.toMatch(/attachment|r2_key/i);
+    expect(doc.text).not.toContain("\u2014");
+  });
+
+  it("keeps one email per person and sends board-only files only to the board", () => {
+    expect(loginAudienceForVisibility("board")).toBe("board");
+    expect(loginAudienceForVisibility("residents")).toBe("owners");
+    expect(
+      uniqueLoginEmails([
+        { id: "1", email: "Sam@example.com" },
+        { id: "2", email: "sam@example.com" },
+        { id: "3", email: "  " },
+        { id: "4", email: "ada@example.com" },
+      ]).map((row) => row.email),
+    ).toEqual(["Sam@example.com", "ada@example.com"]);
+  });
+
+  it("still saves when email is not configured, and reports a partial send", async () => {
+    expect(
+      ownerEmailFlash({
+        saved: "Announcement posted.",
+        audience: "owners",
+        recipients: 2,
+        delivery: { sent: 2, failed: 0, skipped: false },
+      }),
+    ).toMatchObject({ message: "Announcement posted. Emailed 2 owners.", tone: "ok", note: "Emailed 2 owners." });
+    expect(
+      ownerEmailFlash({
+        saved: "Document published.",
+        audience: "board",
+        recipients: 1,
+        delivery: { sent: 1, failed: 0, skipped: false },
+      }).message,
+    ).toBe("Document published. Emailed 1 board member.");
+    expect(
+      ownerEmailFlash({
+        saved: "Event added.",
+        audience: "owners",
+        recipients: 3,
+        delivery: { sent: 0, failed: 0, skipped: true },
+      }),
+    ).toMatchObject({ message: "Event added. Email was not sent.", tone: "warn" });
+    expect(
+      ownerEmailFlash({
+        saved: "Announcement saved.",
+        audience: "owners",
+        recipients: 0,
+        delivery: { sent: 0, failed: 0, skipped: false },
+      }).message,
+    ).toBe("Announcement saved. No active logins to email.");
+
+    const bodies: { to: string[]; attachments?: unknown; html?: unknown; text: string }[] = [];
+    const delivery = await deliverOwnerEmails({
+      apiKey: "test-key",
+      from: "Tango Mar <donotreply@mytangomar.com>",
+      recipients: [{ email: "a@example.com" }, { email: "b@example.com" }],
+      subject: "Tango Mar: Covenants",
+      text: "Open documents\nhttps://mytangomar.com/a/tango-mar/documents",
+      fetchImpl: async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as { to: string[]; attachments?: unknown; html?: unknown; text: string };
+        bodies.push(body);
+        expect(body.attachments).toBeUndefined();
+        expect(body.html).toBeUndefined();
+        return new Response("no", { status: body.to[0] === "a@example.com" ? 200 : 500 });
+      },
+    });
+    expect(delivery).toEqual({ sent: 1, failed: 1, skipped: false });
+    expect(bodies.map((body) => body.to[0])).toEqual(["a@example.com", "b@example.com"]);
+    expect(
+      ownerEmailFlash({ saved: "Document published.", audience: "owners", recipients: 2, delivery }).message,
+    ).toBe("Document published. Emailed 1 of 2 owners.");
+
+    const skipped = await deliverOwnerEmails({
+      from: "Tango Mar <donotreply@mytangomar.com>",
+      recipients: [{ email: "a@example.com" }],
+      subject: "Hi",
+      text: "Hi",
+      fetchImpl: async () => {
+        throw new Error("should not send");
+      },
+    });
+    expect(skipped).toEqual({ sent: 0, failed: 0, skipped: true });
+  });
+
+  it("emails each active login once, and board-only files skip homeowners", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    sqlite.exec(readFileSync("migrations/0001_schema.sql", "utf8"));
+    sqlite.exec(readFileSync("migrations/0002_seed_tango_mar.sql", "utf8"));
+    sqlite.exec(`
+      INSERT INTO properties (id, association_id, lot_number, street_address, status, created_at)
+      VALUES ('prop_sam_2', 'assoc_tango_mar', '15', 'Lot 15', 'active', '2026-10-02T00:00:00Z');
+      INSERT INTO property_owners (id, association_id, property_id, user_id, is_primary, created_at)
+      VALUES ('own_sam_2', 'assoc_tango_mar', 'prop_sam_2', 'user_sam', 0, '2026-10-02T00:00:00Z');
+      INSERT INTO users (id, email, name, created_at) VALUES
+        ('user_board', 'ada.board@example.com', 'Ada Board', '2026-10-02T00:00:00Z'),
+        ('user_inactive', 'old.owner@example.com', 'Old Owner', '2026-10-02T00:00:00Z'),
+        ('user_invited', 'new.owner@example.com', 'New Owner', '2026-10-02T00:00:00Z'),
+        ('user_blank', '', 'No Email', '2026-10-02T00:00:00Z');
+      INSERT INTO memberships (id, association_id, user_id, role_id, status, created_at) VALUES
+        ('mem_board', 'assoc_tango_mar', 'user_board', 'board', 'active', '2026-10-02T00:00:00Z'),
+        ('mem_inactive', 'assoc_tango_mar', 'user_inactive', 'homeowner', 'inactive', '2026-10-02T00:00:00Z'),
+        ('mem_invited', 'assoc_tango_mar', 'user_invited', 'homeowner', 'invited', '2026-10-02T00:00:00Z'),
+        ('mem_blank', 'assoc_tango_mar', 'user_blank', 'homeowner', 'active', '2026-10-02T00:00:00Z');
+    `);
+    const db = new SqliteD1(sqlite);
+    const owners = uniqueLoginEmails(await activeLoginEmails(db as unknown as D1Database, "assoc_tango_mar", "owners"));
+    expect(owners.map((row) => row.email)).toEqual([
+      "ada.board@example.com",
+      "casey.nguyen@example.com",
+      "jordan.lee@example.com",
+      "sam.rivera@example.com",
+    ]);
+    const board = uniqueLoginEmails(await activeLoginEmails(db as unknown as D1Database, "assoc_tango_mar", "board"));
+    expect(board.map((row) => row.email)).toEqual(["ada.board@example.com", "jordan.lee@example.com"]);
+    sqlite.close();
+  });
+});
+
+class SqliteStatement {
+  constructor(
+    private readonly sqlite: DatabaseSync,
+    private readonly sql: string,
+    private readonly params: unknown[] = [],
+  ) {}
+
+  bind(...values: unknown[]): SqliteStatement {
+    return new SqliteStatement(this.sqlite, this.sql, values);
+  }
+
+  async all<T>(): Promise<{ results: T[] }> {
+    const rows = this.sqlite.prepare(this.sql).all(...(this.params as (string | number | null | bigint)[]));
+    return { results: rows as T[] };
+  }
+}
+
+class SqliteD1 {
+  constructor(private readonly sqlite: DatabaseSync) {}
+
+  prepare(query: string): SqliteStatement {
+    return new SqliteStatement(this.sqlite, query);
+  }
+}
+
+function formByAction(html: string, action: string): string {
+  const marker = `action="${action}"`;
+  const start = html.indexOf(marker);
+  expect(start).toBeGreaterThan(-1);
+  const end = html.indexOf("</form>", start);
+  return html.slice(start, end);
+}
 
 describe("tokens", () => {
   it("hashes a magic link token with sha-256", async () => {

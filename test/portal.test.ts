@@ -6,15 +6,15 @@ import { annualDues, defaultDuesYear, lotsToInvoice } from "../src/lib/dues";
 import { landingAccount, loggedOutNav, render } from "../src/views/layout";
 import { documentDetailPage, documentsAdminPage, newsAdminPage, ownerDetailPage } from "../src/views/admin";
 import { newsEdit } from "../src/routes/admin";
-import type { AnnouncementRow, DocumentRow, EventRow, VersionRow } from "../src/db";
+import type { AnnouncementRow, DocumentRow, EventRow, NoticeRow, VersionRow } from "../src/db";
 import { documentContentDisposition, isBrowserViewable } from "../src/lib/files";
-import { documentsPage, faqPage } from "../src/views/resident";
+import { dashboardPage, documentsPage, faqPage, noticesPage } from "../src/views/resident";
 import { checkEmailPage, homePage, invalidLinkPage, joinReceivedPage, joinRequestPage, loginPage } from "../src/views/public";
 import type { OwnerListRow } from "../src/db";
 import type { AppBindings, Association, Membership, User } from "../src/types";
 import type { Context } from "hono";
 import { parseCsv, parseOwnersCsv } from "../src/lib/csv";
-import { isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../src/lib/dates";
+import { formatDateTime, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../src/lib/dates";
 import { balanceCents, csvText, formatMoney, invoiceStatus, isDelinquent, parseMoneyToCents } from "../src/lib/money";
 import { sha256Hex } from "../src/lib/tokens";
 import { deliverOwnerEmails, fileToResendAttachment, loginAudienceForVisibility, ownerEmailFlash, ownerNoticeEmail, uniqueLoginEmails } from "../src/lib/email";
@@ -539,6 +539,72 @@ describe("resident FAQ", () => {
     expect(html).not.toContain("<h2>Where is the gate?</h2>");
     expect(html).not.toContain("\u2014");
     expect(faqPage([])).toContain("No questions yet.");
+  });
+});
+
+describe("personal notices", () => {
+  const association: Association = {
+    id: "assoc_tango_mar",
+    slug: "tango-mar",
+    name: "Tango Mar",
+    legal_name: "Tango Mar Property Owners Association",
+    address_line1: "31 Tang O Mar Drive",
+    city: "Miramar Beach",
+    state: "FL",
+    postal_code: "32550",
+    county: "Walton County",
+    timezone: "America/Chicago",
+  };
+
+  const createdAt = "2026-10-06T17:30:00.000Z";
+  const readAt = "2026-10-06T20:15:00.000Z";
+
+  const notice = (overrides: Partial<NoticeRow> = {}): NoticeRow => ({
+    id: "note-dues",
+    kind: "account",
+    title: "Dues reminder",
+    body: "Please mail a check.",
+    href: "/a/tango-mar/notices",
+    read_at: null,
+    created_at: createdAt,
+    ...overrides,
+  });
+
+  it("shows when each dashboard notice was created in the association timezone", () => {
+    const created = formatDateTime(createdAt, association.timezone);
+    expect(created).toBe("October 6, 2026 at 12:30 PM CDT");
+    const html = dashboardPage({
+      association,
+      name: "Jordan Lee",
+      ledger: [],
+      upcoming: [],
+      invoices: [],
+      payments: [],
+      notices: [notice(), notice({ id: "note-gate", title: "Gate code", body: "Changed Friday.", created_at: readAt })],
+      emergencies: [],
+    });
+    const opened = formatDateTime(readAt, association.timezone);
+    expect(html).toContain("<h2>Personal notices</h2>");
+    expect(html).toContain(
+      `<li><a href="/a/tango-mar/notices">Dues reminder</a> <span class="muted">${created}</span> <span class="muted">Please mail a check.</span> </li>`,
+    );
+    expect(html).toContain(
+      `<li><a href="/a/tango-mar/notices">Gate code</a> <span class="muted">${opened}</span> <span class="muted">Changed Friday.</span> </li>`,
+    );
+    expect(html).not.toContain(createdAt);
+  });
+
+  it("shows the opened time on the notices page when a notice has been marked read", () => {
+    const created = formatDateTime(createdAt, association.timezone);
+    const opened = formatDateTime(readAt, association.timezone);
+    expect(opened).toBe("October 6, 2026 at 3:15 PM CDT");
+    const html = noticesPage(association, [
+      notice({ read_at: readAt }),
+      notice({ id: "note-gate", title: "Gate code", body: "", read_at: null }),
+    ]);
+    expect(html).toContain(`<p class="muted">${created} · Opened ${opened}</p>`);
+    expect(html).toContain(`<p class="muted">${created} · Unread</p>`);
+    expect(html).not.toContain(">Read<");
   });
 });
 

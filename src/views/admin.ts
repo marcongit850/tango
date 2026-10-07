@@ -537,7 +537,7 @@ function announcementForm(base: string, association: Association, row: Announcem
         { value: "emergency", label: "Emergency" },
       ], row?.kind ?? "news")}
       ${textField("Title", "title", { value: row?.title ?? "", required: true })}
-      ${areaField("Body", "body", row?.body ?? "", true)}
+      ${areaField("Description", "body", row?.body ?? "", true)}
       <label><input type="checkbox" name="pinned" value="1" ${row?.pinned ? "checked" : ""}> Pin</label>
       ${textField("Expires", "expires_on", { type: "date", value: row?.expires_at ? zonedIsoDate(new Date(row.expires_at), association.timezone) : "" })}
       ${emailOwnersField()}

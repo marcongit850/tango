@@ -376,6 +376,9 @@ describe("news admin", () => {
     expect(html).not.toContain('type="checkbox" name="confirm"');
     expect(html).not.toContain('id="edit"');
     expect(html.indexOf(">Post<")).toBeGreaterThan(html.indexOf("Beach cleanup"));
+    expect(formByAction(html, "/a/tango-mar/admin/announcements")).toContain(
+      '<label>Description<textarea name="body" required></textarea></label>',
+    );
   });
 
   it("opens the matching edit form at the top with the saved values", () => {
@@ -392,6 +395,9 @@ describe("news admin", () => {
     expect(html).toContain("Edit announcement");
     expect(html).toContain('value="Beach cleanup"');
     expect(html).toContain(">Bring bags.</textarea>");
+    expect(formByAction(html, "/a/tango-mar/admin/announcements/ann-1")).toContain(
+      '<label>Description<textarea name="body" required>Bring bags.</textarea></label>',
+    );
     expect(html).toContain('action="/a/tango-mar/admin/announcements/ann-1"');
     expect(html).toContain("Save announcement");
     expect(html).toContain("Cancel");

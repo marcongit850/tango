@@ -243,13 +243,14 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
 body:has(.dash) {
   background-color: #f4efe6;
   background-image:
-    linear-gradient(180deg, rgba(244, 239, 230, 0.94) 0%, rgba(226, 241, 238, 0.88) 42%, rgba(244, 239, 230, 0.92) 100%),
+    linear-gradient(180deg, rgba(244, 239, 230, 0.9) 0%, rgba(244, 239, 230, 0.62) 22%, rgba(226, 241, 238, 0.72) 100%),
     url("/tango-mar-boardwalk.png");
   background-repeat: no-repeat;
   background-size: cover;
-  background-position: center top;
+  background-position: center 30%;
   background-attachment: fixed;
 }
+body:has(.dash) .site-header { background: rgba(255, 253, 248, 0.92); }
 .kicker {
   margin: 0 0 0.3rem;
   font-size: 0.72rem;

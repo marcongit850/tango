@@ -160,7 +160,7 @@ Run that file once. If the console says a column already exists, or `join_reques
 After it succeeds, use the portal:
 
 - Admin, Owners and lots: edit a lot, set improved or unimproved, and assign the primary owner. Open a person to change the login email. That keeps the same user and the lots already linked to them, and it is refused when another person already uses that email. CSV import remains the bulk path.
-- Admin, Ledger, Annual dues: add a year (this creates both amounts), then **Assign to matching lots**. That writes the invoices Upcoming assessments uses. Changing an amount later does not rewrite invoices already assigned.
+- Admin, Ledger, Annual dues: add a year (this creates both amounts), then check **Assign this assessment to matching lots** and choose **Assign to matching lots**. That writes the invoices Upcoming assessments uses. Changing an amount later does not rewrite invoices already assigned.
 - Admin, Messages: incoming from owners.
 - The activity page is the old audit log. The database table is still `audit_log`.
 

@@ -565,6 +565,9 @@ export type AssessmentRow = {
 // A lot with no type (NULL or blank) has not been marked improved or
 // unimproved, so that owner still sees both annual rows. An owner with no
 // linked lot sees nothing. Invoice assignment still follows assessment lot type.
+// invoice_count is live invoices only (issued_on on or before today). An early
+// Assign row dated on a future open date does not count, so the dashboard can
+// stay Scheduled until that date.
 const UPCOMING_WHEN_SQL = `
   AND (
     a.due_on > ?
@@ -599,12 +602,12 @@ export async function upcomingAssessments(
                 (SELECT COUNT(*) FROM invoices i
                  JOIN property_owners po ON po.property_id = i.property_id AND po.association_id = i.association_id
                  WHERE i.assessment_id = a.id AND i.association_id = a.association_id
-                   AND po.user_id = ? AND i.status != 'void') AS invoice_count
+                   AND po.user_id = ? AND i.status != 'void' AND i.issued_on <= ?) AS invoice_count
          FROM assessments a
          WHERE a.association_id = ? AND a.due_on > ?
          ORDER BY a.due_on`,
       )
-      .bind(userId, associationId, today)
+      .bind(userId, today, associationId, today)
       .all<AssessmentRow>();
     return results;
   }
@@ -614,12 +617,12 @@ export async function upcomingAssessments(
               (SELECT COUNT(*) FROM invoices i
                JOIN property_owners po ON po.property_id = i.property_id AND po.association_id = i.association_id
                WHERE i.assessment_id = a.id AND i.association_id = a.association_id
-                 AND po.user_id = ? AND i.status != 'void') AS invoice_count
+                 AND po.user_id = ? AND i.status != 'void' AND i.issued_on <= ?) AS invoice_count
        FROM assessments a
        WHERE a.association_id = ?${UPCOMING_WHEN_SQL}${UPCOMING_LOT_SQL}
        ORDER BY a.due_on, a.lot_type`,
     )
-    .bind(userId, associationId, today, today, userId, associationId)
+    .bind(userId, today, associationId, today, today, userId, associationId)
     .all<AssessmentRow>();
   return results;
 }

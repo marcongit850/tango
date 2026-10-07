@@ -363,9 +363,104 @@ describe("upcoming assessments", () => {
       )
       .run();
 
+    const beforeOpen = await upcomingAssessments(db, "assoc_tango_mar", "user_marc", today);
+    expect(beforeOpen).toHaveLength(1);
+    expect(beforeOpen[0]?.invoice_count).toBe(0);
+
+    const opened = await upcomingAssessments(db, "assoc_tango_mar", "user_marc", "2027-01-01");
+    expect(opened).toHaveLength(1);
+    expect(opened[0]?.invoice_count).toBe(1);
+    sqlite.close();
+  });
+
+  it("ignores an invoice whose issued date is still ahead, even after the assessment has opened", async () => {
+    const { sqlite, db } = openTypedLots();
+    addLot(sqlite, { id: "prop_marc", ownerId: "user_marc", lotType: "improved", lotNumber: "14" });
+    addAssessment(sqlite, {
+      id: "dues_future_issue",
+      name: "2027 annual assessment (improved lots)",
+      dueOn: "2027-03-01",
+      opensOn: "2026-01-01",
+      lotType: "improved",
+    });
+    sqlite
+      .prepare(
+        `INSERT INTO invoices (
+           id, association_id, property_id, assessment_id, invoice_number, amount_cents, issued_on, due_on, status
+         ) VALUES (
+           'inv_future', 'assoc_tango_mar', 'prop_marc', 'dues_future_issue', 'DUES-14', 62500, '2027-06-01', '2027-03-01', 'open'
+         )`,
+      )
+      .run();
+
     const rows = await upcomingAssessments(db, "assoc_tango_mar", "user_marc", today);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.invoice_count).toBe(1);
+    expect(rows[0]?.invoice_count).toBe(0);
+    const html = dashboardPage({
+      association,
+      name: "Marc",
+      ledger: [],
+      upcoming: rows,
+      invoices: [],
+      payments: [],
+      notices: [],
+      emergencies: [],
+      today,
+    });
+    expect(html).toContain("Scheduled");
+    expect(html).not.toContain("Invoiced");
+    sqlite.close();
+  });
+
+  it("shows Scheduled until the open date, then Invoiced only for live invoices", async () => {
+    const { sqlite, db } = openTypedLots();
+    addLot(sqlite, { id: "prop_marc", ownerId: "user_marc", lotType: "improved", lotNumber: "14" });
+    addAssessment(sqlite, {
+      id: "dues_2027_improved",
+      name: "2027 annual assessment (improved lots)",
+      dueOn: "2027-03-01",
+      opensOn: "2027-01-01",
+      lotType: "improved",
+    });
+
+    const render = async (today: string) => {
+      const rows = await upcomingAssessments(db, "assoc_tango_mar", "user_marc", today);
+      return dashboardPage({
+        association,
+        name: "Marc",
+        ledger: [],
+        upcoming: rows,
+        invoices: [],
+        payments: [],
+        notices: [],
+        emergencies: [],
+        today,
+      });
+    };
+
+    const unassigned = await render("2027-01-01");
+    expect(unassigned).toContain("Scheduled");
+    expect(unassigned).not.toContain("Invoiced");
+
+    sqlite
+      .prepare(
+        `INSERT INTO invoices (
+           id, association_id, property_id, assessment_id, invoice_number, amount_cents, issued_on, due_on, status
+         ) VALUES (
+           'inv_marc', 'assoc_tango_mar', 'prop_marc', 'dues_2027_improved', 'DUES-14', 62500, '2027-01-01', '2027-03-01', 'open'
+         )`,
+      )
+      .run();
+
+    const early = await render("2026-12-31");
+    expect(early).toContain("Opens January 1, 2027. Due March 1, 2027. Not due yet.");
+    expect(early).toContain("$625.00");
+    expect(early).toContain("Scheduled");
+    expect(early).not.toContain("Invoiced");
+
+    const opened = await render("2027-01-01");
+    expect(opened).toContain("Opens January 1, 2027. Due March 1, 2027. Not due yet.");
+    expect(opened).toContain("Invoiced");
+    expect(opened).not.toContain("Scheduled");
     sqlite.close();
   });
 });
@@ -461,7 +556,9 @@ describe("assigning a future assessment", () => {
 
     const upcoming = await upcomingAssessments(db, "assoc_tango_mar", "user_sam", "2026-10-07");
     const improved = upcoming.find((row) => row.id === "assessment_2027_improved");
-    expect(improved).toMatchObject({ invoice_count: 1, due_on: "2027-03-01", opens_on: "2027-01-01" });
+    expect(improved).toMatchObject({ invoice_count: 0, due_on: "2027-03-01", opens_on: "2027-01-01" });
+    const live = await upcomingAssessments(db, "assoc_tango_mar", "user_sam", "2027-01-01");
+    expect(live.find((row) => row.id === "assessment_2027_improved")).toMatchObject({ invoice_count: 1 });
     expect(upcoming.some((row) => row.id === "assessment_2027_unimproved")).toBe(false);
     expect(upcoming.some((row) => row.due_on < "2026-10-07")).toBe(false);
     expect(upcoming.some((row) => row.due_on === "2026-10-07")).toBe(false);
@@ -480,37 +577,63 @@ describe("assigning a future assessment", () => {
   });
 });
 
+function upcomingDashboard(today: string, invoiceCount: number): string {
+  return dashboardPage({
+    association,
+    name: "Marc",
+    ledger: [],
+    upcoming: [
+      {
+        id: "assessment_2027_improved",
+        name: "2027 annual assessment (improved lots)",
+        description: "",
+        amount_cents: 62500,
+        due_on: "2027-03-01",
+        opens_on: "2027-01-01",
+        lot_type: "improved",
+        invoice_count: invoiceCount,
+      },
+    ],
+    invoices: [],
+    payments: [],
+    notices: [],
+    emergencies: [],
+    today,
+  });
+}
+
 describe("upcoming assessment copy", () => {
-  it("labels a future invoiced assessment as scheduled dates, not past due", () => {
-    const html = dashboardPage({
-      association,
-      name: "Marc",
-      ledger: [],
-      upcoming: [
-        {
-          id: "assessment_2027_improved",
-          name: "2027 annual assessment (improved lots)",
-          description: "",
-          amount_cents: 62500,
-          due_on: "2027-03-01",
-          opens_on: "2027-01-01",
-          lot_type: "improved",
-          invoice_count: 1,
-        },
-      ],
-      invoices: [],
-      payments: [],
-      notices: [],
-      emergencies: [],
-      today: "2026-10-07",
-    });
+  it("stays Scheduled before the open date even when invoice rows exist", () => {
+    const html = upcomingDashboard("2026-10-07", 1);
     expect(html).toContain("2027 annual assessment (improved lots)");
     expect(html).toContain("Opens January 1, 2027. Due March 1, 2027. Not due yet.");
-    expect(html).toContain("Invoiced");
+    expect(html).toContain("Scheduled");
+    expect(html).not.toContain("Invoiced");
     expect(html).toContain('<span class="money">$625.00</span>');
     expect(html).not.toContain("money owe");
     expect(html).not.toContain("Past due");
+  });
 
+  it("says Invoiced on and after the open date when invoices are live", () => {
+    for (const today of ["2027-01-01", "2027-02-15"]) {
+      const html = upcomingDashboard(today, 1);
+      expect(html).toContain("Opens January 1, 2027. Due March 1, 2027. Not due yet.");
+      expect(html).toContain("Invoiced");
+      expect(html).not.toContain("Scheduled");
+      expect(html).toContain('<span class="money">$625.00</span>');
+    }
+  });
+
+  it("stays Scheduled when no invoices exist", () => {
+    for (const today of ["2026-10-07", "2027-01-01"]) {
+      const html = upcomingDashboard(today, 0);
+      expect(html).toContain("Opens January 1, 2027. Due March 1, 2027. Not due yet.");
+      expect(html).toContain("Scheduled");
+      expect(html).not.toContain("Invoiced");
+    }
+  });
+
+  it("labels a future assessment invoice as not owed yet", () => {
     const detail = invoiceDetailPage(
       association,
       {

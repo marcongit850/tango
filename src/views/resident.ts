@@ -29,6 +29,16 @@ function eventKindLabel(kind: string): string {
   return "Event";
 }
 
+// Invoiced only after the open date, and only for invoices that are already live.
+// invoice_count ignores future issued_on. A future opens_on stays Scheduled even
+// if a live invoice was written early.
+function upcomingStatusLabel(row: AssessmentRow, today: string): "Invoiced" | "Scheduled" {
+  const opensOn = row.opens_on ?? "";
+  const waitingToOpen = opensOn !== "" && (today === "" || opensOn > today);
+  if (waitingToOpen || row.invoice_count <= 0) return "Scheduled";
+  return "Invoiced";
+}
+
 export function dashboardPage(options: {
   association: Association;
   name: string;
@@ -80,7 +90,7 @@ export function dashboardPage(options: {
         </div>
         <div class="dues-amount">
           <p><span class="money">${esc(formatMoney(row.amount_cents))}</span></p>
-          <p class="muted">${row.invoice_count > 0 ? "Invoiced" : "Scheduled"}</p>
+          <p class="muted">${upcomingStatusLabel(row, today)}</p>
         </div>
       </li>`;
     })

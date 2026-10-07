@@ -192,7 +192,7 @@ export function documentsPage(association: Association, documents: DocumentRow[]
   </section>`;
 }
 
-export function newsPage(association: Association, items: AnnouncementRow[], meetings: EventRow[]): string {
+export function newsPage(association: Association, items: AnnouncementRow[]): string {
   const news = items
     .map(
       (item) => `<article class="card ${item.kind === "emergency" ? "emergency" : ""}">
@@ -202,12 +202,7 @@ export function newsPage(association: Association, items: AnnouncementRow[], mee
       </article>`,
     )
     .join("");
-  const meetingRows = meetings
-    .map(
-      (item) => `<li><strong>${esc(item.title)}</strong> — ${dateTimeCell(item.starts_at, association.timezone)}${item.location ? `, ${esc(item.location)}` : ""}</li>`,
-    )
-    .join("");
-  return `<section class="panel"><h1>Neighborhood news</h1>${meetingRows ? `<h2>Upcoming meetings</h2><ul>${meetingRows}</ul>` : ""}</section>
+  return `<section class="panel"><h1>Neighborhood news</h1></section>
     <section class="stack">${news || empty("No announcements.")}</section>`;
 }
 

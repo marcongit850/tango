@@ -137,13 +137,8 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
 
   app.get("/a/:slug/news", async (c) => {
     const { association } = requireMember(c);
-    const now = new Date().toISOString();
-    const [items, events] = await Promise.all([
-      visibleAnnouncements(c.env.DB, association.id, now),
-      listEvents(c.env.DB, association.id),
-    ]);
-    const meetings = events.filter((event) => event.kind === "meeting" && event.starts_at >= now);
-    return render(c, { title: "News", active: "news", body: newsPage(association, items, meetings) });
+    const items = await visibleAnnouncements(c.env.DB, association.id, new Date().toISOString());
+    return render(c, { title: "News", active: "news", body: newsPage(association, items) });
   });
 
   app.get("/a/:slug/news/:announcementId", async (c) => {

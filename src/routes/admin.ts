@@ -42,7 +42,7 @@ import {
   versionById,
   writeAudit,
 } from "../db";
-import { activeAdminContacts, keepsAnAdmin } from "../lib/access";
+import { activeAdminContacts, keepsAnAdmin, MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE, masterKeepsAdminWrites } from "../lib/access";
 import { changeLoginEmail } from "../lib/login-email";
 import { categoryLabel, isDocumentCategory, isLegacyDocumentCategory, normalizeFolder } from "../lib/categories";
 import { annualDues, defaultDuesYear, isLotType } from "../lib/dues";
@@ -202,6 +202,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     }
     const nextAdmin = fields.is_admin === "1";
     const currentlyAdmin = owner.is_admin === 1 && owner.status === "active";
+    if (!masterKeepsAdminWrites({ isMaster: owner.is_master === 1, nextIsAdmin: nextAdmin, nextStatus: status, nextRole: role })) {
+      return redirectTo(c, ownerPath(association.slug, owner.user_id), MASTER_ADMIN_EDIT_MESSAGE, "warn");
+    }
     if (!keepsAnAdmin({ activeAdminCount: await countActiveAdmins(c.env.DB, association.id), currentlyAdmin, nextAdmin: nextAdmin && status === "active" })) {
       return redirectTo(c, ownerPath(association.slug, owner.user_id), "Keep at least one person with edit access.", "warn");
     }
@@ -441,6 +444,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     if (!owner) throw new NotFoundError();
     const back = ownerPath(association.slug, owner.user_id);
     if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, back, "Confirm the delete first.", "warn");
+    if (owner.is_master === 1) return redirectTo(c, back, MASTER_ADMIN_DELETE_MESSAGE, "warn");
     const currentlyAdmin = owner.is_admin === 1 && owner.status === "active";
     if (
       !keepsAnAdmin({
@@ -452,6 +456,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       return redirectTo(c, back, "Keep at least one person with edit access.", "warn");
     }
     const removed = await deletePersonAccount(c.env.DB, association.id, owner.user_id);
+    if (removed === "master") return redirectTo(c, back, MASTER_ADMIN_DELETE_MESSAGE, "warn");
     if (removed === "missing") throw new NotFoundError();
     await writeAudit(c.env.DB, {
       associationId: association.id,

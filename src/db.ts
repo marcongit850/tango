@@ -994,7 +994,7 @@ export async function deletePersonAccount(
   db: D1Database,
   associationId: string,
   userId: string,
-): Promise<"removed" | "unlinked" | "missing"> {
+): Promise<"removed" | "unlinked" | "missing" | "master"> {
   const user = await db
     .prepare(
       `SELECT u.id, u.email
@@ -1005,6 +1005,13 @@ export async function deletePersonAccount(
     .bind(associationId, userId)
     .first<{ id: string; email: string }>();
   if (!user) return "missing";
+  if (await hasColumn(db, "memberships", "is_master")) {
+    const lock = await db
+      .prepare("SELECT is_master FROM memberships WHERE association_id = ? AND user_id = ?")
+      .bind(associationId, userId)
+      .first<{ is_master: number }>();
+    if (Number(lock?.is_master) === 1) return "master";
+  }
 
   const others = await db
     .prepare("SELECT COUNT(*) AS n FROM memberships WHERE user_id = ? AND association_id != ?")
@@ -1105,6 +1112,7 @@ export type OwnerListRow = {
   phone: string;
   role_id: MembershipRole;
   is_admin: number;
+  is_master: number;
   status: string;
   property_id: string | null;
   lot_number: string | null;
@@ -1113,10 +1121,12 @@ export type OwnerListRow = {
 
 export async function listOwners(db: D1Database, associationId: string): Promise<OwnerListRow[]> {
   const flagged = await hasColumn(db, "memberships", "is_admin");
+  const mastered = await hasColumn(db, "memberships", "is_master");
+  const masterSql = mastered ? "m.is_master" : "0 AS is_master";
   const { results } = await db
     .prepare(
       flagged
-        ? `SELECT u.id AS user_id, u.email, u.name, u.phone, m.role_id, m.is_admin, m.status,
+        ? `SELECT u.id AS user_id, u.email, u.name, u.phone, m.role_id, m.is_admin, ${masterSql}, m.status,
                   p.id AS property_id, p.lot_number, p.street_address
            FROM memberships m
            JOIN users u ON u.id = m.user_id
@@ -1126,7 +1136,7 @@ export async function listOwners(db: D1Database, associationId: string): Promise
            WHERE m.association_id = ?
            ORDER BY u.name`
         : `SELECT u.id AS user_id, u.email, u.name, u.phone, m.role_id,
-                  CASE WHEN m.role_id IN ('board', 'officer') THEN 1 ELSE 0 END AS is_admin, m.status,
+                  CASE WHEN m.role_id IN ('board', 'officer') THEN 1 ELSE 0 END AS is_admin, ${masterSql}, m.status,
                   p.id AS property_id, p.lot_number, p.street_address
            FROM memberships m
            JOIN users u ON u.id = m.user_id
@@ -1137,11 +1147,12 @@ export async function listOwners(db: D1Database, associationId: string): Promise
            ORDER BY u.name`,
     )
     .bind(associationId)
-    .all<Omit<OwnerListRow, "role_id"> & { role_id: string }>();
+    .all<Omit<OwnerListRow, "role_id" | "is_master"> & { role_id: string; is_master?: number | null }>();
   return results.map((row) => ({
     ...row,
     role_id: row.role_id === "officer" ? "board" : row.role_id === "board" ? "board" : "homeowner",
     is_admin: row.role_id === "officer" || Number(row.is_admin) === 1 ? 1 : 0,
+    is_master: Number(row.is_master) === 1 ? 1 : 0,
   }));
 }
 

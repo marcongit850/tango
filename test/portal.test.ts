@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { activeAdminContacts, canEditAdmin, canViewAdmin, canViewPropertyFinancials, isAdmin, keepsAnAdmin, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
+import { activeAdminContacts, canEditAdmin, canViewAdmin, canViewPropertyFinancials, isAdmin, keepsAnAdmin, masterKeepsAdminWrites, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
 import { annualDues, defaultDuesYear, lotsToInvoice } from "../src/lib/dues";
 import { landingAccount, loggedOutNav, render } from "../src/views/layout";
 import { adminHome, documentDetailPage, documentsAdminPage, importPage, ledgerPage, newsAdminPage, ownerDetailPage, paymentInvoiceVisible } from "../src/views/admin";
@@ -205,6 +205,17 @@ describe("access", () => {
     expect(keepsAnAdmin({ activeAdminCount: 1, currentlyAdmin: true, nextAdmin: false })).toBe(false);
     expect(keepsAnAdmin({ activeAdminCount: 2, currentlyAdmin: true, nextAdmin: false })).toBe(true);
     expect(keepsAnAdmin({ activeAdminCount: 1, currentlyAdmin: true, nextAdmin: true })).toBe(true);
+    expect(masterKeepsAdminWrites({ isMaster: false, nextIsAdmin: false, nextStatus: "inactive", nextRole: "homeowner" })).toBe(true);
+    expect(masterKeepsAdminWrites({ isMaster: true, nextIsAdmin: true, nextStatus: "active", nextRole: "board" })).toBe(true);
+    expect(masterKeepsAdminWrites({ isMaster: true, nextIsAdmin: true, nextStatus: "active", nextRole: "homeowner" })).toBe(true);
+    expect(masterKeepsAdminWrites({ isMaster: true, nextIsAdmin: false, nextStatus: "active", nextRole: "board" })).toBe(false);
+    expect(masterKeepsAdminWrites({ isMaster: true, nextIsAdmin: true, nextStatus: "inactive", nextRole: "board" })).toBe(false);
+    expect(masterKeepsAdminWrites({ isMaster: true, nextIsAdmin: true, nextStatus: "active", nextRole: "public" })).toBe(false);
+    expect(
+      activeAdminContacts([
+        { user_id: "user_marc", name: "Marc", email: "marc@whpinc.com", role_id: "board", is_admin: 1, is_master: 1, status: "active" },
+      ]),
+    ).toEqual([{ user_id: "user_marc", name: "Marc", email: "marc@whpinc.com", is_master: 1 }]);
   });
 
   it("shows magic links only for local development when email was not sent", () => {
@@ -420,6 +431,7 @@ describe("public home", () => {
       phone: "850-555-0102",
       role_id: "homeowner",
       is_admin: 0,
+      is_master: 0,
       status: "active",
       property_id: "prop_14",
       lot_number: "14",
@@ -1354,6 +1366,7 @@ describe("email owners", () => {
     phone: "",
     role_id: "homeowner",
     is_admin: 0,
+    is_master: 0,
     status: "active",
     property_id: "prop_14",
     lot_number: "14",

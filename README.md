@@ -257,11 +257,37 @@ Publishing Insurance, or saving a year or subfolder, before this runs asks you t
 
 Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0007` is already on the remote database.
 
+## Master admin (paste this before merge)
+
+`migrations/0009_master_admin.sql` marks one master admin on each association. Paste it in the Cloudflare dashboard before you merge the pull request. Marc does not need a terminal.
+
+What it does:
+
+- Adds `is_master` on `memberships`. The flag belongs to that person's membership in one association, so a later neighborhood can have its own master.
+- If `marc@whpinc.com` already has a membership, that membership is the master. Edit access is turned on, and the membership is set active so that login can sign in. The role stays as it is (homeowner or board).
+- If that login is not a member of an association, the earliest active person who already has edit access in that association becomes the master. On the demo roster that person is Jordan Lee (`jordan.lee@example.com`), because Marc is not in the seed. A live Tango Mar database that already has Marc uses Marc, not Jordan.
+- At most one master per association. Other people with edit access can still lose that access or be deleted. The portal still keeps at least one person with edit access.
+- The master cannot be deleted. Saving a role that would turn off edit access, or mark the master inactive, is refused.
+
+Dashboard steps:
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database**.
+2. Select the database named **tango**.
+3. Open **Console**.
+4. Paste the full contents of `migrations/0009_master_admin.sql`.
+5. Select **Execute**.
+
+Run that file once, after `0008`. If the console says a column already exists, this file was already applied.
+
+On the person page, the master row says Master admin. Edit access is checked and cannot be cleared, and Delete person is not offered. Until this file runs, delete and edit access behave as they do today.
+
+Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0008` is already on the remote database.
+
 ## Delete a person or a lot
 
-Board admins can remove a person or a lot. No extra database migration is required.
+Board admins can remove a person or a lot. Deleting a person does not need its own migration. The master admin lock is `migrations/0009_master_admin.sql`, described above.
 
-Open the person from Admin, Users, for example [https://mytangomar.com/a/tango-mar/admin/owners](https://mytangomar.com/a/tango-mar/admin/owners). Check **Delete this person**, then submit. That removes the login, sessions, magic links, membership, lot links, notices, and messages they sent. Lots and their invoices stay. The portal keeps at least one active admin. If that login is also a member of another association, only this association's membership is removed and the account stays.
+Open the person from Admin, Users, for example [https://mytangomar.com/a/tango-mar/admin/owners](https://mytangomar.com/a/tango-mar/admin/owners). Check **Delete this person**, then submit. That removes the login, sessions, magic links, membership, lot links, notices, and messages they sent. Lots and their invoices stay. The portal keeps at least one person with edit access. The master admin for this association cannot be deleted. If that login is also a member of another association, only this association's membership is removed and the account stays. A master in another association is a different membership, so removing someone here does not remove that other lock.
 
 Open a lot from the ledger, for example [https://mytangomar.com/a/tango-mar/admin/ledger](https://mytangomar.com/a/tango-mar/admin/ledger) and then the lot. Check **Delete this lot**, then submit. The lot and its owner links are removed when it has no invoices and no payments. A lot that still has either stays in place, and the page says to clear those first. Invoices on that page still open for edit, and a payment on an invoice is deleted from the invoice page first.
 
@@ -321,6 +347,7 @@ Preview URLs are public unless you put access control in front of them.
 | Homeowner | Their own lots, invoices, payments, and messages. Current resident documents. With edit access, they can also open admin tools and change them. |
 | Board member | Same resident access, plus board-only documents. Admin pages open view-only: Overview, ledgers, documents, and the other read pages. Create, edit, and delete stay off until edit access is checked. |
 | Edit access | Checkbox on the person page (`is_admin`). A homeowner or a board member with it can use the admin write tools. New people do not have it until it is checked. A board member without it can still view admin pages. A homeowner without it only sees their own lots. Keep at least one person with edit access. |
+| Master admin | One membership per association (`is_master`). That person keeps edit access and cannot be deleted. Other people with edit access stay removable. For Tango Mar this is `marc@whpinc.com` when that membership exists. |
 
 A board member's dashboard still shows only their own lots. Other residents' balances are on the admin ledger. View-only board members can open that ledger but cannot change it.
 
@@ -328,7 +355,7 @@ A board member's dashboard still shows only their own lots. Other residents' bal
 
 Migrations live in `migrations/`.
 
-- `associations`, `users`, `roles`, `memberships` (`is_admin` is edit access on a homeowner or a board member; a board member without it is view-only)
+- `associations`, `users`, `roles`, `memberships` (`is_admin` is edit access on a homeowner or a board member; a board member without it is view-only; `is_master` is the one locked master admin for that association)
 - `properties` (lots, with `lot_type` of `improved` or `unimproved`) and `property_owners`
 - `assessments` (`opens_on`, `lot_type`, amount, due date), `invoices`, `payments` (amounts in cents; payments are recorded, not charged online)
 - `documents` and `document_versions` (`current_version_id` is what residents see; `visibility` is `residents` or `board`)

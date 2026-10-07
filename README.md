@@ -166,7 +166,7 @@ Run that file once. If the console says a column already exists, or `join_reques
 After it succeeds, use the portal:
 
 - Admin, Owners and lots: edit a lot, set improved or unimproved, and assign the primary owner. Open a person to change the login email. That keeps the same user and the lots already linked to them, and it is refused when another person already uses that email. CSV import remains the bulk path.
-- Admin, Ledger, Annual dues: add a year (this creates both amounts), then check **Assign this assessment to matching lots** and choose **Assign to matching lots**. That writes the invoices Upcoming assessments uses. Changing an amount later does not rewrite invoices already assigned. Click a dollar amount under Assessments and balances to change one invoice.
+- Admin, Ledger, Annual dues: add a year (this creates both amounts). On the open date, matching lots are invoiced automatically. Check **Assign this assessment to matching lots** only when you want those invoices before the open date. That writes the invoices Upcoming assessments uses. Changing an amount later does not rewrite invoices already assigned. Click a dollar amount under Assessments and balances to change one invoice.
 - Admin, Ledger, Assessments and balances: click a dollar amount to open that lot's invoices, then edit or delete one. See [Edit an invoice](#edit-an-invoice). No new D1 SQL is required for that.
 - Admin, Messages: incoming from owners.
 - The activity page is the old audit log. The database table is still `audit_log`.
@@ -327,6 +327,25 @@ Leave `RESEND_API_KEY` empty to keep the on-screen link.
 
 Magic-link tokens and session tokens are stored as SHA-256 hashes. The cookie is `HttpOnly` and `SameSite=Lax`. `Secure` is set when the site is served over HTTPS. Links expire in 20 minutes and work once. Sessions last 30 days.
 
+## Automatic invoices on the open date
+
+No D1 migration. Marc does not paste SQL for this change.
+
+When an assessment has an open date, and that date is today in the association time zone (or any earlier date that is still not fully invoiced), the Worker creates one invoice for each active lot of that assessment's lot type. Improved assessments go only to improved lots. Unimproved assessments go only to unimproved lots. An assessment set to all lots goes to every active lot. Lots that already have an invoice for that assessment, including a voided one, are skipped. The invoice uses the open date as the issued date and the assessment due date as the due date, the same as **Assign to matching lots**. A future open date stays off the balance until that date. A blank open date is not automatic.
+
+The schedule is in `wrangler.jsonc`: `15 6 * * *`. That is 6:15 AM UTC, which is 12:15 AM Central Standard Time and 1:15 AM Central Daylight Time, so Tango Mar (`America/Chicago`) has already reached the open date. The next deploy with Wrangler installs this trigger and replaces any other cron triggers on the Worker. Adding a second schedule in the dashboard does not stick after the next `npx wrangler deploy`.
+
+After you deploy, confirm the trigger. This can take up to 15 minutes to show up.
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **Workers & Pages**.
+2. In **Overview**, select the Worker named **tango**.
+3. Open **Settings**.
+4. Open **Triggers**.
+5. Under **Cron Triggers**, confirm the schedule is `15 6 * * *`.
+6. If the list is empty, select **Add Cron Trigger**, enter `15 6 * * *`, and save. Do not add any other schedule.
+
+To see that it ran: on the same Worker, open **Settings**, then under **Trigger Events** select **View events**.
+
 ## Deploy
 
 ```bash
@@ -376,7 +395,7 @@ Balance = non-void invoice amounts + late fees − recorded payments.
 | --- | --- |
 | `npm run dev` | Local Worker with `APP_ENV=development` |
 | `npm run check` | Typecheck |
-| `npm test` | Unit tests for CSV parsing, money, access rules, Central Time, and join approval |
+| `npm test` | Unit tests for CSV parsing, money, access rules, Central Time, join approval, and automatic assessment invoices |
 | `npm run db:migrate:local` | Apply D1 migrations locally |
 | `npm run db:migrate:remote` | Apply D1 migrations to the bound remote database |
 | `npm run types` | Regenerate `worker-configuration.d.ts` after binding changes |
@@ -387,7 +406,7 @@ Balance = non-void invoice amounts + late fees − recorded payments.
 ```text
 migrations/          D1 schema and Tango Mar seed
 samples/             Example owner CSV
-src/index.ts         Worker entry
+src/index.ts         Worker entry, including the daily assessment invoice cron
 src/app.ts           Routes and session loading
 src/routes/          Public, auth, resident, and board handlers
 public/              Static files, including the Tango Mar header logo

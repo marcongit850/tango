@@ -12,7 +12,7 @@ import type {
   User,
 } from "./types";
 import type { LotType } from "./lib/dues";
-import { lotsToInvoice } from "./lib/dues";
+import { assessmentOpenForInvoicing, lotsToInvoice } from "./lib/dues";
 import { isForeignKey, isMissingColumn, isMissingTable } from "./lib/errors";
 import { balanceCents, invoiceStatus, isDelinquent } from "./lib/money";
 
@@ -1373,7 +1373,7 @@ export async function listAssessments(db: D1Database, associationId: string): Pr
 
 export async function assignAssessmentInvoices(
   db: D1Database,
-  input: { associationId: string; assessmentId: string; today: string },
+  input: { associationId: string; assessmentId: string; today: string; includeVoided?: boolean },
 ): Promise<{ created: number; already: number; name: string; issuedOn: string } | null> {
   const assessment = await db
     .prepare(
@@ -1384,10 +1384,13 @@ export async function assignAssessmentInvoices(
     .first<{ id: string; name: string; amount_cents: number; due_on: string; opens_on: string | null; lot_type: LotType | null }>();
   if (!assessment) return null;
   const lots = await listLots(db, input.associationId);
+  // A voided invoice is still an invoice. Manual assign can replace one. The daily
+  // job passes includeVoided so a void is not opened again the next morning.
+  const voidClause = input.includeVoided ? "" : " AND status != 'void'";
   const { results: existing } = await db
     .prepare(
       `SELECT property_id FROM invoices
-       WHERE association_id = ? AND assessment_id = ? AND status != 'void'`,
+       WHERE association_id = ? AND assessment_id = ?${voidClause}`,
     )
     .bind(input.associationId, assessment.id)
     .all<{ property_id: string }>();
@@ -1432,6 +1435,51 @@ export async function assignAssessmentInvoices(
     created += 1;
   }
   return { created, already: plan.already, name: assessment.name, issuedOn };
+}
+
+export type IssuedAssessmentInvoices = {
+  assessmentId: string;
+  name: string;
+  created: number;
+  already: number;
+  issuedOn: string;
+};
+
+/** Creates invoices for assessments whose open date is today or earlier and still have matching lots without an invoice. */
+export async function issueOpenAssessmentInvoices(
+  db: D1Database,
+  input: { associationId: string; today: string },
+): Promise<IssuedAssessmentInvoices[]> {
+  if (!(await duesColumnsReady(db))) return [];
+  const { results } = await db
+    .prepare(
+      `SELECT id, opens_on
+       FROM assessments
+       WHERE association_id = ? AND opens_on IS NOT NULL AND opens_on <= ?
+       ORDER BY opens_on, id`,
+    )
+    .bind(input.associationId, input.today)
+    .all<{ id: string; opens_on: string }>();
+
+  const issued: IssuedAssessmentInvoices[] = [];
+  for (const row of results) {
+    if (!assessmentOpenForInvoicing(row.opens_on, input.today)) continue;
+    const result = await assignAssessmentInvoices(db, {
+      associationId: input.associationId,
+      assessmentId: row.id,
+      today: input.today,
+      includeVoided: true,
+    });
+    if (!result) continue;
+    issued.push({
+      assessmentId: row.id,
+      name: result.name,
+      created: result.created,
+      already: result.already,
+      issuedOn: result.issuedOn,
+    });
+  }
+  return issued;
 }
 
 export type AssessmentDeleteResult =

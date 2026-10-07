@@ -22,6 +22,12 @@
     "APP_ENV": "production",
     "EMAIL_FROM": "Tango Mar <donotreply@mytangomar.com>"
   },
+  // Daily assessment invoices. 06:15 UTC is 12:15 AM Central Standard Time and 1:15 AM Central Daylight Time,
+  // so the open date has started in America/Chicago. The next run also catches a missed day.
+  // Deploy replaces dashboard cron triggers with this list. Confirm it under Settings, Triggers.
+  "triggers": {
+    "crons": ["15 6 * * *"]
+  },
   "d1_databases": [
     {
       "binding": "DB",

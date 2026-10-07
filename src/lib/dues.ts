@@ -1,3 +1,5 @@
+import { isIsoDate } from "./dates";
+
 export type LotType = "improved" | "unimproved";
 
 export const IMPROVED_DUES_CENTS = 62500;
@@ -52,6 +54,12 @@ export type AssignableLot = {
   status: string;
   lotType: LotType;
 };
+
+/** True when the open date is today or earlier, so matching lots should have invoices. */
+export function assessmentOpenForInvoicing(opensOn: string | null | undefined, today: string): boolean {
+  if (!opensOn || !isIsoDate(opensOn) || !isIsoDate(today)) return false;
+  return opensOn <= today;
+}
 
 export function lotsToInvoice(
   lots: readonly AssignableLot[],

@@ -73,7 +73,7 @@ describe("owner csv", () => {
     expect(parsed.rows[1]).toMatchObject({ role: "homeowner", isAdmin: null, startingBalanceCents: 0, balanceAsOf: "2026-10-06" });
   });
 
-  it("maps officer to board with admin and rejects admin on a homeowner", () => {
+  it("maps officer to board with admin and allows edit access on a homeowner", () => {
     const csv = [
       "email,name,lot_number,street_address,role,admin",
       "a@example.com,Jordan,3,Street,officer,",
@@ -81,11 +81,12 @@ describe("owner csv", () => {
       "c@example.com,Sam,5,Street,homeowner,yes",
     ].join("\n");
     const parsed = parseOwnersCsv(csv, { city: "Miramar Beach", state: "FL", postalCode: "32550", today: "2026-10-06" });
+    expect(parsed.errors).toEqual([]);
     expect(parsed.rows.map((row) => ({ email: row.email, role: row.role, isAdmin: row.isAdmin }))).toEqual([
       { email: "a@example.com", role: "board", isAdmin: true },
       { email: "b@example.com", role: "board", isAdmin: false },
+      { email: "c@example.com", role: "homeowner", isAdmin: true },
     ]);
-    expect(parsed.errors[0].message).toMatch(/Edit access is only for board members/);
   });
 
   it("reports a missing column and a bad role", () => {
@@ -159,12 +160,15 @@ describe("access", () => {
   it("hides another resident's ledger and shows it to an admin", () => {
     expect(canViewPropertyFinancials({ role_id: "homeowner", is_admin: 0 }, "user_sam", ["user_casey"])).toBe(false);
     expect(canViewPropertyFinancials({ role_id: "homeowner", is_admin: 0 }, "user_sam", ["user_sam"])).toBe(true);
+    expect(canViewPropertyFinancials({ role_id: "homeowner", is_admin: 1 }, "user_marc", ["user_sam"])).toBe(true);
     expect(canViewPropertyFinancials({ role_id: "board", is_admin: 1 }, "user_quinn", ["user_sam"])).toBe(true);
     expect(canViewPropertyFinancials({ role_id: "board", is_admin: 0 }, "user_quinn", [])).toBe(false);
     expect(canViewPropertyFinancials({ role_id: "board", is_admin: 0 }, "user_quinn", ["user_quinn"])).toBe(true);
     expect(canViewPropertyFinancials({ role_id: "officer" }, "user_jordan", [])).toBe(true);
     expect(canViewPropertyFinancials(null, "visitor", ["user_sam"])).toBe(false);
     expect(isAdmin({ role_id: "homeowner", is_admin: 0 })).toBe(false);
+    expect(isAdmin({ role_id: "homeowner", is_admin: 1, status: "active" })).toBe(true);
+    expect(isAdmin({ role_id: "homeowner", is_admin: 1, status: "inactive" })).toBe(false);
     expect(isAdmin({ role_id: "board", is_admin: 1 })).toBe(true);
     expect(isAdmin({ role_id: "board", is_admin: 0 })).toBe(false);
     expect(isAdmin({ role_id: "officer" })).toBe(true);
@@ -174,6 +178,8 @@ describe("access", () => {
     expect(canEditAdmin({ role_id: "board", is_admin: 0, status: "active" })).toBe(false);
     expect(canEditAdmin({ role_id: "board", is_admin: 1, status: "active" })).toBe(true);
     expect(canViewAdmin({ role_id: "homeowner", is_admin: 0, status: "active" })).toBe(false);
+    expect(canViewAdmin({ role_id: "homeowner", is_admin: 1, status: "active" })).toBe(true);
+    expect(canEditAdmin({ role_id: "homeowner", is_admin: 1, status: "active" })).toBe(true);
     expect(canViewAdmin({ role_id: "board", is_admin: 1, status: "inactive" })).toBe(false);
     expect(canEditAdmin({ role_id: "officer", status: "active" })).toBe(true);
     expect(
@@ -185,11 +191,14 @@ describe("access", () => {
         { user_id: "user_board", name: "Board Only", email: "board@example.com", role_id: "board", is_admin: 0, status: "active" },
         { user_id: "user_old", name: "Former Admin", email: "old@example.com", role_id: "board", is_admin: 1, status: "inactive" },
         { user_id: "user_text", name: "Text Flag", email: "text@example.com", role_id: "board", is_admin: "1", status: "active" },
+        { user_id: "user_owner", name: "Owner Admin", email: "owner@example.com", role_id: "homeowner", is_admin: 1, status: "active" },
+        { user_id: "user_plain", name: "Plain Owner", email: "plain@example.com", role_id: "homeowner", is_admin: 0, status: "active" },
         { user_id: "user_jordan", name: "Jordan Lee", email: "jordan.lee@example.com", role_id: "officer", status: "active" },
       ]),
     ).toEqual([
       { user_id: "user_marc", name: "Marc", email: "marc@whpinc.com" },
       { user_id: "user_text", name: "Text Flag", email: "text@example.com" },
+      { user_id: "user_owner", name: "Owner Admin", email: "owner@example.com" },
       { user_id: "user_jordan", name: "Jordan Lee", email: "jordan.lee@example.com" },
     ]);
     expect(keepsAnAdmin({ activeAdminCount: 1, currentlyAdmin: true, nextAdmin: false })).toBe(false);
@@ -223,6 +232,7 @@ describe("access", () => {
       INSERT INTO memberships (id, association_id, user_id, role_id, is_admin, status, created_at) VALUES
         ('mem_marc', 'assoc_tango_mar', 'user_marc', 'board', 1, 'active', '2026-10-02T00:00:00Z'),
         ('mem_quiet', 'assoc_tango_mar', 'user_quiet', 'board', 0, 'active', '2026-10-02T00:00:00Z');
+      UPDATE memberships SET is_admin = 1 WHERE user_id = 'user_sam';
       INSERT INTO properties (id, association_id, lot_number, street_address, status, created_at) VALUES
         ('prop_marc', 'assoc_tango_mar', '1', 'Lot 1', 'active', '2026-10-02T00:00:00Z'),
         ('prop_marc_2', 'assoc_tango_mar', '2', 'Lot 2', 'active', '2026-10-02T00:00:00Z');
@@ -234,7 +244,10 @@ describe("access", () => {
     expect(activeAdminContacts(owners)).toEqual([
       { user_id: "user_jordan", name: "Jordan Lee", email: "jordan.lee@example.com" },
       { user_id: "user_marc", name: "Marc", email: "marc@whpinc.com" },
+      { user_id: "user_sam", name: "Sam Rivera", email: "sam.rivera@example.com" },
     ]);
+    expect(owners.find((owner) => owner.user_id === "user_sam")).toMatchObject({ role_id: "homeowner", is_admin: 1 });
+    expect(owners.find((owner) => owner.user_id === "user_casey")).toMatchObject({ role_id: "homeowner", is_admin: 0 });
     sqlite.close();
   });
 
@@ -520,12 +533,16 @@ describe("signed-in header", () => {
     expect(account.indexOf(">Admin<")).toBeLessThan(account.indexOf("Marc"));
   });
 
-  it("shows Admin for view-only board members and hides it from homeowners", async () => {
+  it("shows Admin for view-only board members and for homeowners with edit access", async () => {
     const homeowner = await headerParts(membership("homeowner", 0));
     expect(homeowner.nav).not.toContain("Admin");
     expect(homeowner.account).not.toContain("Admin");
     expect(homeowner.account).toContain("Marc");
     expect(homeowner.account).toContain("Log out");
+
+    const ownerAdmin = await headerParts(membership("homeowner", 1));
+    expect(ownerAdmin.nav).not.toContain("Admin");
+    expect(ownerAdmin.account).toContain('class="account-admin" href="/a/tango-mar/admin">Admin</a>');
 
     const board = await headerParts(membership("board", 0));
     expect(board.nav).not.toContain("Admin");
@@ -710,7 +727,7 @@ describe("admin overview", () => {
       audit: [],
     });
     const blurb =
-      "Board members can view these tools. Edit access is required to create, edit, or delete. Homeowners only see their own lots. Keep at least one person with edit access.";
+      "Board members can view these tools. Edit access can be given to a homeowner or a board member. It is required to create, edit, or delete. A homeowner without edit access only sees their own lots. Keep at least one person with edit access.";
     expect(html).toContain("<h1>Board admin</h1>");
     expect(html).toContain("<h2>Access</h2>");
     expect(html).toContain(`<div class="access-explainer"><p>${blurb}</p><div class="access-selection-barrier" aria-hidden="true"><br></div></div>`);

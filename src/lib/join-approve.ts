@@ -30,9 +30,13 @@ export function planUserName(existingName: string | null | undefined, requestedN
 }
 
 export function planMembership(existing: MembershipSnapshot): { roleId: MembershipRole; isAdmin: 0 | 1 } {
-  if (existing && existing.status !== "inactive" && (existing.role_id === "board" || existing.role_id === "officer")) {
+  if (!existing || existing.status === "inactive") return { roleId: "homeowner", isAdmin: 0 };
+  if (existing.role_id === "board" || existing.role_id === "officer") {
     const isAdmin = existing.role_id === "officer" || Number(existing.is_admin) === 1 ? 1 : 0;
     return { roleId: "board", isAdmin };
+  }
+  if (existing.role_id === "homeowner" && Number(existing.is_admin) === 1) {
+    return { roleId: "homeowner", isAdmin: 1 };
   }
   return { roleId: "homeowner", isAdmin: 0 };
 }

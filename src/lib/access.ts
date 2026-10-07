@@ -9,16 +9,20 @@ export function isBoardMember(membership: AccessMembership): boolean {
   return membership.role_id === "board" || membership.role_id === "officer";
 }
 
-/** Admin tools. Officers are treated as admins until the role migration is applied. */
+/**
+ * Edit access (`is_admin`) on a homeowner or a board member.
+ * Officers are treated as admins until the role migration is applied.
+ */
 export function isAdmin(membership: AccessMembership): boolean {
-  if (!isBoardMember(membership) || !membership) return false;
+  if (!membership || membership.status === "inactive") return false;
   if (membership.role_id === "officer") return true;
+  if (membership.role_id !== "board" && membership.role_id !== "homeowner") return false;
   return Number(membership.is_admin) === 1;
 }
 
-/** Active board members can open admin read pages. They are view-only until edit access is on. */
+/** Board members can open admin read pages. A homeowner can open them only with edit access. */
 export function canViewAdmin(membership: AccessMembership): boolean {
-  return isBoardMember(membership);
+  return isBoardMember(membership) || isAdmin(membership);
 }
 
 /** Edit access: create, edit, and delete in admin tools. */
@@ -44,7 +48,7 @@ export function canViewPropertyFinancials(
 
 export type AdminContact = { user_id: string; name: string; email: string };
 
-/** Active board members with edit access, one row per person, in the given order. */
+/** Active people with edit access, one row per person, in the given order. */
 export function activeAdminContacts(
   people: (AdminContact & { role_id: string; is_admin?: number | boolean | string | null; status?: string | null })[],
 ): AdminContact[] {

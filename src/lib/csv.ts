@@ -129,10 +129,6 @@ export function parseOwnersCsv(
       errors.push({ line, message: "Admin must be yes or no." });
       continue;
     }
-    if (roleText === "homeowner" && adminFlag === true) {
-      errors.push({ line, message: "Edit access is only for board members." });
-      continue;
-    }
     const startingBalanceCents = parseMoneyToCents(balanceText);
     if (startingBalanceCents === null) {
       errors.push({ line, message: "Starting balance must be a dollar amount like 375.50." });

@@ -457,7 +457,7 @@ export function threadPage(
     })
     .join("");
   const intro = options.incoming
-    ? `<p class="muted">Incoming from owners. Board members can read these. Edit access is required to delete or mark reviewed.</p>`
+    ? `<p class="muted">Incoming from owners. Board members can read these. A homeowner or board member with edit access can delete or mark reviewed.</p>`
     : "";
   const threadDelete = options.allowThreadDelete
     ? `<div class="actions">${confirmDeleteButton(threadDeleteAction(association.slug, threadId, inbox), "Delete thread", "Delete this message thread")}</div>`

@@ -341,7 +341,32 @@ describe("public home", () => {
     expect(html).toContain('href="/join"');
     expect(html).toContain("Welcome to Tango Mar");
     expect(html).not.toContain("A private beach neighborhood in Miramar Beach, Walton County, Florida.");
+    expect(html).not.toContain("A beach neighborhood in Miramar Beach, Walton County, Florida.");
     expect(html).toContain("Your neighborhood portal for association information, documents, announcements, account details, and community resources.");
+    expect(html).toContain("Everything You Need, All in One Place");
+    expect(html).toContain(
+      "Whether you're looking for association documents, the latest neighborhood updates, account information, or a way to contact the association, the Tango Mar homeowner portal makes it easy to find what you need.",
+    );
+    expect(html).toContain("COMMUNITY UPDATES");
+    expect(html).toContain("Stay up to date on neighborhood announcements, meetings, projects, and important notices.");
+    expect(html).toContain('href="/a/tango-mar/news"');
+    expect(html).toContain("View Updates");
+    expect(html).toContain("DOCUMENTS &amp; FORMS");
+    expect(html).toContain("Access covenants, bylaws, association records, forms, meeting documents, and other homeowner resources.");
+    expect(html).toContain('href="/a/tango-mar/documents"');
+    expect(html).toContain("View Documents");
+    expect(html).toContain("YOUR ACCOUNT");
+    expect(html).toContain("View your property information, association account details, and available payment options.");
+    expect(html).toContain('href="/a/tango-mar/dashboard"');
+    expect(html).toContain("Manage Account");
+    expect(html).toContain("CONTACT THE ASSOCIATION");
+    expect(html).toContain("Have a question or need assistance? Send a request directly through your homeowner portal.");
+    expect(html).toContain('href="/a/tango-mar/messages"');
+    expect(html).toContain("Contact Us");
+    expect(html).toContain("Welcome Home");
+    expect(html).toContain("This website serves as the central online resource for Tango Mar property owners, providing convenient access to association information, community documents, neighborhood updates, and homeowner resources.");
+    expect(html).toContain('class="home-beach" src="/tango-mar-boardwalk.png"');
+    expect(html).not.toContain("\u2013");
     expect(html).toContain('src="/tango-mar-boardwalk.png"');
     expect(html).toContain('src="/tango-mar-mark.png"');
     expect(html).toContain('src="/welcome-intro.mp4"');

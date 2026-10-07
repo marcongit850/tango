@@ -192,6 +192,31 @@ Posting a notice with a file before this runs asks you to apply the file first. 
 
 Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0005` is already on the remote database.
 
+## Mark a message reviewed (paste this before merge)
+
+`migrations/0007_message_reviewed.sql` lets the board clear a thread from **Messages waiting on the board** without sending a reply. Paste it in the Cloudflare dashboard before you merge the pull request. Marc does not need a terminal.
+
+What it does:
+
+- Adds `reviewed_at` on `messages`. Existing rows start empty, so a thread whose latest message is from an owner still counts as waiting.
+- Mark reviewed stamps the latest message on that thread. The waiting count skips it.
+- A new message from the owner is a new row, so that thread counts as waiting again.
+- Opening a thread does not clear it. A board reply still clears it, because the latest message is then from the board.
+
+Dashboard steps:
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database**.
+2. Select the database named **tango**.
+3. Open **Console**.
+4. Paste the full contents of `migrations/0007_message_reviewed.sql`.
+5. Select **Execute**.
+
+Run that file once, after `0006`. If the console says a column already exists, this file was already applied.
+
+On Admin, Messages, **Mark reviewed** is on the thread and on the inbox row. Until this file runs, the waiting count still works and Mark reviewed asks you to apply it first.
+
+Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0006` is already on the remote database.
+
 ## Create the R2 bucket
 
 Document bytes live in R2. The database stores the version metadata and the object key.

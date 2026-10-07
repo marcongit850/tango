@@ -3,6 +3,7 @@ import { zonedIsoDate } from "../lib/dates";
 import { lotTypeLabel } from "../lib/dues";
 import { esc } from "../lib/html";
 import type { Association, DocumentCategory } from "../types";
+import { messageWaitingOnBoard, type MessageRow } from "../db";
 import type {
   AnnouncementRow,
   AssessmentAdminRow,
@@ -14,7 +15,6 @@ import type {
   FaqRow,
   JoinRequestRow,
   LotRow,
-  MessageRow,
   OwnerListRow,
   PropertyRow,
   VersionRow,
@@ -643,31 +643,62 @@ export function auditPage(association: Association, rows: AuditRow[]): string {
   return `${adminNav(association.slug, "audit")}<section class="panel"><h1>Activity</h1>${auditTable(association, rows)}</section>`;
 }
 
-export function adminMessagesPage(association: Association, threads: MessageRow[]): string {
+export function adminMessagesPage(association: Association, threads: MessageRow[], staffIds: readonly string[]): string {
+  const staff = new Set(staffIds);
+  const listPath = `/a/${association.slug}/admin/messages`;
   const rows = threads
     .map(
       (thread) => `<tr>
-        <td><a href="/a/${esc(association.slug)}/admin/messages/${esc(thread.thread_id)}">${esc(thread.subject)}</a></td>
+        <td><a href="${esc(listPath)}/${esc(thread.thread_id)}">${esc(thread.subject)}</a></td>
         <td>${esc(thread.from_name)}</td>
         <td>${thread.lot_number ? `Lot ${esc(thread.lot_number)}` : ""}</td>
         <td>${dateTimeCell(thread.created_at, association.timezone)}</td>
+        <td>${messageReviewCell(association.slug, thread, staff, listPath)}</td>
       </tr>`,
     )
     .join("");
   return `${adminNav(association.slug, "messages")}
     <section class="panel">
       <h1>Messages</h1>
-      <p class="muted">Incoming from owners. These notes are private to the board. Other owners cannot read them.</p>
-      ${rows ? `<table><thead><tr><th>Subject</th><th>Latest from</th><th>Lot</th><th>When</th></tr></thead><tbody>${rows}</tbody></table>` : empty("No incoming messages.")}
+      <p class="muted">Incoming from owners. These notes are private to the board. Other owners cannot read them. Mark reviewed clears a thread from Messages waiting on the board without sending a reply.</p>
+      ${rows ? `<table><thead><tr><th>Subject</th><th>Latest from</th><th>Lot</th><th>When</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No incoming messages.")}
     </section>`;
 }
 
-export function adminThreadPage(association: Association, subject: string, messages: MessageRow[]): string {
+export function adminThreadPage(
+  association: Association,
+  subject: string,
+  messages: MessageRow[],
+  staffIds: readonly string[],
+): string {
   const threadId = messages[0]?.thread_id ?? "";
-  return `${adminNav(association.slug, "messages")}${threadPage(association, subject, messages, {
+  const latest = messages.at(-1);
+  const threadPath = `/a/${association.slug}/admin/messages/${threadId}`;
+  const review = latest ? messageReviewNote(association.slug, latest, new Set(staffIds), threadPath) : "";
+  return `${adminNav(association.slug, "messages")}${review}${threadPage(association, subject, messages, {
     incoming: true,
-    next: `/a/${association.slug}/admin/messages/${threadId}`,
+    next: threadPath,
   })}`;
+}
+
+function messageReviewCell(slug: string, thread: MessageRow, staff: ReadonlySet<string>, next: string): string {
+  if (messageWaitingOnBoard(thread, staff)) return messageReviewForm(slug, thread.thread_id, next);
+  if (thread.reviewed_at) return "Reviewed";
+  return "";
+}
+
+function messageReviewNote(slug: string, latest: MessageRow, staff: ReadonlySet<string>, next: string): string {
+  if (messageWaitingOnBoard(latest, staff)) {
+    return `<section class="panel">${messageReviewForm(slug, latest.thread_id, next)}<p class="muted">This clears the thread from Messages waiting on the board. It does not send a reply. A new message from the owner puts it back.</p></section>`;
+  }
+  if (latest.reviewed_at) {
+    return `<section class="panel"><p class="muted">Reviewed. A new message from the owner puts this thread back on the waiting list.</p></section>`;
+  }
+  return "";
+}
+
+function messageReviewForm(slug: string, threadId: string, next: string): string {
+  return `<form method="post" action="/a/${esc(slug)}/admin/messages/${esc(threadId)}/reviewed"><input type="hidden" name="next" value="${esc(next)}"><button class="secondary" type="submit">Mark reviewed</button></form>`;
 }
 
 function duesSection(options: {

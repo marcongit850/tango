@@ -133,7 +133,7 @@ export function joinRequestPage(
 ): string {
   return `<section class="panel">
       <h1>Request to join</h1>
-      <p>Tell the board who you are. They will follow up by email. Sending this form does not create a login.</p>
+      <p>Please provide your information so the Association can verify your eligibility for portal access. Once reviewed, a board member or association representative will follow up by email. Submission of this form does not automatically create or approve an account.</p>
       ${error ? `<p class="flash warn">${esc(error)}</p>` : ""}
       <form class="fields" method="post" action="/join">
         <label class="hp">Company<input type="text" name="company" tabindex="-1" autocomplete="off"></label>

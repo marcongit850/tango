@@ -114,9 +114,10 @@ export function parseOwnersCsv(
     const balanceText = cell("starting_balance");
     const balanceAsOf = cell("balance_as_of") || defaults.today;
     const phone = cell("phone");
-    const city = cell("city") || defaults.city;
-    const state = cell("state") || defaults.state;
-    const postalCode = cell("postal_code") || defaults.postalCode;
+    // Blank city, state, postal_code, or zip stays blank so import can keep the stored value.
+    const city = cell("city");
+    const state = cell("state");
+    const postalCode = cell("postal_code") || cell("zip");
     const houseName = cell("house_name");
     const mailingStreet = cell("mailing_street");
     const mailingCity = cell("mailing_city");

@@ -496,6 +496,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const back = `/a/${association.slug}/admin/owners#lots`;
     const lotNumber = textValue(fields, "lot_number", 40);
     const street = textValue(fields, "street_address", 200);
+    const city = textValue(fields, "city", 80);
+    const state = textValue(fields, "state", 40);
+    const postalCode = textValue(fields, "postal_code", 20);
     const lotType = textValue(fields, "lot_type", 20) || "improved";
     const details = lotDetailsFromForm(fields);
     if (!lotNumber || !street || !isLotType(lotType)) return redirectTo(c, back, "Lot number, street address, and type are required.", "warn");
@@ -518,9 +521,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
           association.id,
           lotNumber,
           street,
-          association.city,
-          association.state,
-          association.postal_code,
+          city,
+          state,
+          postalCode,
           lotType,
           details.houseName,
           details.mailingStreet,
@@ -539,7 +542,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
             `INSERT INTO properties (id, association_id, lot_number, street_address, city, state, postal_code, status, lot_type, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
           )
-          .bind(id, association.id, lotNumber, street, association.city, association.state, association.postal_code, lotType, new Date().toISOString())
+          .bind(id, association.id, lotNumber, street, city, state, postalCode, lotType, new Date().toISOString())
           .run();
       } catch (fallback) {
         if (!isMissingColumn(fallback)) throw fallback;
@@ -548,7 +551,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
             `INSERT INTO properties (id, association_id, lot_number, street_address, city, state, postal_code, status, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
           )
-          .bind(id, association.id, lotNumber, street, association.city, association.state, association.postal_code, new Date().toISOString())
+          .bind(id, association.id, lotNumber, street, city, state, postalCode, new Date().toISOString())
           .run();
         return redirectTo(c, back, `Lot ${lotNumber} added. Apply the admin migration in D1 before setting lot type.`, "warn");
       }
@@ -574,6 +577,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     if (!property) throw new NotFoundError();
     const lotNumber = textValue(fields, "lot_number", 40);
     const street = textValue(fields, "street_address", 200);
+    const city = textValue(fields, "city", 80);
+    const state = textValue(fields, "state", 40);
+    const postalCode = textValue(fields, "postal_code", 20);
     const status = textValue(fields, "status", 20);
     const lotType = textValue(fields, "lot_type", 20);
     const details = lotDetailsFromForm(fields);
@@ -590,13 +596,16 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       await c.env.DB
         .prepare(
           `UPDATE properties SET
-             lot_number = ?, street_address = ?, status = ?, lot_type = ?,
+             lot_number = ?, street_address = ?, city = ?, state = ?, postal_code = ?, status = ?, lot_type = ?,
              house_name = ?, mailing_street = ?, mailing_city = ?, mailing_state = ?, mailing_postal_code = ?, admin_notes = ?
            WHERE association_id = ? AND id = ?`,
         )
         .bind(
           lotNumber,
           street,
+          city,
+          state,
+          postalCode,
           status,
           lotType,
           details.houseName,
@@ -613,8 +622,8 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       if (!isMissingColumn(error)) throw error;
       try {
         await c.env.DB
-          .prepare("UPDATE properties SET lot_number = ?, street_address = ?, status = ?, lot_type = ? WHERE association_id = ? AND id = ?")
-          .bind(lotNumber, street, status, lotType, association.id, property.id)
+          .prepare("UPDATE properties SET lot_number = ?, street_address = ?, city = ?, state = ?, postal_code = ?, status = ?, lot_type = ? WHERE association_id = ? AND id = ?")
+          .bind(lotNumber, street, city, state, postalCode, status, lotType, association.id, property.id)
           .run();
       } catch (fallback) {
         if (!isMissingColumn(fallback)) throw fallback;

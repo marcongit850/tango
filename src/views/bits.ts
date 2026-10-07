@@ -87,10 +87,31 @@ export function selectField(
   return `<label>${esc(label)}<select name="${esc(name)}">${html}</select></label>`;
 }
 
-export function addressLine(street: string, city: string, state: string, postal: string): string {
+/** City, ST ZIP from whatever is stored. Empty parts are left out. */
+export function addressLocality(city: string, state: string, postal: string): string {
   const cityState = [city.trim(), state.trim()].filter(Boolean).join(", ");
-  const locality = [cityState, postal.trim()].filter(Boolean).join(" ");
-  return [street.trim(), locality].filter(Boolean).join(", ");
+  return [cityState, postal.trim()].filter(Boolean).join(" ");
+}
+
+export function addressLine(street: string, city: string, state: string, postal: string): string {
+  return [street.trim(), addressLocality(city, state, postal)].filter(Boolean).join(", ");
+}
+
+/** Escaped HTML: street, then City, ST ZIP. */
+export function addressLines(street: string, city: string, state: string, postal: string): string {
+  const locality = addressLocality(city, state, postal);
+  return [street.trim(), locality].filter(Boolean).map((line) => esc(line)).join("<br>");
+}
+
+export function propertyAddressHtml(street: string, city: string, state: string, postal: string): string {
+  const lines = addressLines(street, city, state, postal);
+  return lines ? `<p>${lines}</p>` : "";
+}
+
+export function mailingAddressHtml(street: string, city: string, state: string, postal: string): string {
+  const lines = addressLines(street, city, state, postal);
+  if (!lines) return `<p class="muted">Mailing address matches the property address.</p>`;
+  return `<p>Mailing address (if different)<br>${lines}</p>`;
 }
 
 export function contactPhones(contacts: { name: string; phone: string; isPrimary?: boolean }[]): string {

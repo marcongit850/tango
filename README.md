@@ -83,7 +83,7 @@ Required columns:
 | `email` | Login address. Matched case-insensitively. |
 | `name` | Person's name. |
 | `lot_number` | Unique within the association. |
-| `street_address` | Lot address. |
+| `street_address` | Street line of the physical address. |
 
 Optional columns:
 
@@ -94,8 +94,8 @@ Optional columns:
 | `starting_balance` | Dollars owed. `375.50` and `$1,200.00` both work. A negative amount is recorded as an opening credit. Blank means zero. |
 | `balance_as_of` | `YYYY-MM-DD`. Blank uses today in the association time zone. |
 | `phone` | Stored on the user. Shown on Owners and lots and when that lot is opened. Other residents do not see it. |
-| `city`, `state`, `postal_code` | Default to the association's city, state, and postal code. |
-| `house_name` | Name on the lot, such as MELOMAR. A blank cell keeps the name already stored. |
+| `city`, `state`, `postal_code` | City, state, and ZIP of the physical address. `zip` is accepted in place of `postal_code`. A blank cell keeps the value already stored. |
+| `house_name` | Name on the lot. A blank cell keeps the name already stored. |
 | `mailing_street`, `mailing_city`, `mailing_state`, `mailing_postal_code` | Where mail for that lot should go when it is not the lot address. A blank cell keeps the value already stored. |
 
 Admin notes are not imported. Add those on the lot in Owners and lots.
@@ -169,7 +169,7 @@ Run that file once. If the console says a column already exists, or `join_reques
 
 After it succeeds, use the portal:
 
-- Admin, Owners and lots: edit a lot, set improved or unimproved, and assign the primary owner. House name, mailing address, and admin notes are edited on that roster and on the lot page. Open a person under Users to change the login email. That keeps the same user and the lots already linked to them, and it is refused when another person already uses that email. CSV import remains the bulk path.
+- Admin, Owners and lots: edit a lot, set improved or unimproved, and assign the primary owner. House name, property address, mailing address, and admin notes are edited on that roster and on the lot page. Open a person under Users to change the login email. That keeps the same user and the lots already linked to them, and it is refused when another person already uses that email. CSV import remains the bulk path.
 - Admin, Ledger, Annual dues: add a year (this creates both amounts). On the open date, matching lots are invoiced automatically. Check **Assign this assessment to matching lots** only when you want those invoices before the open date. That writes the invoices Upcoming assessments uses. Changing an amount later does not rewrite invoices already assigned. Click a dollar amount under Assessments and balances to change one invoice.
 - Admin, Ledger, Assessments and balances: click a dollar amount to open that lot's invoices, then edit or delete one. See [Edit an invoice](#edit-an-invoice). No new D1 SQL is required for that.
 - Admin, Messages: incoming from owners.
@@ -334,7 +334,9 @@ Dashboard steps:
 
 Run that file once, after `0010`. If the console says a column already exists, this file was already applied. Do not paste it again.
 
-After it succeeds, use Admin, Owners and lots. The property roster is that page. Users, lower on the same page, is only sign-in accounts: email, admin access, and last login. Open a lot to see every linked phone number. Owners see house name, mailing address, and phones on their own lot. They do not see admin notes.
+After it succeeds, use Admin, Owners and lots. The property roster is that page. Users, lower on the same page, is only sign-in accounts: email, admin access, and last login. Open a lot to see every linked phone number. Owners see house name, the property address, mailing address, and phones on their own lot. They do not see admin notes.
+
+City, state, and ZIP for the physical address are the existing `properties.city`, `properties.state`, and `properties.postal_code` columns from the original schema. No further migration is required to edit them. The lot page shows the street, then city, state, and ZIP on the next line. Mailing address stays labeled "Mailing address (if different)". A blank mailing address means it matches the property address.
 
 Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0010` is already on the remote database.
 

@@ -80,7 +80,7 @@ export function adminHome(options: {
   return `${adminNav(options.association.slug, "overview")}
     <section class="panel">
       <h1>Board admin</h1>
-      <p class="muted">${esc(options.association.legal_name)}. Tools on this page stay inside ${esc(options.association.name)}.</p>
+      <p class="muted">Only board admins can open these tools.</p>
     </section>
     <section class="grid">
       ${statCard(options.lots, "Lots", `${base}/owners#lots`)}

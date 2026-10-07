@@ -1,0 +1,121 @@
+Privacy Policy
+
+Effective Date: October 6, 2026
+
+Tango Mar Property Owners Association, Inc. ("Association," "we," "us," or "our") respects the privacy of its members and other authorized users of this website and owner portal.
+
+This Privacy Policy explains what information we may collect, how we use it, and how access to member, property, and account information is handled.
+
+Information We Collect
+
+We may collect and maintain information associated with Association membership and use of the portal, including:
+
+- Name
+- Mailing address
+- Email address
+- Telephone number
+- Property address, lot number, or other property information
+- Association account balances
+- Charges, assessments, payments, credits, and ledger information
+- Communications submitted through the portal
+- Documents or forms submitted to the Association
+- Login and authentication information
+- IP address, browser, device, and technical information used for security and system operation
+- Other information reasonably necessary to administer the Association and provide portal services
+
+How We Use Information
+
+The Association may use information collected through the portal to:
+
+- Maintain Association membership and property records
+- Provide owners with access to information associated with their property
+- Display account balances, assessments, payments, and ledger activity
+- Process or facilitate payments
+- Distribute Association notices, documents, meeting information, and announcements
+- Respond to questions, requests, and communications
+- Maintain and improve the website and portal
+- Protect the security of member accounts and Association records
+- Comply with legal, accounting, recordkeeping, and Association obligations
+
+Property and Account Privacy
+
+Owners may view the properties or lots linked to their authorized account.
+
+Other residents cannot view another owner's private account, ledger, payment history, or other restricted financial information through the portal.
+
+Users with authorized Association administrator access may view member and financial information when necessary to perform Association duties. Administrator access is limited to this Association. Administrators cannot access the records, ledgers, or financial information of unrelated associations that may use the same website platform or technology.
+
+Login and Authentication
+
+The portal may use passwordless or "magic link" authentication.
+
+Sign-in links are intended only for the person who controls the email address to which the link is sent. Users should not forward sign-in links or permit unauthorized persons to access their email account for the purpose of entering the portal.
+
+Users should notify the Association if they believe their email account, login access, or portal information has been compromised.
+
+Payments
+
+Payments may be processed through a third-party payment provider.
+
+When payment information is submitted directly to a payment processor, the Association may receive transaction information such as the payment amount, date, status, and identifying details necessary to apply the payment to the appropriate account.
+
+The Association does not intend to store complete credit card numbers or complete bank account credentials submitted directly to a third-party payment processor.
+
+Payment processors may maintain their own privacy policies and terms.
+
+Association Documents
+
+The portal may provide access to Association documents, including covenants, bylaws, rules, meeting materials, notices, financial information, and other records.
+
+The Association attempts to make current information available through the portal. However, if there is any conflict between information displayed on the website and an official Association record, recorded document, adopted resolution, official ledger, or other controlling record, the official record will govern.
+
+Service Providers
+
+The Association may use third-party vendors to provide services such as:
+
+- Website hosting
+- Email delivery
+- Data storage
+- Authentication
+- Payment processing
+- Website security
+- Accounting or Association management services
+
+These providers may receive information reasonably necessary to perform services for the Association.
+
+Disclosure of Information
+
+The Association may disclose information when reasonably necessary to:
+
+- Administer the Association
+- Provide requested services
+- Work with authorized vendors, accountants, attorneys, managers, or contractors
+- Comply with applicable law, court orders, subpoenas, or governmental requests
+- Protect the Association, its members, its property, or its legal rights
+- Respond to lawful requests for Association records
+
+Nothing in this Privacy Policy is intended to limit any right of access to Association records that may exist under applicable law or the Association's governing documents.
+
+Data Security
+
+The Association and its service providers use reasonable administrative, technical, and organizational measures intended to protect information from unauthorized access, loss, misuse, or disclosure.
+
+No website, computer system, email system, or electronic storage method can be guaranteed to be completely secure.
+
+Data Retention
+
+Information may be retained for as long as reasonably necessary to administer the Association, maintain its records, comply with legal or accounting requirements, resolve disputes, and protect the Association's rights.
+
+Children's Privacy
+
+The portal is intended for Association members, property owners, authorized representatives, and other authorized users. It is not intended for use by children.
+
+Changes to This Privacy Policy
+
+The Association may update this Privacy Policy from time to time.
+
+The current version will be posted on the website with an updated effective date.
+
+Contact
+
+Questions about this Privacy Policy or the use of information through the portal may be directed to the Association through the contact information provided on this website.

@@ -16,6 +16,7 @@ import { NotFoundError, isMissingTable } from "../lib/errors";
 import { logError, logInfo } from "../lib/log";
 import type { AppBindings } from "../types";
 import { render } from "../views/layout";
+import { privacyPage, termsPage } from "../views/legal";
 import { homePage, joinReceivedPage, joinRequestPage, legalPage, loginPage, type HomePortal } from "../views/public";
 import { readForm, redirectTo, requireAssociation, textValue, type AppContext } from "./common";
 
@@ -50,6 +51,10 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/legal", async (c) => render(c, { title: "Not legal advice", active: "legal", body: legalPage() }));
+
+  app.get("/privacy", async (c) => render(c, { title: "Privacy Policy · Tango Mar", active: "privacy", body: privacyPage() }));
+
+  app.get("/terms", async (c) => render(c, { title: "Terms of Use · Tango Mar", active: "terms", body: termsPage() }));
 
   app.get("/join", async (c) => {
     return render(c, { title: "Request to join", active: "join", body: joinRequestPage() });

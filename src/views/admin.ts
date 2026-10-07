@@ -80,7 +80,7 @@ export function adminHome(options: {
   return `${adminNav(options.association.slug, "overview")}
     <section class="panel">
       <h1>Board admin</h1>
-      <p class="muted">${esc(options.association.legal_name)}. Tools on this page stay inside ${esc(options.association.name)}.</p>
+      <p class="muted">Only board admins can open these tools.</p>
     </section>
     <section class="grid">
       ${statCard(options.lots, "Lots", `${base}/owners#lots`)}
@@ -91,7 +91,7 @@ export function adminHome(options: {
     </section>
     <section class="panel">
       <h2>Roles</h2>
-      <p>Homeowner sees only their lots. Board member is the other role. Admin access is a flag on a board member, and it is what opens these tools. Keep at least one active admin. Public is the logged-out visitor and is not assigned on a roster.</p>
+      <p>Homeowners see their lots. Board members can be given Admin access, which opens these tools. Keep at least one admin.</p>
       <p><a href="${base}/export.csv">Export ledger for the accountant</a></p>
     </section>
     <section class="panel"><h2>Recent activity</h2>${auditTable(options.association, options.audit.slice(0, 8))}</section>`;

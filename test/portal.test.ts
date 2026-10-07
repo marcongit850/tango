@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { canViewPropertyFinancials, isAdmin, keepsAnAdmin, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
+import { activeAdminContacts, canViewPropertyFinancials, isAdmin, keepsAnAdmin, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
 import { annualDues, defaultDuesYear, lotsToInvoice } from "../src/lib/dues";
 import { landingAccount, loggedOutNav, render } from "../src/views/layout";
 import { adminHome, documentDetailPage, documentsAdminPage, ledgerPage, newsAdminPage, ownerDetailPage, paymentInvoiceVisible } from "../src/views/admin";
 import { newsEdit } from "../src/routes/admin";
-import type { AnnouncementRow, DocumentRow, EventRow, NoticeRow, PropertyRow, VersionRow } from "../src/db";
+import { listOwners, type AnnouncementRow, type DocumentRow, type EventRow, type NoticeRow, type PropertyRow, type VersionRow } from "../src/db";
 import { documentContentDisposition, isBrowserViewable } from "../src/lib/files";
 import { dashboardPage, documentsPage, faqPage, noticesPage } from "../src/views/resident";
 import { checkEmailPage, homePage, invalidLinkPage, joinReceivedPage, joinRequestPage, loginPage } from "../src/views/public";
@@ -119,6 +119,23 @@ describe("access", () => {
     expect(isAdmin({ role_id: "board", is_admin: 0 })).toBe(false);
     expect(isAdmin({ role_id: "officer" })).toBe(true);
     expect(isAdmin({ role_id: "board", is_admin: 1, status: "inactive" })).toBe(false);
+    expect(isAdmin({ role_id: "board", is_admin: true, status: "active" })).toBe(true);
+    expect(
+      activeAdminContacts([
+        { user_id: "user_marc", name: "Marc", email: "marc@whpinc.com", role_id: "board", is_admin: true, status: "active" },
+        { user_id: "user_marc", name: "Marc", email: "marc@whpinc.com", role_id: "board", is_admin: 1, status: "active" },
+        { user_id: "user_blank", name: "  ", email: "", role_id: "board", is_admin: 1, status: "active" },
+        { user_id: "user_invited", name: "Invited Admin", email: "invited@example.com", role_id: "board", is_admin: 1, status: "invited" },
+        { user_id: "user_board", name: "Board Only", email: "board@example.com", role_id: "board", is_admin: 0, status: "active" },
+        { user_id: "user_old", name: "Former Admin", email: "old@example.com", role_id: "board", is_admin: 1, status: "inactive" },
+        { user_id: "user_text", name: "Text Flag", email: "text@example.com", role_id: "board", is_admin: "1", status: "active" },
+        { user_id: "user_jordan", name: "Jordan Lee", email: "jordan.lee@example.com", role_id: "officer", status: "active" },
+      ]),
+    ).toEqual([
+      { user_id: "user_marc", name: "Marc", email: "marc@whpinc.com" },
+      { user_id: "user_text", name: "Text Flag", email: "text@example.com" },
+      { user_id: "user_jordan", name: "Jordan Lee", email: "jordan.lee@example.com" },
+    ]);
     expect(keepsAnAdmin({ activeAdminCount: 1, currentlyAdmin: true, nextAdmin: false })).toBe(false);
     expect(keepsAnAdmin({ activeAdminCount: 2, currentlyAdmin: true, nextAdmin: false })).toBe(true);
     expect(keepsAnAdmin({ activeAdminCount: 1, currentlyAdmin: true, nextAdmin: true })).toBe(true);
@@ -129,6 +146,40 @@ describe("access", () => {
     expect(shouldRevealMagicLink({ appEnv: "production", hostname: "localhost", emailSent: false })).toBe(true);
     expect(shouldRevealMagicLink({ appEnv: "development", hostname: "tango.example", emailSent: false })).toBe(true);
     expect(shouldRevealMagicLink({ appEnv: "development", hostname: "localhost", emailSent: true })).toBe(false);
+  });
+
+  it("lists each active admin once, with name and email", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    sqlite.exec("PRAGMA foreign_keys = ON");
+    for (const file of [
+      "migrations/0001_schema.sql",
+      "migrations/0002_seed_tango_mar.sql",
+      "migrations/0003_join_requests.sql",
+      "migrations/0004_join_request_approved.sql",
+      "migrations/0005_admin_improvements.sql",
+    ]) {
+      sqlite.exec(readFileSync(file, "utf8"));
+    }
+    sqlite.exec(`
+      INSERT INTO users (id, email, name, created_at) VALUES
+        ('user_marc', 'marc@whpinc.com', 'Marc', '2026-10-02T00:00:00Z'),
+        ('user_quiet', 'quiet@example.com', 'Quiet Board', '2026-10-02T00:00:00Z');
+      INSERT INTO memberships (id, association_id, user_id, role_id, is_admin, status, created_at) VALUES
+        ('mem_marc', 'assoc_tango_mar', 'user_marc', 'board', 1, 'active', '2026-10-02T00:00:00Z'),
+        ('mem_quiet', 'assoc_tango_mar', 'user_quiet', 'board', 0, 'active', '2026-10-02T00:00:00Z');
+      INSERT INTO properties (id, association_id, lot_number, street_address, status, created_at) VALUES
+        ('prop_marc', 'assoc_tango_mar', '1', 'Lot 1', 'active', '2026-10-02T00:00:00Z'),
+        ('prop_marc_2', 'assoc_tango_mar', '2', 'Lot 2', 'active', '2026-10-02T00:00:00Z');
+      INSERT INTO property_owners (id, association_id, property_id, user_id, is_primary, created_at) VALUES
+        ('own_marc', 'assoc_tango_mar', 'prop_marc', 'user_marc', 1, '2026-10-02T00:00:00Z'),
+        ('own_marc_2', 'assoc_tango_mar', 'prop_marc_2', 'user_marc', 1, '2026-10-02T00:00:00Z');
+    `);
+    const owners = await listOwners(new SqliteD1(sqlite) as unknown as D1Database, "assoc_tango_mar");
+    expect(activeAdminContacts(owners)).toEqual([
+      { user_id: "user_jordan", name: "Jordan Lee", email: "jordan.lee@example.com" },
+      { user_id: "user_marc", name: "Marc", email: "marc@whpinc.com" },
+    ]);
+    sqlite.close();
   });
 
   it("rejects open redirects", () => {
@@ -595,14 +646,18 @@ describe("admin overview", () => {
       waiting: 0,
       pendingJoins: null,
       outstandingCents: 160050,
-      admins: [{ user_id: "user_jordan", name: "Jordan Lee", email: "jordan.lee@example.com" }],
+      admins: [
+        { user_id: "user_marc", name: "Marc", email: "marc@whpinc.com" },
+        { user_id: "user_blank", name: " ", email: " " },
+        { user_id: "user_jordan", name: "Jordan Lee", email: "jordan.lee@example.com" },
+      ],
       audit: [],
     });
     const blurb =
-      "Homeowners see their lots. Board members can be given Admin access, which opens these tools. Keep at least one admin.";
+      "Homeowners see their own lots. Board members with Admin access can open these tools. Keep at least one active admin.";
     expect(html).toContain("<h1>Board admin</h1>");
     expect(html).toContain("<h2>Access</h2>");
-    expect(html).toContain(blurb);
+    expect(html).toContain(`<div class="access-explainer"><p>${blurb}</p><div class="access-selection-barrier" aria-hidden="true"><br></div></div>`);
     expect(html).not.toContain("<h2>Roles</h2>");
     expect(html).toContain('<a class="card" href="/a/tango-mar/admin/ledger"><h2>$1,600.50</h2><p>Total Outstanding</p></a>');
     expect(html).not.toContain("<h2>Total outstanding</h2>");
@@ -613,11 +668,22 @@ describe("admin overview", () => {
     expect(html.indexOf("<h2>Access</h2>")).toBeLessThan(html.indexOf(blurb));
     expect(html.indexOf(blurb)).toBeLessThan(html.indexOf("<summary>Current admins</summary>"));
     expect(html).toContain(
-      '<li><a href="/a/tango-mar/admin/owners/user_jordan">Jordan Lee</a><div class="muted">jordan.lee@example.com</div></li>',
+      '<li><a href="/a/tango-mar/admin/owners/user_marc">Marc</a><span class="muted">marc@whpinc.com</span></li>',
     );
+    expect(html).toContain(
+      '<li><a href="/a/tango-mar/admin/owners/user_jordan">Jordan Lee</a><span class="muted">jordan.lee@example.com</span></li>',
+    );
+    expect(html).not.toContain("user_blank");
+    expect(html).not.toContain("<li></li>");
     expect(html).not.toContain("<details open>");
-    expect(html.indexOf("<summary>Current admins</summary>")).toBeLessThan(html.indexOf("Export ledger for the accountant"));
-    expect(html.indexOf("Export ledger for the accountant")).toBeLessThan(html.indexOf("<h2>Recent activity</h2>"));
+    expect(html).not.toContain("export.csv");
+    expect(html).not.toContain("Export ledger for the accountant");
+    const details = html.slice(html.indexOf("<details>"), html.indexOf("</details>"));
+    expect(details).toContain("<summary>Current admins</summary>");
+    expect(details).toContain("Marc");
+    expect(details).not.toContain("Recent activity");
+    expect(details).not.toContain(blurb);
+    expect(html.indexOf("</details>")).toBeLessThan(html.indexOf("<h2>Recent activity</h2>"));
   });
 });
 
@@ -1474,6 +1540,7 @@ describe("ledger payment invoices", () => {
     expect(invoiceOptions.filter((option) => option.hidden).map((option) => option.value)).toEqual(["inv-4"]);
     expect(invoiceOptions.find((option) => option.value === "inv-4")?.propertyId).toBe("prop-4");
     expect(html).toContain('<script src="/ledger-payment.js"></script>');
+    expect(html).toContain('<a href="/a/tango-mar/admin/export.csv">Download CSV for the accountant</a>');
     const invoiceForm = formElement(html, "/a/tango-mar/admin/invoices");
     expect(invoiceForm).not.toContain("data-payment-form");
     expect(invoiceForm).not.toContain("data-property-id");

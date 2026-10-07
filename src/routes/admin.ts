@@ -42,7 +42,7 @@ import {
   versionById,
   writeAudit,
 } from "../db";
-import { keepsAnAdmin } from "../lib/access";
+import { activeAdminContacts, keepsAnAdmin } from "../lib/access";
 import { changeLoginEmail } from "../lib/login-email";
 import { isDocumentCategory } from "../lib/categories";
 import { annualDues, defaultDuesYear, isLotType } from "../lib/dues";
@@ -125,9 +125,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         waiting: threads.filter((thread) => messageWaitingOnBoard(thread, staff)).length,
         pendingJoins,
         outstandingCents,
-        admins: owners
-          .filter((owner) => owner.is_admin === 1 && owner.status !== "inactive")
-          .map((owner) => ({ user_id: owner.user_id, name: owner.name, email: owner.email })),
+        admins: activeAdminContacts(owners),
         audit,
       }),
     });

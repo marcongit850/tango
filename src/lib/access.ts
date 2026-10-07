@@ -1,6 +1,6 @@
 type AccessMembership = {
   role_id: string;
-  is_admin?: number | null;
+  is_admin?: number | boolean | string | null;
   status?: string | null;
 } | null | undefined;
 
@@ -30,6 +30,25 @@ export function canViewPropertyFinancials(
   if (!membership || membership.status === "inactive") return false;
   if (membership.role_id !== "homeowner" && membership.role_id !== "board" && membership.role_id !== "officer") return false;
   return ownerUserIds.includes(viewerUserId);
+}
+
+export type AdminContact = { user_id: string; name: string; email: string };
+
+/** Active board members with Admin access, one row per person, in the given order. */
+export function activeAdminContacts(
+  people: (AdminContact & { role_id: string; is_admin?: number | boolean | string | null; status?: string | null })[],
+): AdminContact[] {
+  const seen = new Set<string>();
+  const contacts: AdminContact[] = [];
+  for (const person of people) {
+    if (person.status !== "active" || !isAdmin(person) || seen.has(person.user_id)) continue;
+    const name = person.name.trim();
+    const email = person.email.trim();
+    if (!name && !email) continue;
+    seen.add(person.user_id);
+    contacts.push({ user_id: person.user_id, name, email });
+  }
+  return contacts;
 }
 
 export function keepsAnAdmin(input: {

@@ -113,24 +113,37 @@ export function adminHome(options: {
     </section>
     <section class="panel">
       <h2>Access</h2>
-      <p>Homeowners see their lots. Board members can be given Admin access, which opens these tools. Keep at least one admin.</p>
+      ${accessExplainer()}
       <details>
         <summary>Current admins</summary>
         ${currentAdminList(options.association.slug, options.admins)}
       </details>
-      <p><a href="${base}/export.csv">Export ledger for the accountant</a></p>
     </section>
     <section class="panel"><h2>Recent activity</h2>${auditTable(options.association, options.audit.slice(0, 8))}</section>`;
 }
 
+const ACCESS_EXPLAINER =
+  "Homeowners see their own lots. Board members with Admin access can open these tools. Keep at least one active admin.";
+
+function accessExplainer(): string {
+  // WebKit triple-click walks past a paragraph into later elements until it finds a line break.
+  // The hidden break stops that selection inside this explainer, before Current admins.
+  return `<div class="access-explainer"><p>${ACCESS_EXPLAINER}</p><div class="access-selection-barrier" aria-hidden="true"><br></div></div>`;
+}
+
 function currentAdminList(slug: string, admins: { user_id: string; name: string; email: string }[]): string {
   const items = admins
-    .map(
-      (admin) =>
-        `<li><a href="/a/${esc(slug)}/admin/owners/${esc(admin.user_id)}">${esc(admin.name)}</a><div class="muted">${esc(admin.email)}</div></li>`,
-    )
+    .map((admin) => {
+      const name = admin.name.trim();
+      const email = admin.email.trim();
+      const label = name || email;
+      if (!label) return "";
+      const emailLine = name && email ? `<span class="muted">${esc(email)}</span>` : "";
+      return `<li><a href="/a/${esc(slug)}/admin/owners/${esc(admin.user_id)}">${esc(label)}</a>${emailLine}</li>`;
+    })
+    .filter(Boolean)
     .join("");
-  return items ? `<ul>${items}</ul>` : empty("No current admins.");
+  return items ? `<div class="access-admin-list"><ul>${items}</ul></div>` : empty("No current admins.");
 }
 
 function statCard(value: number | string, label: string, href: string): string {

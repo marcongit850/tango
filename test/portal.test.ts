@@ -654,7 +654,7 @@ describe("admin overview", () => {
       audit: [],
     });
     const blurb =
-      "Homeowners see their own lots. Board members with Admin access can open these tools. Keep at least one active admin.";
+      "Admin access opens these board tools. Homeowners only see their own lots. Keep at least one admin.";
     expect(html).toContain("<h1>Board admin</h1>");
     expect(html).toContain("<h2>Access</h2>");
     expect(html).toContain(`<div class="access-explainer"><p>${blurb}</p><div class="access-selection-barrier" aria-hidden="true"><br></div></div>`);
@@ -676,8 +676,14 @@ describe("admin overview", () => {
     expect(html).not.toContain("user_blank");
     expect(html).not.toContain("<li></li>");
     expect(html).not.toContain("<details open>");
-    expect(html).not.toContain("export.csv");
-    expect(html).not.toContain("Export ledger for the accountant");
+    expect(html).not.toContain("\u2014");
+    const access = html.slice(html.indexOf("<h2>Access</h2>"), html.indexOf("</details>") + "</details>".length);
+    expect(access).not.toContain("export.csv");
+    expect(access).not.toContain("Export ledger");
+    const exportLink = '<p class="overview-export"><a href="/a/tango-mar/admin/export.csv">Export ledger for the accountant</a></p>';
+    expect(html).toContain(exportLink);
+    expect(html.indexOf("</details>")).toBeLessThan(html.indexOf(exportLink));
+    expect(html.indexOf(exportLink)).toBeLessThan(html.indexOf("<h2>Recent activity</h2>"));
     const details = html.slice(html.indexOf("<details>"), html.indexOf("</details>"));
     expect(details).toContain("<summary>Current admins</summary>");
     expect(details).toContain("Marc");

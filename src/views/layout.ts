@@ -349,6 +349,7 @@ body:has(.ask-portal) main { padding-bottom: 5rem; }
   overflow: hidden;
   line-height: 0;
 }
+.overview-export { margin: 0; }
 .access-admin-list ul { margin: 0.35rem 0 0; padding-left: 1.2rem; }
 .access-admin-list li { margin: 0.35rem 0; }
 .access-admin-list li .muted { display: block; }

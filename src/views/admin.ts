@@ -119,11 +119,12 @@ export function adminHome(options: {
         ${currentAdminList(options.association.slug, options.admins)}
       </details>
     </section>
+    <p class="overview-export"><a href="${base}/export.csv">Export ledger for the accountant</a></p>
     <section class="panel"><h2>Recent activity</h2>${auditTable(options.association, options.audit.slice(0, 8))}</section>`;
 }
 
 const ACCESS_EXPLAINER =
-  "Homeowners see their own lots. Board members with Admin access can open these tools. Keep at least one active admin.";
+  "Admin access opens these board tools. Homeowners only see their own lots. Keep at least one admin.";
 
 function accessExplainer(): string {
   // WebKit triple-click walks past a paragraph into later elements until it finds a line break.

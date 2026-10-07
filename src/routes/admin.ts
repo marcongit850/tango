@@ -125,6 +125,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         waiting: threads.filter((thread) => messageWaitingOnBoard(thread, staff)).length,
         pendingJoins,
         outstandingCents,
+        admins: owners
+          .filter((owner) => owner.is_admin === 1 && owner.status !== "inactive")
+          .map((owner) => ({ user_id: owner.user_id, name: owner.name, email: owner.email })),
         audit,
       }),
     });

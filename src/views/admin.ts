@@ -90,6 +90,7 @@ export function adminHome(options: {
   waiting: number;
   pendingJoins: number | null;
   outstandingCents: number;
+  admins: { user_id: string; name: string; email: string }[];
   audit: AuditRow[];
 }): string {
   const base = `/a/${esc(options.association.slug)}/admin`;
@@ -113,9 +114,23 @@ export function adminHome(options: {
     <section class="panel">
       <h2>Access</h2>
       <p>Homeowners see their lots. Board members can be given Admin access, which opens these tools. Keep at least one admin.</p>
+      <details>
+        <summary>Current admins</summary>
+        ${currentAdminList(options.association.slug, options.admins)}
+      </details>
       <p><a href="${base}/export.csv">Export ledger for the accountant</a></p>
     </section>
     <section class="panel"><h2>Recent activity</h2>${auditTable(options.association, options.audit.slice(0, 8))}</section>`;
+}
+
+function currentAdminList(slug: string, admins: { user_id: string; name: string; email: string }[]): string {
+  const items = admins
+    .map(
+      (admin) =>
+        `<li><a href="/a/${esc(slug)}/admin/owners/${esc(admin.user_id)}">${esc(admin.name)}</a><div class="muted">${esc(admin.email)}</div></li>`,
+    )
+    .join("");
+  return items ? `<ul>${items}</ul>` : empty("No current admins.");
 }
 
 function statCard(value: number | string, label: string, href: string): string {

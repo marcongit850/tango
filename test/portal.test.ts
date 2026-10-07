@@ -595,6 +595,7 @@ describe("admin overview", () => {
       waiting: 0,
       pendingJoins: null,
       outstandingCents: 160050,
+      admins: [{ user_id: "user_jordan", name: "Jordan Lee", email: "jordan.lee@example.com" }],
       audit: [],
     });
     const blurb =
@@ -610,7 +611,12 @@ describe("admin overview", () => {
     expect(html.indexOf(">Total Outstanding<")).toBeLessThan(html.indexOf(">Lots<"));
     expect(html.indexOf("<h1>Board admin</h1>")).toBeLessThan(html.indexOf("<h2>Access</h2>"));
     expect(html.indexOf("<h2>Access</h2>")).toBeLessThan(html.indexOf(blurb));
-    expect(html.indexOf(blurb)).toBeLessThan(html.indexOf("Export ledger for the accountant"));
+    expect(html.indexOf(blurb)).toBeLessThan(html.indexOf("<summary>Current admins</summary>"));
+    expect(html).toContain(
+      '<li><a href="/a/tango-mar/admin/owners/user_jordan">Jordan Lee</a><div class="muted">jordan.lee@example.com</div></li>',
+    );
+    expect(html).not.toContain("<details open>");
+    expect(html.indexOf("<summary>Current admins</summary>")).toBeLessThan(html.indexOf("Export ledger for the accountant"));
     expect(html.indexOf("Export ledger for the accountant")).toBeLessThan(html.indexOf("<h2>Recent activity</h2>"));
   });
 });

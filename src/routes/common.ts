@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { setCookie } from "hono/cookie";
-import { isAdmin } from "../lib/access";
+import { canEditAdmin, canViewAdmin } from "../lib/access";
 import { ForbiddenError, NotFoundError, RedirectError } from "../lib/errors";
 import { assertSameOrigin, clip, isHttps } from "../lib/html";
 import type { AppBindings, Association, Membership, User } from "../types";
@@ -26,7 +26,13 @@ export function requireMember(c: AppContext): { association: Association; user: 
 
 export function requireStaff(c: AppContext): { association: Association; user: User; membership: Membership } {
   const context = requireMember(c);
-  if (!isAdmin(context.membership)) throw new ForbiddenError();
+  if (!canViewAdmin(context.membership)) throw new ForbiddenError();
+  return context;
+}
+
+export function requireEditor(c: AppContext): { association: Association; user: User; membership: Membership } {
+  const context = requireStaff(c);
+  if (!canEditAdmin(context.membership)) throw new ForbiddenError();
   return context;
 }
 

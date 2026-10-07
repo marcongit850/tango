@@ -2,7 +2,7 @@
 
 Neighborhood OS for a small property owners association that still keeps its roster in Excel. This repository is one Cloudflare Worker. The first association is **Tango Mar**, a beach neighborhood in Miramar Beach, Walton County, Florida.
 
-The public home page is the Tango Mar entry: a full-bleed boardwalk photo, resident login, and request access. Someone who is already signed in sees Open dashboard, and Admin when they have admin access, plus their name and log out. `/a/{slug}` redirects to that home page.
+The public home page is the Tango Mar entry: a full-bleed boardwalk photo, resident login, and request access. Someone who is already signed in sees Open dashboard, and Admin when they are a board member, plus their name and log out. `/a/{slug}` redirects to that home page.
 
 One deployment can host many associations. Each association's lots, balances, documents, and messages stay inside that association. A resident sees only the lots linked to their login. Other residents never see that ledger.
 
@@ -74,7 +74,7 @@ Edit `migrations/0002_seed_tango_mar.sql` if the mailing address should change, 
 
 ## CSV import
 
-People with admin access import owners from Excel by saving the sheet as **CSV UTF-8**. The sample file is `samples/tango-mar-owners.csv`. In the portal: Admin, CSV import.
+People with edit access import owners from Excel by saving the sheet as **CSV UTF-8**. The sample file is `samples/tango-mar-owners.csv`. In the portal: Admin, CSV import.
 
 Required columns:
 
@@ -114,7 +114,7 @@ That runs `wrangler d1 migrations apply tango --remote`.
 
 ## Request to join
 
-The home page links to `/join` (Request access). The form asks for a name, an email, an optional address or lot, and an optional note. A successful submit stores a pending row in `join_requests` for Tango Mar, adds a portal notice for each person with admin access, and emails those people when `RESEND_API_KEY` is set. Sending the form does not create a login.
+The home page links to `/join` (Request access). The form asks for a name, an email, an optional address or lot, and an optional note. A successful submit stores a pending row in `join_requests` for Tango Mar, adds a portal notice for each person with edit access, and emails those people when `RESEND_API_KEY` is set. Sending the form does not create a login.
 
 Admins open Admin, Join requests. **Approve** creates or reuses a user for that email, gives them an active homeowner membership (an active board login keeps that role and its admin flag), and marks the request approved. When the address matches exactly one active lot and that lot has no owner, Approve links the person to it. A blank address, no match, more than one match, or a lot that already has an owner is left for Owners and lots. **Decline** marks the request declined and does not create a login. A declined request can still be approved later. **Delete** removes the request. It does not remove a login that Approve already created. **Mark reviewed** only changes the status. It does not create a login. A reviewed request can still be approved or declined later.
 
@@ -294,16 +294,16 @@ Preview URLs are public unless you put access control in front of them.
 | --- | --- |
 | Public | Logged-out visitor. Public home, resident login, and request access. No documents and no balances. |
 | Homeowner | Their own lots, invoices, payments, and messages. Current resident documents. |
-| Board member | Same resident access, plus board-only documents. Admin tools stay off unless the admin flag is on. |
-| Admin flag | A board member who can open Admin. Keep at least one active admin so the portal cannot lock itself out. |
+| Board member | Same resident access, plus board-only documents. Admin pages open view-only: Overview, ledgers, documents, and the other read pages. Create, edit, and delete stay off. |
+| Edit access | Checkbox on the person page (`is_admin`). A board member with it can use the admin write tools. New board members are view-only until it is checked. Keep at least one person with edit access. |
 
-A board member's dashboard still shows only their own lots, even when the admin flag is on. Other residents' balances are on the admin ledger, not on the personal dashboard.
+A board member's dashboard still shows only their own lots. Other residents' balances are on the admin ledger. View-only board members can open that ledger but cannot change it.
 
 ## Data model
 
 Migrations live in `migrations/`.
 
-- `associations`, `users`, `roles`, `memberships` (`is_admin` is the admin flag on a board member)
+- `associations`, `users`, `roles`, `memberships` (`is_admin` is edit access on a board member; without it the board member is view-only)
 - `properties` (lots, with `lot_type` of `improved` or `unimproved`) and `property_owners`
 - `assessments` (`opens_on`, `lot_type`, amount, due date), `invoices`, `payments` (amounts in cents; payments are recorded, not charged online)
 - `documents` and `document_versions` (`current_version_id` is what residents see; `visibility` is `residents` or `board`)
@@ -314,7 +314,7 @@ Migrations live in `migrations/`.
 - `magic_links`, `sessions`
 - `join_requests` (public request to join: pending, reviewed, approved, or declined)
 
-Every tenant-owned row carries `association_id`. Financial queries also require that association id, and homeowner queries join `property_owners` for the signed-in user. Admin queries are rejected unless the membership is an active board member with the admin flag for that same association.
+Every tenant-owned row carries `association_id`. Financial queries also require that association id, and homeowner queries join `property_owners` for the signed-in user. Admin read pages require an active board member in that association. Creating, editing, and deleting also require edit access.
 
 Balance = non-void invoice amounts + late fees − recorded payments.
 

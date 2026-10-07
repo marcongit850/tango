@@ -42,11 +42,12 @@ import {
   versionById,
   writeAudit,
 } from "../db";
-import { keepsAnAdmin } from "../lib/access";
+import { activeAdminContacts, keepsAnAdmin } from "../lib/access";
 import { changeLoginEmail } from "../lib/login-email";
 import { isDocumentCategory } from "../lib/categories";
 import { annualDues, defaultDuesYear, isLotType } from "../lib/dues";
 import { parseOwnersCsv } from "../lib/csv";
+import { OWNER_IMPORT_TEMPLATE } from "../lib/owner-import-template";
 import { formatAddress, formatDateTime, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../lib/dates";
 import {
   deliverOwnerEmails,
@@ -87,7 +88,8 @@ import {
   type NewsEdit,
 } from "../views/admin";
 import { render } from "../views/layout";
-import { fileValue, readForm, redirectTo, requireStaff, textValue, type AppContext } from "./common";
+import { canEditAdmin } from "../lib/access";
+import { fileValue, readForm, redirectTo, requireEditor, requireStaff, textValue, type AppContext } from "./common";
 
 const ROLES = new Set<MembershipRole>(["homeowner", "board"]);
 const STATUSES = new Set<MembershipStatus>(["invited", "active", "inactive"]);
@@ -95,8 +97,15 @@ const METHODS = new Set(["check", "cash", "ach_recorded", "other"]);
 const INVOICE_STATUSES = new Set(["open", "partial", "paid", "void"]);
 
 export function registerAdminRoutes(app: Hono<AppBindings>): void {
+  const blockViewOnlyWrites = async (c: AppContext, next: () => Promise<void>) => {
+    if (c.req.method !== "GET" && c.req.method !== "HEAD") requireEditor(c);
+    await next();
+  };
+  app.use("/a/:slug/admin", blockViewOnlyWrites);
+  app.use("/a/:slug/admin/*", blockViewOnlyWrites);
+
   app.get("/a/:slug/admin", async (c) => {
-    const { association } = requireStaff(c);
+    const { association, membership } = requireStaff(c);
     const today = todayIso(association.timezone);
     const [properties, owners, ledger, threads, staffIds, audit, outstandingCents] = await Promise.all([
       listProperties(c.env.DB, association.id),
@@ -125,16 +134,15 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         waiting: threads.filter((thread) => messageWaitingOnBoard(thread, staff)).length,
         pendingJoins,
         outstandingCents,
-        admins: owners
-          .filter((owner) => owner.is_admin === 1 && owner.status !== "inactive")
-          .map((owner) => ({ user_id: owner.user_id, name: owner.name, email: owner.email })),
+        admins: activeAdminContacts(owners),
         audit,
+        canEdit: canEditAdmin(membership),
       }),
     });
   });
 
   app.get("/a/:slug/admin/owners", async (c) => {
-    const { association } = requireStaff(c);
+    const { association, membership } = requireStaff(c);
     const delinquentOnly = c.req.query("delinquent") === "1";
     const today = todayIso(association.timezone);
     const [owners, ledger, lots] = await Promise.all([
@@ -152,12 +160,12 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     return render(c, {
       title: delinquentOnly ? "Delinquent accounts" : "Owners & lots",
       active: "admin",
-      body: ownersPage(association, lots, decorated, delinquentOnly),
+      body: ownersPage(association, lots, decorated, delinquentOnly, canEditAdmin(membership)),
     });
   });
 
   app.get("/a/:slug/admin/owners/:userId", async (c) => {
-    const { association } = requireStaff(c);
+    const { association, membership } = requireStaff(c);
     const owner = (await listOwners(c.env.DB, association.id)).find((row) => row.user_id === c.req.param("userId"));
     if (!owner) throw new NotFoundError();
     const today = todayIso(association.timezone);
@@ -177,12 +185,13 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         balanceHref: balanceLot ? `/a/${association.slug}/admin/ledger/${balanceLot.property_id}` : "",
         lots: [],
         properties,
+        canEdit: canEditAdmin(membership),
       }),
     });
   });
 
   app.post("/a/:slug/admin/owners/:userId/role", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const role = textValue(fields, "role_id", 20);
     const status = textValue(fields, "status", 20);
@@ -194,7 +203,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const nextAdmin = role === "board" && fields.is_admin === "1";
     const currentlyAdmin = owner.role_id === "board" && owner.is_admin === 1 && owner.status === "active";
     if (!keepsAnAdmin({ activeAdminCount: await countActiveAdmins(c.env.DB, association.id), currentlyAdmin, nextAdmin: nextAdmin && status === "active" })) {
-      return redirectTo(c, ownerPath(association.slug, owner.user_id), "Keep at least one person with admin access.", "warn");
+      return redirectTo(c, ownerPath(association.slug, owner.user_id), "Keep at least one person with edit access.", "warn");
     }
     try {
       await c.env.DB
@@ -219,7 +228,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/owners/:userId/email", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const owner = (await listOwners(c.env.DB, association.id)).find((row) => row.user_id === c.req.param("userId"));
     if (!owner) throw new NotFoundError();
@@ -248,7 +257,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/owners/:userId/profile", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const owner = (await listOwners(c.env.DB, association.id)).find((row) => row.user_id === c.req.param("userId"));
     if (!owner) throw new NotFoundError();
@@ -274,7 +283,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/owners/:userId/lot", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const ownerId = c.req.param("userId");
     const property = await propertyInAssociation(c.env.DB, association.id, textValue(fields, "property_id", 80));
@@ -304,7 +313,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/owners/:userId/notice", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const ownerId = c.req.param("userId");
     const back = ownerPath(association.slug, ownerId);
@@ -378,7 +387,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/owners/:userId/remind", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     await readForm(c);
     const owner = (await listOwners(c.env.DB, association.id)).find((row) => row.user_id === c.req.param("userId"));
     if (!owner) throw new NotFoundError();
@@ -426,7 +435,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/owners/:userId/delete", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const owner = (await listOwners(c.env.DB, association.id)).find((row) => row.user_id === c.req.param("userId"));
     if (!owner) throw new NotFoundError();
@@ -440,7 +449,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         nextAdmin: false,
       })
     ) {
-      return redirectTo(c, back, "Keep at least one person with admin access.", "warn");
+      return redirectTo(c, back, "Keep at least one person with edit access.", "warn");
     }
     const removed = await deletePersonAccount(c.env.DB, association.id, owner.user_id);
     if (removed === "missing") throw new NotFoundError();
@@ -465,7 +474,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/lots", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const back = `/a/${association.slug}/admin/owners#lots`;
     const lotNumber = textValue(fields, "lot_number", 40);
@@ -509,7 +518,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/lots/:propertyId", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const back = `/a/${association.slug}/admin/owners#lots`;
     const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
@@ -547,7 +556,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/lots/:propertyId/owner", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const back = `/a/${association.slug}/admin/owners#lots`;
     const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
@@ -580,12 +589,23 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/a/:slug/admin/import", async (c) => {
+    const { association, membership } = requireStaff(c);
+    return render(c, { title: "CSV import", active: "admin", body: importPage(association, undefined, canEditAdmin(membership)) });
+  });
+
+  app.get("/a/:slug/admin/import/template.csv", (c) => {
     const { association } = requireStaff(c);
-    return render(c, { title: "CSV import", active: "admin", body: importPage(association) });
+    return new Response(OWNER_IMPORT_TEMPLATE, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${association.slug}-owners-template.csv"`,
+        "Cache-Control": "private, no-store",
+      },
+    });
   });
 
   app.post("/a/:slug/admin/import", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const file = fileValue(fields, "csv");
     if (!file || file.size === 0) return redirectTo(c, `/a/${association.slug}/admin/import`, "Choose a CSV file.", "warn");
@@ -607,7 +627,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/a/:slug/admin/ledger", async (c) => {
-    const { association } = requireStaff(c);
+    const { association, membership } = requireStaff(c);
     const today = todayIso(association.timezone);
     const [ledger, owners, properties] = await Promise.all([
       ledgerForAssociation(c.env.DB, association.id, today),
@@ -646,12 +666,13 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         assessments,
         duesReady,
         duesYear: defaultDuesYear(today),
+        canEdit: canEditAdmin(membership),
       }),
     });
   });
 
   app.get("/a/:slug/admin/ledger/:propertyId", async (c) => {
-    const { association } = requireStaff(c);
+    const { association, membership } = requireStaff(c);
     const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
     if (!property) throw new NotFoundError();
     const today = todayIso(association.timezone);
@@ -678,12 +699,13 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         balance,
         invoices,
         paymentCount: Number(paymentCount?.n ?? 0),
+        canEdit: canEditAdmin(membership),
       }),
     });
   });
 
   app.post("/a/:slug/admin/ledger/:propertyId/delete", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
     if (!property) throw new NotFoundError();
@@ -706,19 +728,19 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/a/:slug/admin/invoices/:invoiceId", async (c) => {
-    const { association } = requireStaff(c);
+    const { association, membership } = requireStaff(c);
     const invoice = await invoiceById(c.env.DB, association.id, c.req.param("invoiceId"));
     if (!invoice) throw new NotFoundError();
     const payments = await paymentsForInvoice(c.env.DB, association.id, invoice.id);
     return render(c, {
       title: invoice.invoice_number,
       active: "admin",
-      body: invoiceAdminPage({ association, invoice, payments }),
+      body: invoiceAdminPage({ association, invoice, payments, canEdit: canEditAdmin(membership) }),
     });
   });
 
   app.post("/a/:slug/admin/invoices", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const property = await propertyInAssociation(c.env.DB, association.id, textValue(fields, "property_id", 80));
     const description = textValue(fields, "description", 200);
@@ -753,7 +775,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/invoices/:invoiceId", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const id = c.req.param("invoiceId");
     const existing = await invoiceById(c.env.DB, association.id, id);
@@ -798,7 +820,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/invoices/:invoiceId/delete", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const id = c.req.param("invoiceId");
     const invoice = await invoiceById(c.env.DB, association.id, id);
@@ -831,7 +853,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/invoices/:invoiceId/payments/:paymentId/delete", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const invoiceId = c.req.param("invoiceId");
     const paymentId = c.req.param("paymentId");
@@ -867,7 +889,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/assessments", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const back = `/a/${association.slug}/admin/ledger#dues`;
     const year = Number(textValue(fields, "year", 4));
@@ -915,7 +937,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/assessments/:assessmentId", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const back = `/a/${association.slug}/admin/ledger#dues`;
     const id = c.req.param("assessmentId");
@@ -948,7 +970,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/assessments/:assessmentId/assign", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const back = `/a/${association.slug}/admin/ledger#dues`;
     if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, back, "Confirm the assign first.", "warn");
@@ -970,7 +992,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/assessments/:assessmentId/delete", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const back = `/a/${association.slug}/admin/ledger#dues`;
     const id = c.req.param("assessmentId");
@@ -999,7 +1021,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/payments", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const property = await propertyInAssociation(c.env.DB, association.id, textValue(fields, "property_id", 80));
     const amount = parseMoneyToCents(textValue(fields, "amount", 40));
@@ -1093,14 +1115,14 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/a/:slug/admin/documents", async (c) => {
-    const { association } = requireStaff(c);
+    const { association, membership } = requireStaff(c);
     await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
     const documents = await listDocuments(c.env.DB, association.id, true);
-    return render(c, { title: "Documents", active: "admin", body: documentsAdminPage(association, documents) });
+    return render(c, { title: "Documents", active: "admin", body: documentsAdminPage(association, documents, canEditAdmin(membership)) });
   });
 
   app.post("/a/:slug/admin/documents", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const title = textValue(fields, "title", 200);
     const category = textValue(fields, "category", 40);
@@ -1133,15 +1155,15 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/a/:slug/admin/documents/:documentId", async (c) => {
-    const { association } = requireStaff(c);
+    const { association, membership } = requireStaff(c);
     await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
     const document = await loadDocument(c, association.id, c.req.param("documentId"));
     const versions = await documentVersions(c.env.DB, association.id, document.id);
-    return render(c, { title: document.title, active: "admin", body: documentDetailPage(association, document, versions) });
+    return render(c, { title: document.title, active: "admin", body: documentDetailPage(association, document, versions, canEditAdmin(membership)) });
   });
 
   app.post("/a/:slug/admin/documents/:documentId/versions", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const document = await loadDocument(c, association.id, c.req.param("documentId"));
     const file = fileValue(fields, "file");
@@ -1186,7 +1208,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/documents/:documentId/current", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const document = await loadDocument(c, association.id, c.req.param("documentId"));
     const version = await versionById(c.env.DB, association.id, textValue(fields, "version_id", 80));
@@ -1207,7 +1229,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/documents/:documentId/visibility", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const document = await loadDocument(c, association.id, c.req.param("documentId"));
     const visibility = textValue(fields, "visibility", 20);
@@ -1230,7 +1252,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/documents/:documentId/delete", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const document = await loadDocument(c, association.id, c.req.param("documentId"));
     const back = `/a/${association.slug}/admin/documents`;
@@ -1278,23 +1300,26 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/a/:slug/admin/news", async (c) => {
-    const { association } = requireStaff(c);
+    const { association, membership } = requireStaff(c);
     const [announcements, events, faqs, contacts] = await Promise.all([
       allAnnouncements(c.env.DB, association.id),
       listEvents(c.env.DB, association.id),
       listFaqs(c.env.DB, association.id),
       listContacts(c.env.DB, association.id),
     ]);
-    const editing = newsEdit(c.req.query("edit") ?? "", c.req.query("id") ?? "", announcements, events, faqs, contacts, association.timezone);
+    const canEdit = canEditAdmin(membership);
+    const editing = canEdit
+      ? newsEdit(c.req.query("edit") ?? "", c.req.query("id") ?? "", announcements, events, faqs, contacts, association.timezone)
+      : null;
     return render(c, {
       title: "News",
       active: "admin",
-      body: newsAdminPage({ association, announcements, events, faqs, contacts, editing }),
+      body: newsAdminPage({ association, announcements, events, faqs, contacts, editing, canEdit }),
     });
   });
 
   app.post("/a/:slug/admin/announcements", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const kind = textValue(fields, "kind", 20);
     const title = textValue(fields, "title", 200);
@@ -1340,7 +1365,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/announcements/:announcementId/hide", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     await readForm(c);
     const id = c.req.param("announcementId");
     const now = new Date().toISOString();
@@ -1360,7 +1385,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/announcements/:announcementId", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const id = c.req.param("announcementId");
     const parsed = readAnnouncement(fields, association.timezone);
@@ -1395,7 +1420,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/announcements/:announcementId/delete", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const id = c.req.param("announcementId");
     if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, `/a/${association.slug}/admin/news`, "Confirm the delete first.", "warn");
@@ -1412,7 +1437,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/events", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const kind = textValue(fields, "kind", 20);
     const title = textValue(fields, "title", 200);
@@ -1453,7 +1478,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/events/:eventId", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const id = c.req.param("eventId");
     const parsed = readEvent(fields, association.timezone);
@@ -1487,7 +1512,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/events/:eventId/delete", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const id = c.req.param("eventId");
     if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, `/a/${association.slug}/admin/news`, "Confirm the delete first.", "warn");
@@ -1504,7 +1529,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/faqs", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const question = textValue(fields, "question", 300);
     const answer = textValue(fields, "answer", 5000);
@@ -1527,7 +1552,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/faqs/:faqId", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const id = c.req.param("faqId");
     const question = textValue(fields, "question", 300);
@@ -1550,7 +1575,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/faqs/:faqId/delete", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const id = c.req.param("faqId");
     if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, `/a/${association.slug}/admin/news`, "Confirm the delete first.", "warn");
@@ -1567,7 +1592,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/contacts", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const name = textValue(fields, "name", 120);
     const roleTitle = textValue(fields, "role_title", 120);
@@ -1598,7 +1623,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/contacts/:contactId", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const id = c.req.param("contactId");
     const name = textValue(fields, "name", 120);
@@ -1623,7 +1648,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/contacts/:contactId/delete", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const id = c.req.param("contactId");
     if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, `/a/${association.slug}/admin/news`, "Confirm the delete first.", "warn");
@@ -1640,10 +1665,10 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/a/:slug/admin/join-requests", async (c) => {
-    const { association } = requireStaff(c);
+    const { association, membership } = requireStaff(c);
     try {
       const rows = await listJoinRequests(c.env.DB, association.id);
-      return render(c, { title: "Join requests", active: "admin", body: joinRequestsPage(association, rows) });
+      return render(c, { title: "Join requests", active: "admin", body: joinRequestsPage(association, rows, canEditAdmin(membership)) });
     } catch (error) {
       if (!isMissingTable(error)) throw error;
       return render(c, {
@@ -1656,7 +1681,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/join-requests/:requestId/approve", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     await readForm(c);
     const requestId = c.req.param("requestId");
     const back = `/a/${association.slug}/admin/join-requests`;
@@ -1720,7 +1745,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/join-requests/:requestId/reviewed", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     await readForm(c);
     const requestId = c.req.param("requestId");
     const updated = await reviewJoinRequest(c.env.DB, association.id, requestId);
@@ -1737,7 +1762,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/join-requests/:requestId/decline", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     await readForm(c);
     const requestId = c.req.param("requestId");
     const back = `/a/${association.slug}/admin/join-requests`;
@@ -1763,7 +1788,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/join-requests/:requestId/delete", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const requestId = c.req.param("requestId");
     const back = `/a/${association.slug}/admin/join-requests`;
@@ -1782,16 +1807,16 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/a/:slug/admin/messages", async (c) => {
-    const { association } = requireStaff(c);
+    const { association, membership } = requireStaff(c);
     const [threads, staffIds] = await Promise.all([
       threadsForViewer(c.env.DB, association.id, "", true),
       staffUserIds(c.env.DB, association.id),
     ]);
-    return render(c, { title: "Messages", active: "admin", body: adminMessagesPage(association, threads, staffIds) });
+    return render(c, { title: "Messages", active: "admin", body: adminMessagesPage(association, threads, staffIds, canEditAdmin(membership)) });
   });
 
   app.get("/a/:slug/admin/messages/:threadId", async (c) => {
-    const { association } = requireStaff(c);
+    const { association, membership } = requireStaff(c);
     const threadId = c.req.param("threadId");
     const [messages, staffIds] = await Promise.all([
       threadMessages(c.env.DB, association.id, threadId),
@@ -1801,12 +1826,12 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     return render(c, {
       title: messages[0].subject,
       active: "admin",
-      body: adminThreadPage(association, messages[0].subject, messages, staffIds),
+      body: adminThreadPage(association, messages[0].subject, messages, staffIds, canEditAdmin(membership)),
     });
   });
 
   app.post("/a/:slug/admin/messages/:threadId/reviewed", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const threadId = c.req.param("threadId");
     const listPath = `/a/${association.slug}/admin/messages`;
@@ -1842,7 +1867,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/messages/:threadId/delete", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const threadId = c.req.param("threadId");
     const list = `/a/${association.slug}/admin/messages`;
@@ -1864,7 +1889,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/admin/messages/:threadId/messages/:messageId/delete", async (c) => {
-    const { association, user } = requireStaff(c);
+    const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const threadId = c.req.param("threadId");
     const messageId = c.req.param("messageId");
@@ -1890,9 +1915,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/a/:slug/admin/audit", async (c) => {
-    const { association } = requireStaff(c);
+    const { association, membership } = requireStaff(c);
     const rows = await listAudit(c.env.DB, association.id);
-    return render(c, { title: "Activity", active: "admin", body: auditPage(association, rows) });
+    return render(c, { title: "Activity", active: "admin", body: auditPage(association, rows, canEditAdmin(membership)) });
   });
 }
 

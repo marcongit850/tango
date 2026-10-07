@@ -438,6 +438,7 @@ export function threadPage(
     incoming?: boolean;
     next?: string;
     allowThreadDelete?: boolean;
+    allowReply?: boolean;
     replyDelete?: "all" | "own";
     viewerUserId?: string;
     inbox?: "admin" | "resident";
@@ -456,19 +457,23 @@ export function threadPage(
     })
     .join("");
   const intro = options.incoming
-    ? `<p class="muted">Incoming from owners. Only people with admin access can read the board side of this thread.</p>`
+    ? `<p class="muted">Incoming from owners. Board members can read these. Edit access is required to delete or mark reviewed.</p>`
     : "";
   const threadDelete = options.allowThreadDelete
     ? `<div class="actions">${confirmDeleteButton(threadDeleteAction(association.slug, threadId, inbox), "Delete thread", "Delete this message thread")}</div>`
     : "";
   const next = options.next ? `<input type="hidden" name="next" value="${esc(options.next)}">` : "";
-  return `<section class="panel"><h1>${esc(subject)}</h1>${intro}${threadDelete}</section>
-    <section class="stack">${items}</section>
-    <form class="panel fields" method="post" action="/a/${esc(association.slug)}/messages/${esc(threadId)}/reply">
+  const reply =
+    options.allowReply === false
+      ? ""
+      : `<form class="panel fields" method="post" action="/a/${esc(association.slug)}/messages/${esc(threadId)}/reply">
       ${next}
       ${areaField("Reply", "body", "", true)}
       <button type="submit">Send reply</button>
     </form>`;
+  return `<section class="panel"><h1>${esc(subject)}</h1>${intro}${threadDelete}</section>
+    <section class="stack">${items}</section>
+    ${reply}`;
 }
 
 function threadDeleteAction(slug: string, threadId: string, inbox: "admin" | "resident"): string {

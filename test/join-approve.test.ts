@@ -698,6 +698,7 @@ describe("delete a person or a lot", () => {
       );
       expect(page.status).toBe(200);
       const html = await page.text();
+      expect(html).toContain("> Edit access</label>");
       expect(html).toContain('action="/a/tango-mar/admin/owners/user_casey/delete"');
       expect(html).toContain('type="checkbox" name="confirm" value="yes"');
       expect(html).not.toContain("onsubmit=");
@@ -726,7 +727,7 @@ describe("delete a person or a lot", () => {
       );
       expect(lastAdmin.status).toBe(303);
       expect(decodeURIComponent(lastAdmin.headers.get("Set-Cookie") ?? "")).toContain(
-        "warn:Keep at least one person with admin access.",
+        "warn:Keep at least one person with edit access.",
       );
       expect(sqlite.prepare("SELECT id FROM users WHERE id = 'user_jordan'").get()).toEqual({ id: "user_jordan" });
 

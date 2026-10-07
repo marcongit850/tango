@@ -1,4 +1,4 @@
-import { isAdmin } from "../lib/access";
+import { canViewAdmin } from "../lib/access";
 import { findAssociationBySlug, findMembership, unreadCount } from "../db";
 import { esc, htmlResponse, isHttps } from "../lib/html";
 import type { AppBindings, Association, Membership } from "../types";
@@ -341,6 +341,17 @@ body:has(.ask-portal) main { padding-bottom: 5rem; }
 .ask-thread p { margin: 0.4rem 0 0; }
 .ask-panel input:disabled { cursor: not-allowed; background: #f6f3ec; color: var(--muted); }
 .ask-note { margin: 0.45rem 0 0; font-size: 0.88rem; }
+.access-selection-barrier {
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  line-height: 0;
+}
+.access-admin-list ul { margin: 0.35rem 0 0; padding-left: 1.2rem; }
+.access-admin-list li { margin: 0.35rem 0; }
+.access-admin-list li .muted { display: block; }
 @media (max-width: 800px) {
   .dash-grid { grid-template-columns: 1fr; }
   .lot { flex-direction: column; }
@@ -564,7 +575,7 @@ export async function render(
   const tone = c.get("flashTone");
   const flashHtml = flash ? `<div class="flash ${tone === "warn" ? "warn" : ""}">${esc(flash)}</div>` : "";
   const adminLink =
-    resident && isAdmin(membership)
+    resident && canViewAdmin(membership)
       ? `<a class="account-admin${options.active === "admin" ? " active" : ""}" href="${esc(`${base}/admin`)}">Admin</a>`
       : "";
   const account = user

@@ -381,7 +381,23 @@ describe("ledger invoice edit", () => {
         { headers: { Cookie: `tango_session=${admin}` } },
         env,
       );
-      expect(board.status).toBe(403);
+      expect(board.status).toBe(200);
+      const viewOnly = await board.text();
+      expect(viewOnly).toContain("View only. Edit access is required to create, edit, or delete.");
+      expect(viewOnly).not.toContain("Save invoice");
+      const boardWrite = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices",
+        post(admin, {
+          property_id: "prop_14",
+          description: "Should not save",
+          amount: "1.00",
+          late_fee: "0",
+          issued_on: "2026-01-15",
+          due_on: "2026-03-01",
+        }),
+        env,
+      );
+      expect(boardWrite.status).toBe(403);
     } finally {
       sqlite.close();
     }
@@ -611,6 +627,39 @@ describe("admin overview outstanding", () => {
       expect(await outstandingInvoiceCents(db, "assoc_tango_mar")).toBe(167550);
       const again = await app.request("http://localhost/a/tango-mar/admin", { headers: { Cookie: `tango_session=${token}` } }, env);
       expect(await again.text()).toContain("$1,675.50");
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe("owner import template", () => {
+  it("downloads the sample CSV for an admin and refuses a resident", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const admin = await signIn(sqlite, "user_jordan");
+    const resident = await signIn(sqlite, "user_sam");
+    try {
+      const page = await app.request("http://localhost/a/tango-mar/admin/import", { headers: { Cookie: `tango_session=${admin}` } }, env);
+      expect(await page.text()).toContain('href="/a/tango-mar/admin/import/template.csv"');
+      const denied = await app.request(
+        "http://localhost/a/tango-mar/admin/import/template.csv",
+        { headers: { Cookie: `tango_session=${resident}` } },
+        env,
+      );
+      expect(denied.status).toBe(403);
+      const file = await app.request(
+        "http://localhost/a/tango-mar/admin/import/template.csv",
+        { headers: { Cookie: `tango_session=${admin}` } },
+        env,
+      );
+      expect(file.status).toBe(200);
+      expect(file.headers.get("Content-Type")).toBe("text/csv; charset=utf-8");
+      expect(file.headers.get("Content-Disposition")).toBe('attachment; filename="tango-mar-owners-template.csv"');
+      const body = await file.text();
+      expect(body).toBe(readFileSync("samples/owner-import-template.csv", "utf8"));
+      expect(body.split("\n").filter((line) => line.length > 0)).toHaveLength(3);
     } finally {
       sqlite.close();
     }

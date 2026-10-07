@@ -10,7 +10,7 @@ import {
   retireLegacyJoinNotices,
   writeAudit,
 } from "../db";
-import { isAdmin, safeNextPath } from "../lib/access";
+import { canViewAdmin, safeNextPath } from "../lib/access";
 import { resendApiKey, sendResendEmail } from "../lib/email";
 import { NotFoundError, isMissingTable } from "../lib/errors";
 import { logError, logInfo } from "../lib/log";
@@ -40,7 +40,7 @@ async function portalForUser(c: AppContext): Promise<HomePortal | null> {
   if (!membership || membership.status === "inactive") return null;
   return {
     dashboardHref: `/a/${association.slug}/dashboard`,
-    adminHref: isAdmin(membership) ? `/a/${association.slug}/admin` : null,
+    adminHref: canViewAdmin(membership) ? `/a/${association.slug}/admin` : null,
   };
 }
 

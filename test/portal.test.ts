@@ -204,6 +204,13 @@ describe("public home", () => {
     expect(html).toContain("Your neighborhood portal for association information, documents, announcements, account details, and community resources.");
     expect(html).toContain('src="/tango-mar-boardwalk.png"');
     expect(html).toContain('src="/tango-mar-mark.png"');
+    expect(html).toContain('src="/welcome-intro.mp4"');
+    expect(html).toContain('poster="/welcome-intro-poster.jpg"');
+    expect(html).toContain('aria-label="Welcome to the Tango Mar owner portal"');
+    expect(html).toContain("controls");
+    expect(html).toContain("playsinline");
+    expect(html).not.toContain("autoplay");
+    expect(html.indexOf('href="/login"')).toBeLessThan(html.indexOf("welcome-intro.mp4"));
     expect(html).not.toContain('src="/favicon.png"');
     expect(html).toContain("Property Owners Association");
     expect(html).not.toContain("Welcome to your neighborhood dashboard");

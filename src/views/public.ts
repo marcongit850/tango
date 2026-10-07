@@ -22,21 +22,28 @@ export function homePage(showDemo: boolean, portal: HomePortal | null = null): s
       <img class="shore-photo" src="/tango-mar-boardwalk.png" alt="">
       <div class="shore-scrim" aria-hidden="true"></div>
       <div class="shore-inner">
-        <img class="mark" src="/tango-mar-mark.png" alt="Tango Mar Property Owners Association" width="1143" height="789">
-        <span class="rule" aria-hidden="true"></span>
-        <h1>Welcome to Tango Mar</h1>
-        <p class="place">A private beach neighborhood in Miramar Beach, Walton County, Florida.</p>
-        <p class="blurb">Your neighborhood portal for association information, documents, announcements, account details, and community resources.</p>
-        <p class="actions">
-          ${
-            portal
-              ? `<a class="button" href="${esc(portal.dashboardHref)}">Open dashboard</a>${
-                  portal.adminHref ? `<a class="button secondary" href="${esc(portal.adminHref)}">Admin</a>` : ""
-                }`
-              : `<a class="button" href="/login">Resident login</a>
-          <a class="button secondary" href="/join">Request access</a>`
-          }
-        </p>
+        <div class="shore-copy">
+          <img class="mark" src="/tango-mar-mark.png" alt="Tango Mar Property Owners Association" width="1143" height="789">
+          <span class="rule" aria-hidden="true"></span>
+          <h1>Welcome to Tango Mar</h1>
+          <p class="place">A private beach neighborhood in Miramar Beach, Walton County, Florida.</p>
+          <p class="blurb">Your neighborhood portal for association information, documents, announcements, account details, and community resources.</p>
+          <p class="actions">
+            ${
+              portal
+                ? `<a class="button" href="${esc(portal.dashboardHref)}">Open dashboard</a>${
+                    portal.adminHref ? `<a class="button secondary" href="${esc(portal.adminHref)}">Admin</a>` : ""
+                  }`
+                : `<a class="button" href="/login">Resident login</a>
+            <a class="button secondary" href="/join">Request access</a>`
+            }
+          </p>
+        </div>
+        <figure class="shore-video">
+          <video controls playsinline preload="metadata" poster="/welcome-intro-poster.jpg" width="1080" height="1920" title="Welcome to the Tango Mar owner portal" aria-label="Welcome to the Tango Mar owner portal">
+            <source src="/welcome-intro.mp4" type="video/mp4">
+          </video>
+        </figure>
       </div>
     </section>
     ${demo}`;

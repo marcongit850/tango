@@ -76,6 +76,8 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 400; letter-spacing: -0.02e
 button, .button, nav, label, input, select, textarea, th { font-family: var(--sans); }
 h1 { font-size: 2rem; }
 .muted { color: var(--muted); }
+.dues-help { margin: 0 0 1rem; padding-left: 1.15rem; }
+.dues-help li { margin: 0.4rem 0; }
 .flash { padding: 0.75rem 1rem; border-radius: 0; background: #e7f4ee; color: var(--ok); }
 .flash.warn { background: #fff4e5; color: var(--warn); }
 .emergency { background: var(--emergency); border: 1px solid #efc6c0; border-radius: 0; padding: 0.8rem 1rem; }

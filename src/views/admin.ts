@@ -1077,7 +1077,14 @@ function duesSection(options: {
     .join("");
   return `<section class="panel" id="dues">
     <h2>Annual dues</h2>
-    <p class="muted">The schedule opens January 1 and is due March 1. Improved lots are $625. Unimproved lots are $100. On the open date, each active lot of that type that does not already have this assessment gets an invoice. A missed day is caught up on the next run, and the invoice stays dated on the open date. A blank open date is not automatic. Assign to matching lots does that same assignment early. The amount stays off the balance until the open date, so a future year does not look due today. Upcoming stays Scheduled until that open date, then shows Invoiced. Changing the amount later does not rewrite invoices already assigned. A voided invoice stays void. Click a dollar amount under Assessments and balances to change one invoice. Delete removes the assessment and its unpaid invoices. Delete is refused when a payment is recorded on one of those invoices.</p>
+    <p class="muted">Set the open date, due date, and amounts for improved and unimproved lots. Add a year creates both: improved lots at $625 and unimproved lots at $100, open January 1 and due March 1.</p>
+    <ul class="muted dues-help">
+      <li>On the open date, each active lot of that type that does not already have this assessment gets an invoice. If a day is missed, the next run catches up. The invoice date stays the open date.</li>
+      <li>Leave the open date blank if you want to invoice only by hand. Use Assign to matching lots to create those invoices early.</li>
+      <li>Until the open date, the amount stays off the owner balance, so a future year does not look due today. Upcoming stays Scheduled until that open date. On and after the open date, once invoices are live, Upcoming shows Invoiced.</li>
+      <li>Changing the amount later does not rewrite invoices already assigned. A voided invoice stays void.</li>
+      <li>Under Assessments and balances, click a dollar amount to change one invoice. Delete removes the assessment and its unpaid invoices. Delete is blocked when a payment is recorded on one of those invoices.</li>
+    </ul>
     ${rows ? `<table><thead><tr><th>Assessment</th><th>Lots</th><th>Opens</th><th>Due</th><th>Amount</th><th>Invoices</th>${canEdit ? "<th></th>" : ""}</tr></thead><tbody>${rows}</tbody></table>` : empty("No assessments yet.")}
     ${canEdit ? `<h3>Add a year</h3>
     <form class="fields" method="post" action="${base}/assessments">

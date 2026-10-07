@@ -119,7 +119,6 @@ export function adminHome(options: {
         ${currentAdminList(options.association.slug, options.admins)}
       </details>
     </section>
-    <p class="overview-export"><a href="${base}/export.csv">Export ledger for the accountant</a></p>
     <section class="panel"><h2>Recent activity</h2>${auditTable(options.association, options.audit.slice(0, 8))}</section>`;
 }
 
@@ -377,7 +376,7 @@ export function ledgerPage(options: {
     <section class="panel">
       <h1>Assessments and balances</h1>
       <p class="muted">Click a dollar amount to open that lot's invoices. From there you can edit an invoice or delete it. Delete stays blocked when a payment is recorded on that invoice. Delete the payment on the invoice page first.</p>
-      <p><a href="/a/${esc(options.association.slug)}/admin/export.csv">Download CSV for the accountant</a></p>
+      <p><a href="/a/${esc(options.association.slug)}/admin/export.csv">Download ledger (CSV)</a></p>
       ${rows ? `<table><thead><tr><th>Lot</th><th>Primary owner</th><th>Charges</th><th>Late fees</th><th>Payments</th><th>Balance</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No lots.")}
     </section>
     ${duesSection(options)}

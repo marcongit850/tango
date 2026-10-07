@@ -677,13 +677,9 @@ describe("admin overview", () => {
     expect(html).not.toContain("<li></li>");
     expect(html).not.toContain("<details open>");
     expect(html).not.toContain("\u2014");
-    const access = html.slice(html.indexOf("<h2>Access</h2>"), html.indexOf("</details>") + "</details>".length);
-    expect(access).not.toContain("export.csv");
-    expect(access).not.toContain("Export ledger");
-    const exportLink = '<p class="overview-export"><a href="/a/tango-mar/admin/export.csv">Export ledger for the accountant</a></p>';
-    expect(html).toContain(exportLink);
-    expect(html.indexOf("</details>")).toBeLessThan(html.indexOf(exportLink));
-    expect(html.indexOf(exportLink)).toBeLessThan(html.indexOf("<h2>Recent activity</h2>"));
+    expect(html).not.toContain("export.csv");
+    expect(html).not.toContain("Download ledger");
+    expect(html).not.toContain("Export ledger");
     const details = html.slice(html.indexOf("<details>"), html.indexOf("</details>"));
     expect(details).toContain("<summary>Current admins</summary>");
     expect(details).toContain("Marc");
@@ -1546,7 +1542,8 @@ describe("ledger payment invoices", () => {
     expect(invoiceOptions.filter((option) => option.hidden).map((option) => option.value)).toEqual(["inv-4"]);
     expect(invoiceOptions.find((option) => option.value === "inv-4")?.propertyId).toBe("prop-4");
     expect(html).toContain('<script src="/ledger-payment.js"></script>');
-    expect(html).toContain('<a href="/a/tango-mar/admin/export.csv">Download CSV for the accountant</a>');
+    expect(html).toContain('<a href="/a/tango-mar/admin/export.csv">Download ledger (CSV)</a>');
+    expect(html).not.toContain("Download CSV for the accountant");
     const invoiceForm = formElement(html, "/a/tango-mar/admin/invoices");
     expect(invoiceForm).not.toContain("data-payment-form");
     expect(invoiceForm).not.toContain("data-property-id");

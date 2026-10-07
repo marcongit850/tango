@@ -16,6 +16,16 @@ export function isAdmin(membership: AccessMembership): boolean {
   return Number(membership.is_admin) === 1;
 }
 
+/** Active board members can open admin read pages. They are view-only until edit access is on. */
+export function canViewAdmin(membership: AccessMembership): boolean {
+  return isBoardMember(membership);
+}
+
+/** Edit access: create, edit, and delete in admin tools. */
+export function canEditAdmin(membership: AccessMembership): boolean {
+  return isAdmin(membership);
+}
+
 /**
  * Admins see ledgers inside their own association.
  * Homeowners and board members without admin see only lots they own.
@@ -34,7 +44,7 @@ export function canViewPropertyFinancials(
 
 export type AdminContact = { user_id: string; name: string; email: string };
 
-/** Active board members with Admin access, one row per person, in the given order. */
+/** Active board members with edit access, one row per person, in the given order. */
 export function activeAdminContacts(
   people: (AdminContact & { role_id: string; is_admin?: number | boolean | string | null; status?: string | null })[],
 ): AdminContact[] {

@@ -1,4 +1,4 @@
-import { isAdmin } from "../lib/access";
+import { canViewAdmin } from "../lib/access";
 import { findAssociationBySlug, findMembership, unreadCount } from "../db";
 import { esc, htmlResponse, isHttps } from "../lib/html";
 import type { AppBindings, Association, Membership } from "../types";
@@ -575,7 +575,7 @@ export async function render(
   const tone = c.get("flashTone");
   const flashHtml = flash ? `<div class="flash ${tone === "warn" ? "warn" : ""}">${esc(flash)}</div>` : "";
   const adminLink =
-    resident && isAdmin(membership)
+    resident && canViewAdmin(membership)
       ? `<a class="account-admin${options.active === "admin" ? " active" : ""}" href="${esc(`${base}/admin`)}">Admin</a>`
       : "";
   const account = user

@@ -381,7 +381,23 @@ describe("ledger invoice edit", () => {
         { headers: { Cookie: `tango_session=${admin}` } },
         env,
       );
-      expect(board.status).toBe(403);
+      expect(board.status).toBe(200);
+      const viewOnly = await board.text();
+      expect(viewOnly).toContain("View only. Edit access is required to create, edit, or delete.");
+      expect(viewOnly).not.toContain("Save invoice");
+      const boardWrite = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices",
+        post(admin, {
+          property_id: "prop_14",
+          description: "Should not save",
+          amount: "1.00",
+          late_fee: "0",
+          issued_on: "2026-01-15",
+          due_on: "2026-03-01",
+        }),
+        env,
+      );
+      expect(boardWrite.status).toBe(403);
     } finally {
       sqlite.close();
     }

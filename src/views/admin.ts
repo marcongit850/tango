@@ -41,7 +41,7 @@ import {
 } from "./bits";
 import { threadPage } from "./resident";
 
-function adminNav(slug: string, current: string): string {
+function adminNav(slug: string, current: string, canEdit = true): string {
   const links = [
     ["overview", "Overview"],
     ["owners", "Owners & lots"],
@@ -65,7 +65,7 @@ function adminNav(slug: string, current: string): string {
               : `/a/${esc(slug)}/admin/${id}`;
       return `<a class="button ${id === current ? "" : "secondary"}" href="${href}">${label}</a>`;
     })
-    .join(" ")}</p>`;
+    .join(" ")}</p>${canEdit ? "" : `<p class="muted">View only. Edit access is required to create, edit, or delete.</p>`}`;
 }
 
 function moneyLink(href: string, cents: number): string {
@@ -92,16 +92,18 @@ export function adminHome(options: {
   outstandingCents: number;
   admins: { user_id: string; name: string; email: string }[];
   audit: AuditRow[];
+  canEdit?: boolean;
 }): string {
+  const canEdit = options.canEdit !== false;
   const base = `/a/${esc(options.association.slug)}/admin`;
   const joins =
     options.pendingJoins === null
       ? ""
       : statCard(options.pendingJoins, "Join requests waiting", `${base}/join-requests`);
-  return `${adminNav(options.association.slug, "overview")}
+  return `${adminNav(options.association.slug, "overview", canEdit)}
     <section class="panel">
       <h1>Board admin</h1>
-      <p class="muted">Only board admins can open these tools.</p>
+      <p class="muted">Board members can view these tools. Edit access is required to change them.</p>
     </section>
     <section class="grid">
       ${statCard(formatMoney(options.outstandingCents), "Total Outstanding", `${base}/ledger`)}
@@ -123,7 +125,7 @@ export function adminHome(options: {
 }
 
 const ACCESS_EXPLAINER =
-  "Admin access opens these board tools. Homeowners only see their own lots. Keep at least one admin.";
+  "Board members can view these tools. Edit access is required to create, edit, or delete. Homeowners only see their own lots. Keep at least one person with edit access.";
 
 function accessExplainer(): string {
   // WebKit triple-click walks past a paragraph into later elements until it finds a line break.
@@ -156,6 +158,7 @@ export function ownersPage(
   lots: LotRow[],
   owners: (OwnerListRow & { balance_cents?: number; delinquent?: boolean })[],
   delinquentOnly: boolean,
+  canEdit = true,
 ): string {
   const rows = owners
     .map(
@@ -173,14 +176,8 @@ export function ownersPage(
   const lotRows = lots
     .map((lot) => {
       const edit = `/a/${esc(association.slug)}/admin/lots/${esc(lot.id)}`;
-      return `<tr>
-        <td><a href="/a/${esc(association.slug)}/admin/ledger/${esc(lot.id)}">Lot ${esc(lot.lot_number)}</a></td>
-        <td>${esc(lot.street_address)}</td>
-        <td>${esc(lotTypeLabel(lot.lot_type))}</td>
-        <td>${lot.owner_name ? esc(lot.owner_name) : "No owner"}</td>
-        <td>${lot.owner_email ? esc(lot.owner_email) : ""}</td>
-        <td>${esc(lot.status)}</td>
-        <td>
+      const editCell = canEdit
+        ? `<td>
           <details>
             <summary>Edit</summary>
             <form class="fields" method="post" action="${edit}">
@@ -201,16 +198,21 @@ export function ownersPage(
               <button class="secondary" type="submit">Assign owner</button>
             </form>
           </details>
-        </td>
+        </td>`
+        : "";
+      return `<tr>
+        <td><a href="/a/${esc(association.slug)}/admin/ledger/${esc(lot.id)}">Lot ${esc(lot.lot_number)}</a></td>
+        <td>${esc(lot.street_address)}</td>
+        <td>${esc(lotTypeLabel(lot.lot_type))}</td>
+        <td>${lot.owner_name ? esc(lot.owner_name) : "No owner"}</td>
+        <td>${lot.owner_email ? esc(lot.owner_email) : ""}</td>
+        <td>${esc(lot.status)}</td>
+        ${editCell}
       </tr>`;
     })
     .join("");
-  return `${adminNav(association.slug, "owners")}
-    <section class="panel" id="lots">
-      <h1>Owners & lots</h1>
-      <p class="muted">Each lot shows its primary owner. CSV import is still the bulk way to add a roster. Set improved or unimproved here before assigning annual dues.</p>
-      ${lotRows ? `<table><thead><tr><th>Lot</th><th>Address</th><th>Type</th><th>Primary owner</th><th>Email</th><th>Status</th><th></th></tr></thead><tbody>${lotRows}</tbody></table>` : empty("No lots yet.")}
-      <h2>Add a lot</h2>
+  const addLot = canEdit
+    ? `<h2>Add a lot</h2>
       <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/lots">
         ${textField("Lot number", "lot_number", { required: true })}
         ${textField("Street address", "street_address", { required: true })}
@@ -219,7 +221,14 @@ export function ownersPage(
           { value: "unimproved", label: "Unimproved" },
         ], "improved")}
         <button type="submit">Add lot</button>
-      </form>
+      </form>`
+    : "";
+  return `${adminNav(association.slug, "owners", canEdit)}
+    <section class="panel" id="lots">
+      <h1>Owners & lots</h1>
+      <p class="muted">Each lot shows its primary owner. CSV import is still the bulk way to add a roster. Set improved or unimproved here before assigning annual dues.</p>
+      ${lotRows ? `<table><thead><tr><th>Lot</th><th>Address</th><th>Type</th><th>Primary owner</th><th>Email</th><th>Status</th>${canEdit ? "<th></th>" : ""}</tr></thead><tbody>${lotRows}</tbody></table>` : empty("No lots yet.")}
+      ${addLot}
     </section>
     <section class="panel" id="logins">
       <h2>${delinquentOnly ? "Delinquent accounts" : "Users"}</h2>
@@ -239,18 +248,15 @@ export function ownerDetailPage(options: {
   balanceHref?: string;
   lots: PropertyRow[];
   properties: PropertyRow[];
+  canEdit?: boolean;
 }): string {
   const { association, owner } = options;
+  const canEdit = options.canEdit !== false;
   const base = `/a/${association.slug}/admin/owners/${owner.user_id}`;
   const lotChoices = options.properties
     .map((property) => ({ value: property.id, label: `Lot ${property.lot_number}, ${property.street_address}` }));
-  return `${adminNav(association.slug, "owners")}
-    <section class="panel">
-      <h1>${esc(owner.name)}</h1>
-      <p>${esc(owner.email)}${owner.phone ? ` · ${esc(owner.phone)}` : ""}</p>
-      <p>${esc(roleLabel(owner.role_id, owner.is_admin === 1))} · ${esc(owner.status)}</p>
-      <p>Primary lot balance ${options.balance === null ? "" : options.balanceHref ? moneyLink(options.balanceHref, options.balance) : moneySpan(options.balance)}</p>
-      <h2>Name and phone</h2>
+  const writes = canEdit
+    ? `<h2>Name and phone</h2>
       <p class="muted">Name is required. Phone is optional and shows on this page for the board.</p>
       <form class="fields" method="post" action="${esc(base)}/profile">
         ${textField("Name", "name", { value: owner.name, required: true })}
@@ -272,8 +278,8 @@ export function ownerDetailPage(options: {
             { value: "homeowner", label: "Homeowner" },
             { value: "board", label: "Board member" },
           ], owner.role_id === "board" ? "board" : "homeowner")}
-          <label><input type="checkbox" name="is_admin" value="1" ${owner.role_id === "board" && owner.is_admin === 1 ? "checked" : ""}> Admin access</label>
-          <p class="muted">Admin access applies only to a board member. Keep at least one active admin.</p>
+          <label><input type="checkbox" name="is_admin" value="1" ${owner.role_id === "board" && owner.is_admin === 1 ? "checked" : ""}> Edit access</label>
+          <p class="muted">Edit access lets a board member create, edit, and delete. Without it, they can view these pages. Keep at least one person with edit access.</p>
           ${selectField("Status", "status", [
             { value: "active", label: "Active" },
             { value: "invited", label: "Invited" },
@@ -311,12 +317,24 @@ export function ownerDetailPage(options: {
     </section>
     <section class="panel" id="delete">
       <h2>Delete person</h2>
-      <p class="muted">This removes the login, sessions, and membership. Messages they sent are removed. Lots and their invoices stay. Keep at least one active admin.</p>
+      <p class="muted">This removes the login, sessions, and membership. Messages they sent are removed. Lots and their invoices stay. Keep at least one person with edit access.</p>
       ${confirmDeleteButton(`${base}/delete`, "Delete person", "Delete this person")}
-    </section>`;
+    </section>`
+    : "";
+  return `${adminNav(association.slug, "owners", canEdit)}
+    <section class="panel">
+      <h1>${esc(owner.name)}</h1>
+      <p>${esc(owner.email)}${owner.phone ? ` · ${esc(owner.phone)}` : ""}</p>
+      <p>${esc(roleLabel(owner.role_id, owner.is_admin === 1))} · ${esc(owner.status)}</p>
+      <p>Primary lot balance ${options.balance === null ? "" : options.balanceHref ? moneyLink(options.balanceHref, options.balance) : moneySpan(options.balance)}</p>
+      ${writes || "</section>"}`;
 }
 
-export function importPage(association: Association, result?: { importResult: ImportResult; parseErrors: CsvIssue[] }): string {
+export function importPage(
+  association: Association,
+  result?: { importResult: ImportResult; parseErrors: CsvIssue[] },
+  canEdit = true,
+): string {
   const issues = [
     ...(result?.parseErrors ?? []),
     ...(result?.importResult.errors ?? []),
@@ -325,18 +343,22 @@ export function importPage(association: Association, result?: { importResult: Im
     ? `<div class="flash">Created ${result.importResult.createdUsers}, updated ${result.importResult.updatedUsers}, opening invoices ${result.importResult.invoices}, opening credits ${result.importResult.credits}.</div>`
     : "";
   const issueList = issues.map((issue) => `<li>Line ${issue.line}: ${esc(issue.message)}</li>`).join("");
-  return `${adminNav(association.slug, "import")}
+  const upload = canEdit
+    ? `<form class="fields" method="post" action="/a/${esc(association.slug)}/admin/import" enctype="multipart/form-data">
+        <label>CSV file<input type="file" name="csv" accept=".csv,text/csv" required></label>
+        <button type="submit">Import</button>
+      </form>`
+    : "";
+  return `${adminNav(association.slug, "import", canEdit)}
     <section class="panel">
       <h1>Import owners from CSV</h1>
       <p>Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>.</p>
       <p>A positive starting balance adds one opening invoice per lot (re-import will not double it).</p>
+      <p>The admin column is edit access. Leave it blank for a view-only board member.</p>
       <p><a href="/a/${esc(association.slug)}/admin/import/template.csv">Download template</a></p>
       ${summary}
       ${issueList ? `<ul>${issueList}</ul>` : ""}
-      <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/import" enctype="multipart/form-data">
-        <label>CSV file<input type="file" name="csv" accept=".csv,text/csv" required></label>
-        <button type="submit">Import</button>
-      </form>
+      ${upload}
     </section>`;
 }
 
@@ -353,7 +375,9 @@ export function ledgerPage(options: {
   assessments: AssessmentAdminRow[];
   duesReady: boolean;
   duesYear: number;
+  canEdit?: boolean;
 }): string {
+  const canEdit = options.canEdit !== false;
   const rows = options.ledger
     .map((row) => {
       const href = `/a/${options.association.slug}/admin/ledger/${row.property_id}`;
@@ -373,15 +397,8 @@ export function ledgerPage(options: {
     label: `Lot ${property.lot_number}`,
   }));
   const selectedLot = propertyOptions[0]?.value ?? "";
-  return `${adminNav(options.association.slug, "ledger")}
-    <section class="panel">
-      <h1>Assessments and balances</h1>
-      <p class="muted">Click a dollar amount to open that lot's invoices. From there you can edit an invoice or delete it. Delete stays blocked when a payment is recorded on that invoice. Delete the payment on the invoice page first.</p>
-      <p><a href="/a/${esc(options.association.slug)}/admin/export.csv">Download ledger (CSV)</a></p>
-      ${rows ? `<table><thead><tr><th>Lot</th><th>Primary owner</th><th>Charges</th><th>Late fees</th><th>Payments</th><th>Balance</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No lots.")}
-    </section>
-    ${duesSection(options)}
-    <section class="split">
+  const record = canEdit
+    ? `<section class="split">
       <article class="panel">
         <h2>Record an invoice</h2>
         <form class="fields" method="post" action="/a/${esc(options.association.slug)}/admin/invoices">
@@ -421,7 +438,17 @@ export function ledgerPage(options: {
         </form>
         <script src="/ledger-payment.js"></script>
       </article>
-    </section>`;
+    </section>`
+    : "";
+  return `${adminNav(options.association.slug, "ledger", canEdit)}
+    <section class="panel">
+      <h1>Assessments and balances</h1>
+      <p class="muted">Click a dollar amount to open that lot's invoices. From there you can edit an invoice or delete it. Delete stays blocked when a payment is recorded on that invoice. Delete the payment on the invoice page first.</p>
+      <p><a href="/a/${esc(options.association.slug)}/admin/export.csv">Download ledger (CSV)</a></p>
+      ${rows ? `<table><thead><tr><th>Lot</th><th>Primary owner</th><th>Charges</th><th>Late fees</th><th>Payments</th><th>Balance</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No lots.")}
+    </section>
+    ${duesSection(options, canEdit)}
+    ${record}`;
 }
 
 export function ledgerLotPage(options: {
@@ -433,7 +460,9 @@ export function ledgerLotPage(options: {
   balance: BalanceRow | null;
   invoices: InvoiceRow[];
   paymentCount: number;
+  canEdit?: boolean;
 }): string {
+  const canEdit = options.canEdit !== false;
   const base = `/a/${esc(options.association.slug)}/admin`;
   const rows = options.invoices
     .map((invoice) => {
@@ -454,14 +483,23 @@ export function ledgerLotPage(options: {
     ? `<p>Balance ${moneySpan(options.balance.balance_cents)}${options.balance.delinquent ? ` <span class="badge late">Past due</span>` : ""}</p>`
     : "";
   const blocked = options.invoices.length > 0 || options.paymentCount > 0;
-  const remove = blocked
-    ? `<p>This lot still has invoices or payments. Clear those before deleting the lot.</p>`
-    : confirmDeleteButton(
-        `/a/${options.association.slug}/admin/ledger/${options.propertyId}/delete`,
-        "Delete lot",
-        "Delete this lot",
-      );
-  return `${adminNav(options.association.slug, "ledger")}
+  const remove = !canEdit
+    ? ""
+    : blocked
+      ? `<p>This lot still has invoices or payments. Clear those before deleting the lot.</p>`
+      : confirmDeleteButton(
+          `/a/${options.association.slug}/admin/ledger/${options.propertyId}/delete`,
+          "Delete lot",
+          "Delete this lot",
+        );
+  const deleteSection = canEdit
+    ? `<section class="panel" id="delete">
+      <h2>Delete lot</h2>
+      <p class="muted">This removes the lot and its owner links. Invoices and payments have to be cleared first.</p>
+      ${remove}
+    </section>`
+    : "";
+  return `${adminNav(options.association.slug, "ledger", canEdit)}
     <section class="panel">
       <p><a href="${base}/ledger">Assessments and balances</a></p>
       <h1>Lot ${esc(options.lotNumber)}</h1>
@@ -474,19 +512,17 @@ export function ledgerLotPage(options: {
           : empty("No invoices on this lot.")
       }
     </section>
-    <section class="panel" id="delete">
-      <h2>Delete lot</h2>
-      <p class="muted">This removes the lot and its owner links. Invoices and payments have to be cleared first.</p>
-      ${remove}
-    </section>`;
+    ${deleteSection}`;
 }
 
 export function invoiceAdminPage(options: {
   association: Association;
   invoice: InvoiceRow;
   payments: InvoicePaymentRow[];
+  canEdit?: boolean;
 }): string {
   const { association, invoice } = options;
+  const canEdit = options.canEdit !== false;
   const base = `/a/${esc(association.slug)}/admin`;
   const paid = Number(invoice.paid_cents);
   const remaining = Number(invoice.amount_cents) + Number(invoice.late_fee_cents) - paid;
@@ -498,7 +534,7 @@ export function invoiceAdminPage(options: {
         <td>${esc(payment.reference)}</td>
         <td>${moneySpan(Number(payment.amount_cents))}</td>
         <td>${esc(payment.notes)}</td>
-        <td>${confirmDeleteButton(`/a/${association.slug}/admin/invoices/${invoice.id}/payments/${payment.id}/delete`, "Delete payment", "Delete this payment")}</td>
+        <td>${canEdit ? confirmDeleteButton(`/a/${association.slug}/admin/invoices/${invoice.id}/payments/${payment.id}/delete`, "Delete payment", "Delete this payment") : ""}</td>
       </tr>`,
     )
     .join("");
@@ -507,13 +543,8 @@ export function invoiceAdminPage(options: {
       ? `<p class="muted">A payment is recorded on this invoice, so delete stays blocked. Delete that payment above first if it was recorded by mistake. You can still change the amount, dates, description, and status.</p>`
       : `<p class="muted">This removes the invoice from the lot.</p>
          ${confirmDeleteButton(`/a/${association.slug}/admin/invoices/${invoice.id}/delete`, "Delete invoice", "Delete this invoice")}`;
-  return `${adminNav(association.slug, "ledger")}
-    <section class="panel">
-      <p><a href="${base}/ledger/${esc(invoice.property_id)}">Lot ${esc(invoice.lot_number)}</a></p>
-      <h1>${esc(invoice.invoice_number)}</h1>
-      <p><span class="badge">${esc(invoice.status)}</span></p>
-      <p>Amount ${moneySpan(Number(invoice.amount_cents))} · Late fee ${moneySpan(Number(invoice.late_fee_cents))} · Paid ${moneySpan(paid)} · Remaining ${moneySpan(remaining)}</p>
-      <h2>Edit invoice</h2>
+  const editForm = canEdit
+    ? `<h2>Edit invoice</h2>
       <form class="fields" method="post" action="${base}/invoices/${esc(invoice.id)}">
         ${textField("Description", "description", { value: invoice.description, required: true })}
         ${textField("Amount", "amount", { value: dollarsInput(invoice.amount_cents), required: true })}
@@ -528,7 +559,21 @@ export function invoiceAdminPage(options: {
         ], invoice.status)}
         <p class="muted">Open, partial, and paid follow payments on this invoice when you save. Void leaves the invoice off the balance. A recorded payment stays on the lot.</p>
         <button type="submit">Save invoice</button>
-      </form>
+      </form>`
+    : "";
+  const deleteSection = canEdit
+    ? `<section class="panel">
+      <h2>Delete invoice</h2>
+      ${remove}
+    </section>`
+    : "";
+  return `${adminNav(association.slug, "ledger", canEdit)}
+    <section class="panel">
+      <p><a href="${base}/ledger/${esc(invoice.property_id)}">Lot ${esc(invoice.lot_number)}</a></p>
+      <h1>${esc(invoice.invoice_number)}</h1>
+      <p><span class="badge">${esc(invoice.status)}</span></p>
+      <p>Amount ${moneySpan(Number(invoice.amount_cents))} · Late fee ${moneySpan(Number(invoice.late_fee_cents))} · Paid ${moneySpan(paid)} · Remaining ${moneySpan(remaining)}</p>
+      ${editForm}
     </section>
     <section class="panel">
       <h2>Payments on this invoice</h2>
@@ -538,13 +583,10 @@ export function invoiceAdminPage(options: {
           : empty("No payment is recorded on this invoice.")
       }
     </section>
-    <section class="panel">
-      <h2>Delete invoice</h2>
-      ${remove}
-    </section>`;
+    ${deleteSection}`;
 }
 
-export function documentsAdminPage(association: Association, documents: DocumentRow[]): string {
+export function documentsAdminPage(association: Association, documents: DocumentRow[], canEdit = true): string {
   const rows = documents
     .map(
       (doc) => `<tr>
@@ -555,14 +597,8 @@ export function documentsAdminPage(association: Association, documents: Document
       </tr>`,
     )
     .join("");
-  return `${adminNav(association.slug, "documents")}
-    <section class="split">
-      <article class="panel">
-        <h1>Documents</h1>
-        <p class="muted">Residents see the version marked current. Choose board-only for budgets and other financial reports.</p>
-        ${rows ? `<table><thead><tr><th>Category</th><th>Title</th><th>Visibility</th><th>Current</th></tr></thead><tbody>${rows}</tbody></table>` : empty("No documents yet.")}
-      </article>
-      <article class="panel">
+  const publish = canEdit
+    ? `<article class="panel">
         <h2>Publish a file</h2>
         <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/documents" enctype="multipart/form-data">
           ${textField("Title", "title", { required: true })}
@@ -576,7 +612,16 @@ export function documentsAdminPage(association: Association, documents: Document
           ${emailOwnersField()}
           <button type="submit">Publish</button>
         </form>
+      </article>`
+    : "";
+  return `${adminNav(association.slug, "documents", canEdit)}
+    <section class="split">
+      <article class="panel">
+        <h1>Documents</h1>
+        <p class="muted">Residents see the version marked current. Choose board-only for budgets and other financial reports.</p>
+        ${rows ? `<table><thead><tr><th>Category</th><th>Title</th><th>Visibility</th><th>Current</th></tr></thead><tbody>${rows}</tbody></table>` : empty("No documents yet.")}
       </article>
+      ${publish}
     </section>`;
 }
 
@@ -584,6 +629,7 @@ export function documentDetailPage(
   association: Association,
   document: { id: string; title: string; category: DocumentCategory; visibility: string; current_version_id: string | null },
   versions: VersionRow[],
+  canEdit = true,
 ): string {
   const rows = versions
     .map(
@@ -593,25 +639,22 @@ export function documentDetailPage(
         <td>${esc(version.notes)}</td>
         <td>${dateTimeCell(version.created_at, association.timezone)}</td>
         <td>${documentFileLinks(`/a/${association.slug}/admin/documents/${document.id}/versions/${version.id}/file`, version.content_type)}</td>
-        <td>${version.id === document.current_version_id ? "" : `<form method="post" action="/a/${esc(association.slug)}/admin/documents/${esc(document.id)}/current"><input type="hidden" name="version_id" value="${esc(version.id)}"><button class="secondary" type="submit">Make current</button></form>`}</td>
+        <td>${!canEdit || version.id === document.current_version_id ? "" : `<form method="post" action="/a/${esc(association.slug)}/admin/documents/${esc(document.id)}/current"><input type="hidden" name="version_id" value="${esc(version.id)}"><button class="secondary" type="submit">Make current</button></form>`}</td>
       </tr>`,
     )
     .join("");
-  return `${adminNav(association.slug, "documents")}
-    <section class="panel">
-      <h1>${esc(document.title)}</h1>
-      <p>${categoryCell(document.category)} · ${esc(visibilityLabel(document.visibility))}</p>
-      <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/documents/${esc(document.id)}/visibility">
+  const visibility = canEdit
+    ? `<form class="fields" method="post" action="/a/${esc(association.slug)}/admin/documents/${esc(document.id)}/visibility">
         ${selectField("Who can see it", "visibility", [
           { value: "residents", label: "Owners and residents" },
           { value: "board", label: "Board only" },
         ], document.visibility)}
         <button class="secondary" type="submit">Save visibility</button>
       </form>
-      <p class="muted">Saving visibility does not upload a new file.</p>
-      ${rows ? `<table><thead><tr><th>Version</th><th>File</th><th>Notes</th><th>Uploaded</th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table>` : ""}
-    </section>
-    <section class="panel">
+      <p class="muted">Saving visibility does not upload a new file.</p>`
+    : "";
+  const upload = canEdit
+    ? `<section class="panel">
       <h2>Upload a new version</h2>
       <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/documents/${esc(document.id)}/versions" enctype="multipart/form-data">
         ${areaField("Notes", "notes")}
@@ -627,7 +670,16 @@ export function documentDetailPage(
         <label><input type="checkbox" name="confirm" value="yes" required> Delete this document and its files</label>
         <button class="secondary" type="submit">Delete document</button>
       </form>
-    </section>`;
+    </section>`
+    : "";
+  return `${adminNav(association.slug, "documents", canEdit)}
+    <section class="panel">
+      <h1>${esc(document.title)}</h1>
+      <p>${categoryCell(document.category)} · ${esc(visibilityLabel(document.visibility))}</p>
+      ${visibility}
+      ${rows ? `<table><thead><tr><th>Version</th><th>File</th><th>Notes</th><th>Uploaded</th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table>` : ""}
+    </section>
+    ${upload}`;
 }
 
 export type NewsEdit =
@@ -643,10 +695,12 @@ export function newsAdminPage(options: {
   faqs: FaqRow[];
   contacts: ContactRow[];
   editing?: NewsEdit | null;
+  canEdit?: boolean;
 }): string {
   const { association } = options;
+  const canEdit = options.canEdit !== false;
   const base = `/a/${esc(association.slug)}/admin`;
-  const editing = options.editing ?? null;
+  const editing = canEdit ? options.editing ?? null : null;
   const editingId = editing ? ("row" in editing ? editing.row.id : "") : "";
   const announcements = options.announcements
     .map((item) => {
@@ -655,7 +709,7 @@ export function newsAdminPage(options: {
         <td>${esc(item.kind)}${hidden ? ` <span class="badge">Hidden</span>` : ""}${editingId === item.id ? ` <span class="badge">Editing</span>` : ""}</td>
         <td>${esc(item.title)}</td>
         <td>${dateCell(item.published_at, association.timezone)}</td>
-        <td>${newsItemActions(association.slug, "announcements", item.id, `${base}/announcements/${esc(item.id)}/hide`)}</td>
+        <td>${newsItemActions(association.slug, "announcements", item.id, canEdit ? `${base}/announcements/${esc(item.id)}/hide` : "", canEdit)}</td>
       </tr>`;
     })
     .join("");
@@ -665,7 +719,7 @@ export function newsAdminPage(options: {
         <td>${esc(event.kind)}${editingId === event.id ? ` <span class="badge">Editing</span>` : ""}</td>
         <td>${esc(event.title)}</td>
         <td>${dateTimeCell(event.starts_at, association.timezone)}</td>
-        <td>${newsItemActions(association.slug, "events", event.id)}</td>
+        <td>${newsItemActions(association.slug, "events", event.id, "", canEdit)}</td>
       </tr>`,
     )
     .join("");
@@ -673,7 +727,7 @@ export function newsAdminPage(options: {
     .map(
       (faq) => `<tr>
         <td>${esc(faq.question)}${editingId === faq.id ? ` <span class="badge">Editing</span>` : ""}</td>
-        <td>${newsItemActions(association.slug, "faqs", faq.id)}</td>
+        <td>${newsItemActions(association.slug, "faqs", faq.id, "", canEdit)}</td>
       </tr>`,
     )
     .join("");
@@ -682,11 +736,19 @@ export function newsAdminPage(options: {
       (contact) => `<tr>
         <td>${esc(contact.name)}${editingId === contact.id ? ` <span class="badge">Editing</span>` : ""}</td>
         <td>${esc(contact.role_title)}</td>
-        <td>${newsItemActions(association.slug, "contacts", contact.id)}</td>
+        <td>${newsItemActions(association.slug, "contacts", contact.id, "", canEdit)}</td>
       </tr>`,
     )
     .join("");
-  return `${adminNav(association.slug, "news")}
+  const addForms = canEdit
+    ? `<section class="grid">
+      <article class="panel"><h2>Add announcement</h2>${announcementForm(base, association, null)}</article>
+      <article class="panel"><h2>Add event</h2>${eventForm(base, null)}</article>
+      <article class="panel"><h2>Add FAQ</h2>${faqForm(base, null)}</article>
+      <article class="panel"><h2>Add Board Contact</h2>${contactForm(base, null)}</article>
+    </section>`
+    : "";
+  return `${adminNav(association.slug, "news", canEdit)}
     ${editing ? `<section class="panel" id="edit">${newsEditForm(association, editing)}</section>` : ""}
     <section class="panel">
       <h1>News, calendar, FAQ, Board Contact</h1>
@@ -711,12 +773,7 @@ export function newsAdminPage(options: {
           : empty("No contacts.")
       }
     </section>
-    <section class="grid">
-      <article class="panel"><h2>Add announcement</h2>${announcementForm(base, association, null)}</article>
-      <article class="panel"><h2>Add event</h2>${eventForm(base, null)}</article>
-      <article class="panel"><h2>Add FAQ</h2>${faqForm(base, null)}</article>
-      <article class="panel"><h2>Add Board Contact</h2>${contactForm(base, null)}</article>
-    </section>`;
+    ${addForms}`;
 }
 
 function newsEditForm(association: Association, editing: NewsEdit): string {
@@ -786,7 +843,7 @@ function contactForm(base: string, row: ContactRow | null): string {
     </form>`;
 }
 
-export function joinRequestsPage(association: Association, rows: JoinRequestRow[]): string {
+export function joinRequestsPage(association: Association, rows: JoinRequestRow[], canEdit = true): string {
   const body = rows
     .map((row) => {
       return `<tr>
@@ -795,11 +852,11 @@ export function joinRequestsPage(association: Association, rows: JoinRequestRow[
         <td>${esc(row.address)}</td>
         <td>${esc(row.note)}</td>
         <td>${esc(joinStatusLabel(row.status))}</td>
-        <td>${joinRequestActions(association.slug, row)}</td>
+        <td>${canEdit ? joinRequestActions(association.slug, row) : ""}</td>
       </tr>`;
     })
     .join("");
-  return `${adminNav(association.slug, "joins")}
+  return `${adminNav(association.slug, "joins", canEdit)}
     <section class="panel">
       <h1>Join requests</h1>
       <p class="muted">Approve creates a login and sends a welcome email. Decline does not. Delete removes the request. A lot links only if the address matches one empty lot.</p>
@@ -833,27 +890,32 @@ function joinStatusLabel(status: string): string {
   return status;
 }
 
-export function auditPage(association: Association, rows: AuditRow[]): string {
-  return `${adminNav(association.slug, "audit")}<section class="panel"><h1>Activity</h1>${auditTable(association, rows)}</section>`;
+export function auditPage(association: Association, rows: AuditRow[], canEdit = true): string {
+  return `${adminNav(association.slug, "audit", canEdit)}<section class="panel"><h1>Activity</h1>${auditTable(association, rows)}</section>`;
 }
 
-export function adminMessagesPage(association: Association, threads: MessageRow[], staffIds: readonly string[]): string {
+export function adminMessagesPage(
+  association: Association,
+  threads: MessageRow[],
+  staffIds: readonly string[],
+  canEdit = true,
+): string {
   const staff = new Set(staffIds);
   const listPath = `/a/${association.slug}/admin/messages`;
   const rows = threads
     .map((thread) => {
-      const remove = confirmDeleteButton(`${listPath}/${thread.thread_id}/delete`, "Delete");
+      const remove = canEdit ? confirmDeleteButton(`${listPath}/${thread.thread_id}/delete`, "Delete") : "";
       return `<tr>
         <td><a href="${esc(listPath)}/${esc(thread.thread_id)}">${esc(thread.subject)}</a></td>
         <td>${esc(thread.from_name)}</td>
         <td>${thread.lot_number ? `Lot ${esc(thread.lot_number)}` : ""}</td>
         <td>${dateTimeCell(thread.created_at, association.timezone)}</td>
-        <td>${messageReviewCell(association.slug, thread, staff, listPath)}</td>
+        <td>${canEdit ? messageReviewCell(association.slug, thread, staff, listPath) : thread.reviewed_at ? "Reviewed" : ""}</td>
         <td>${remove}</td>
       </tr>`;
     })
     .join("");
-  return `${adminNav(association.slug, "messages")}
+  return `${adminNav(association.slug, "messages", canEdit)}
     <section class="panel">
       <h1>Messages</h1>
       <p class="muted">Incoming from owners. These notes are private to the board. Other owners cannot read them. Mark reviewed clears a thread from Messages waiting on the board without sending a reply.</p>
@@ -866,16 +928,18 @@ export function adminThreadPage(
   subject: string,
   messages: MessageRow[],
   staffIds: readonly string[],
+  canEdit = true,
 ): string {
   const threadId = messages[0]?.thread_id ?? "";
   const latest = messages.at(-1);
   const threadPath = `/a/${association.slug}/admin/messages/${threadId}`;
-  const review = latest ? messageReviewNote(association.slug, latest, new Set(staffIds), threadPath) : "";
-  return `${adminNav(association.slug, "messages")}${review}${threadPage(association, subject, messages, {
+  const review = canEdit && latest ? messageReviewNote(association.slug, latest, new Set(staffIds), threadPath) : "";
+  return `${adminNav(association.slug, "messages", canEdit)}${review}${threadPage(association, subject, messages, {
     incoming: true,
     next: threadPath,
-    allowThreadDelete: true,
-    replyDelete: "all",
+    allowThreadDelete: canEdit,
+    allowReply: canEdit,
+    replyDelete: canEdit ? "all" : undefined,
     inbox: "admin",
   })}`;
 }
@@ -905,7 +969,7 @@ function duesSection(options: {
   assessments: AssessmentAdminRow[];
   duesReady: boolean;
   duesYear: number;
-}): string {
+}, canEdit = true): string {
   const base = `/a/${esc(options.association.slug)}/admin`;
   if (!options.duesReady) {
     return `<section class="panel" id="dues"><h2>Annual dues</h2><p>Apply the admin migration in D1, then reload. The steps are in the README under Admin improvements.</p></section>`;
@@ -914,15 +978,8 @@ function duesSection(options: {
     .map((row) => {
       const edit = `${base}/assessments/${esc(row.id)}`;
       const confirm = row.invoice_count === 0 ? "Confirm" : "Delete this assessment and its unpaid invoices";
-      const remove = `<form method="post" action="${edit}/delete"><label><input type="checkbox" name="confirm" value="yes" required> ${confirm}</label><button class="secondary" type="submit">Delete</button></form>`;
-      return `<tr>
-        <td>${esc(row.name)}</td>
-        <td>${esc(lotTypeLabel(row.lot_type))}</td>
-        <td>${row.opens_on ? dateCell(row.opens_on, options.association.timezone) : ""}</td>
-        <td>${dateCell(row.due_on, options.association.timezone)}</td>
-        <td>${moneySpan(row.amount_cents)}</td>
-        <td>${row.invoice_count}</td>
-        <td>
+      const actions = canEdit
+        ? `<td>
           <form method="post" action="${edit}/assign"><label><input type="checkbox" name="confirm" value="yes" required> Assign this assessment to matching lots</label><button class="secondary" type="submit">Assign to matching lots</button></form>
           <details>
             <summary>Edit</summary>
@@ -938,21 +995,30 @@ function duesSection(options: {
               ${textField("Due", "due_on", { type: "date", value: row.due_on, required: true })}
               <button class="secondary" type="submit">Save assessment</button>
             </form>
-            ${remove}
+            <form method="post" action="${edit}/delete"><label><input type="checkbox" name="confirm" value="yes" required> ${confirm}</label><button class="secondary" type="submit">Delete</button></form>
           </details>
-        </td>
+        </td>`
+        : "";
+      return `<tr>
+        <td>${esc(row.name)}</td>
+        <td>${esc(lotTypeLabel(row.lot_type))}</td>
+        <td>${row.opens_on ? dateCell(row.opens_on, options.association.timezone) : ""}</td>
+        <td>${dateCell(row.due_on, options.association.timezone)}</td>
+        <td>${moneySpan(row.amount_cents)}</td>
+        <td>${row.invoice_count}</td>
+        ${actions}
       </tr>`;
     })
     .join("");
   return `<section class="panel" id="dues">
     <h2>Annual dues</h2>
     <p class="muted">The schedule opens January 1 and is due March 1. Improved lots are $625. Unimproved lots are $100. Assigning writes one invoice on each active lot of that type that does not already have this assessment, so Upcoming assessments can show it on those owners' dashboards. Changing the amount later does not rewrite invoices already assigned. Click a dollar amount under Assessments and balances to change one invoice. Delete removes the assessment and its unpaid invoices. Delete is refused when a payment is recorded on one of those invoices.</p>
-    ${rows ? `<table><thead><tr><th>Assessment</th><th>Lots</th><th>Opens</th><th>Due</th><th>Amount</th><th>Invoices</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No assessments yet.")}
-    <h3>Add a year</h3>
+    ${rows ? `<table><thead><tr><th>Assessment</th><th>Lots</th><th>Opens</th><th>Due</th><th>Amount</th><th>Invoices</th>${canEdit ? "<th></th>" : ""}</tr></thead><tbody>${rows}</tbody></table>` : empty("No assessments yet.")}
+    ${canEdit ? `<h3>Add a year</h3>
     <form class="fields" method="post" action="${base}/assessments">
       ${textField("Year", "year", { value: String(options.duesYear), required: true })}
       <button type="submit">Add improved and unimproved dues</button>
-    </form>
+    </form>` : ""}
   </section>`;
 }
 
@@ -965,7 +1031,9 @@ function newsItemActions(
   resource: "announcements" | "events" | "faqs" | "contacts",
   id: string,
   hideAction = "",
+  canEdit = true,
 ): string {
+  if (!canEdit) return "";
   const editKind = resource === "announcements" ? "announcement" : resource === "events" ? "event" : resource === "faqs" ? "faq" : "contact";
   const noun = editKind === "announcement" ? "announcement" : editKind === "event" ? "event" : editKind === "faq" ? "FAQ" : "contact";
   const base = `/a/${esc(slug)}/admin`;

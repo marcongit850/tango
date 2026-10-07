@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { activeAdminContacts, canViewPropertyFinancials, isAdmin, keepsAnAdmin, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
+import { activeAdminContacts, canEditAdmin, canViewAdmin, canViewPropertyFinancials, isAdmin, keepsAnAdmin, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
 import { annualDues, defaultDuesYear, lotsToInvoice } from "../src/lib/dues";
 import { landingAccount, loggedOutNav, render } from "../src/views/layout";
 import { adminHome, documentDetailPage, documentsAdminPage, importPage, ledgerPage, newsAdminPage, ownerDetailPage, paymentInvoiceVisible } from "../src/views/admin";
@@ -85,7 +85,7 @@ describe("owner csv", () => {
       { email: "a@example.com", role: "board", isAdmin: true },
       { email: "b@example.com", role: "board", isAdmin: false },
     ]);
-    expect(parsed.errors[0].message).toMatch(/Admin access is only for board members/);
+    expect(parsed.errors[0].message).toMatch(/Edit access is only for board members/);
   });
 
   it("reports a missing column and a bad role", () => {
@@ -170,6 +170,12 @@ describe("access", () => {
     expect(isAdmin({ role_id: "officer" })).toBe(true);
     expect(isAdmin({ role_id: "board", is_admin: 1, status: "inactive" })).toBe(false);
     expect(isAdmin({ role_id: "board", is_admin: true, status: "active" })).toBe(true);
+    expect(canViewAdmin({ role_id: "board", is_admin: 0, status: "active" })).toBe(true);
+    expect(canEditAdmin({ role_id: "board", is_admin: 0, status: "active" })).toBe(false);
+    expect(canEditAdmin({ role_id: "board", is_admin: 1, status: "active" })).toBe(true);
+    expect(canViewAdmin({ role_id: "homeowner", is_admin: 0, status: "active" })).toBe(false);
+    expect(canViewAdmin({ role_id: "board", is_admin: 1, status: "inactive" })).toBe(false);
+    expect(canEditAdmin({ role_id: "officer", status: "active" })).toBe(true);
     expect(
       activeAdminContacts([
         { user_id: "user_marc", name: "Marc", email: "marc@whpinc.com", role_id: "board", is_admin: true, status: "active" },
@@ -514,7 +520,7 @@ describe("signed-in header", () => {
     expect(account.indexOf(">Admin<")).toBeLessThan(account.indexOf("Marc"));
   });
 
-  it("leaves Admin out for residents without admin access", async () => {
+  it("shows Admin for view-only board members and hides it from homeowners", async () => {
     const homeowner = await headerParts(membership("homeowner", 0));
     expect(homeowner.nav).not.toContain("Admin");
     expect(homeowner.account).not.toContain("Admin");
@@ -523,7 +529,7 @@ describe("signed-in header", () => {
 
     const board = await headerParts(membership("board", 0));
     expect(board.nav).not.toContain("Admin");
-    expect(board.account).not.toContain("Admin");
+    expect(board.account).toContain('class="account-admin" href="/a/tango-mar/admin">Admin</a>');
 
     const inactive = await headerParts(membership("board", 1, "inactive"));
     expect(inactive.nav).not.toContain("Admin");
@@ -704,7 +710,7 @@ describe("admin overview", () => {
       audit: [],
     });
     const blurb =
-      "Admin access opens these board tools. Homeowners only see their own lots. Keep at least one admin.";
+      "Board members can view these tools. Edit access is required to create, edit, or delete. Homeowners only see their own lots. Keep at least one person with edit access.";
     expect(html).toContain("<h1>Board admin</h1>");
     expect(html).toContain("<h2>Access</h2>");
     expect(html).toContain(`<div class="access-explainer"><p>${blurb}</p><div class="access-selection-barrier" aria-hidden="true"><br></div></div>`);

@@ -105,7 +105,7 @@ async function importRow(
     existingMembership.status === "active";
   const activeAdmins = await countActiveAdmins(db, association.id);
   if (!keepsAnAdmin({ activeAdminCount: activeAdmins, currentlyAdmin, nextAdmin: row.role === "board" && isAdmin === 1 })) {
-    throw new LastAdminError("Keep at least one person with admin access.");
+    throw new LastAdminError("Keep at least one person with edit access.");
   }
 
   await db

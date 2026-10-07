@@ -114,7 +114,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       threadsForViewer(c.env.DB, association.id, "", true),
       staffUserIds(c.env.DB, association.id),
       listAudit(c.env.DB, association.id),
-      outstandingInvoiceCents(c.env.DB, association.id),
+      outstandingInvoiceCents(c.env.DB, association.id, today),
     ]);
     const staff = new Set(staffIds);
     let pendingJoins: number | null = null;
@@ -705,6 +705,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         invoices,
         paymentCount: Number(paymentCount?.n ?? 0),
         canEdit: canEditAdmin(membership),
+        today,
       }),
     });
   });
@@ -993,7 +994,15 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       entityId: c.req.param("assessmentId"),
       detail: `${result.name}: ${result.created} invoices, ${result.already} already assigned.`,
     });
-    return redirectTo(c, back, `Assigned ${result.name} to ${result.created} lots. ${result.already} already had it.`);
+    const scheduled =
+      result.issuedOn > todayIso(association.timezone)
+        ? ` Those invoices are scheduled and do not count toward balances until ${result.issuedOn}.`
+        : "";
+    return redirectTo(
+      c,
+      back,
+      `Assigned ${result.name} to ${result.created} lots. ${result.already} already had it.${scheduled}`,
+    );
   });
 
   app.post("/a/:slug/admin/assessments/:assessmentId/delete", async (c) => {

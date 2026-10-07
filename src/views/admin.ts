@@ -476,12 +476,17 @@ export function ledgerLotPage(options: {
   invoices: InvoiceRow[];
   paymentCount: number;
   canEdit?: boolean;
+  today?: string;
 }): string {
   const canEdit = options.canEdit !== false;
   const base = `/a/${esc(options.association.slug)}/admin`;
+  const today = options.today ?? "";
+  const scheduledInvoice = (invoice: InvoiceRow) =>
+    Boolean(today) && invoice.status !== "void" && invoice.issued_on > today;
   const rows = options.invoices
     .map((invoice) => {
       const href = `${base}/invoices/${invoice.id}`;
+      const status = scheduledInvoice(invoice) ? "scheduled" : invoice.status;
       return `<tr>
         <td><a href="${esc(href)}">${esc(invoice.invoice_number)}</a></td>
         <td>${esc(invoice.description)}</td>
@@ -489,13 +494,16 @@ export function ledgerLotPage(options: {
         <td>${moneyLink(href, Number(invoice.amount_cents))}</td>
         <td>${moneyLink(href, Number(invoice.late_fee_cents))}</td>
         <td>${moneyLink(href, Number(invoice.paid_cents))}</td>
-        <td><span class="badge">${esc(invoice.status)}</span></td>
+        <td><span class="badge">${esc(status)}</span></td>
       </tr>`;
     })
     .join("");
   const who = [options.ownerName, options.streetAddress].filter(Boolean).join(" · ");
   const balance = options.balance
     ? `<p>Balance ${moneySpan(options.balance.balance_cents)}${options.balance.delinquent ? ` <span class="badge late">Past due</span>` : ""}</p>`
+    : "";
+  const scheduledNote = options.invoices.some(scheduledInvoice)
+    ? `<p class="muted">An invoice dated after today is scheduled. It is not included in the balance until that date.</p>`
     : "";
   const blocked = options.invoices.length > 0 || options.paymentCount > 0;
   const remove = !canEdit
@@ -520,6 +528,7 @@ export function ledgerLotPage(options: {
       <h1>Lot ${esc(options.lotNumber)}</h1>
       ${who ? `<p>${esc(who)}</p>` : ""}
       ${balance}
+      ${scheduledNote}
       <p class="muted">Click an amount to edit or delete that invoice. Delete stays blocked when a payment is recorded on that invoice. Delete the payment on the invoice page first.</p>
       ${
         rows
@@ -1036,7 +1045,7 @@ function duesSection(options: {
     .join("");
   return `<section class="panel" id="dues">
     <h2>Annual dues</h2>
-    <p class="muted">The schedule opens January 1 and is due March 1. Improved lots are $625. Unimproved lots are $100. Assigning writes one invoice on each active lot of that type that does not already have this assessment, so Upcoming assessments can show it on those owners' dashboards. Changing the amount later does not rewrite invoices already assigned. Click a dollar amount under Assessments and balances to change one invoice. Delete removes the assessment and its unpaid invoices. Delete is refused when a payment is recorded on one of those invoices.</p>
+    <p class="muted">The schedule opens January 1 and is due March 1. Improved lots are $625. Unimproved lots are $100. Assigning writes one invoice on each active lot of that type that does not already have this assessment. Upcoming can show that assessment as invoiced. The amount stays off the balance until the open date, so a future year does not look due today. Changing the amount later does not rewrite invoices already assigned. Click a dollar amount under Assessments and balances to change one invoice. Delete removes the assessment and its unpaid invoices. Delete is refused when a payment is recorded on one of those invoices.</p>
     ${rows ? `<table><thead><tr><th>Assessment</th><th>Lots</th><th>Opens</th><th>Due</th><th>Amount</th><th>Invoices</th>${canEdit ? "<th></th>" : ""}</tr></thead><tbody>${rows}</tbody></table>` : empty("No assessments yet.")}
     ${canEdit ? `<h3>Add a year</h3>
     <form class="fields" method="post" action="${base}/assessments">

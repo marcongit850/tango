@@ -665,6 +665,7 @@ describe("owner dashboard", () => {
       payments: [],
       notices: [],
       emergencies: [],
+      today: "2026-10-07",
       news: [
         {
           id: "ann_walkway",
@@ -694,7 +695,10 @@ describe("owner dashboard", () => {
     expect(html).toContain("Lot 14");
     expect(html).toContain("Paid");
     expect(html).toContain("2027 annual assessment");
+    expect(html).toContain("Opens October 1, 2026. Due March 1, 2027. Not due yet.");
     expect(html).toContain("Scheduled");
+    expect(html).toContain('<span class="money">$1,250.00</span>');
+    expect(html).not.toContain("Past due");
     expect(html).toContain(">News<");
     expect(html).toContain("Beach walkway washdown");
     expect(html).toContain('href="/a/tango-mar/news/ann_walkway"');

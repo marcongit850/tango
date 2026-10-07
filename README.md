@@ -90,7 +90,7 @@ Optional columns:
 | Column | Meaning |
 | --- | --- |
 | `role` | `homeowner` (default) or `board`. An older sheet may still say `officer`. That becomes a board member with admin. |
-| `admin` | `yes` or `no`. Blank keeps an existing admin flag for a board member. A new board row with a blank `admin` cell does not get admin. Admin on a homeowner row is rejected. |
+| `admin` | `yes` or `no` for a homeowner or a board member. Blank keeps an existing edit-access flag. A new row with a blank `admin` cell does not get edit access. |
 | `starting_balance` | Dollars owed. `375.50` and `$1,200.00` both work. A negative amount is recorded as an opening credit. Blank means zero. |
 | `balance_as_of` | `YYYY-MM-DD`. Blank uses today in the association time zone. |
 | `phone` | Stored on the user. Visible to the board, not to other residents. |
@@ -116,7 +116,7 @@ That runs `wrangler d1 migrations apply tango --remote`.
 
 The home page links to `/join` (Request access). The form asks for a name, an email, an optional address or lot, and an optional note. A successful submit stores a pending row in `join_requests` for Tango Mar, adds a portal notice for each person with edit access, and emails those people when `RESEND_API_KEY` is set. Sending the form does not create a login.
 
-Admins open Admin, Join requests. **Approve** creates or reuses a user for that email, gives them an active homeowner membership (an active board login keeps that role and its admin flag), and marks the request approved. When the address matches exactly one active lot and that lot has no owner, Approve links the person to it. A blank address, no match, more than one match, or a lot that already has an owner is left for Owners and lots. **Decline** marks the request declined and does not create a login. A declined request can still be approved later. **Delete** removes the request. It does not remove a login that Approve already created. **Mark reviewed** only changes the status. It does not create a login. A reviewed request can still be approved or declined later.
+Admins open Admin, Join requests. **Approve** creates or reuses a user for that email, gives them an active homeowner membership (an active board login keeps that role and its admin flag, and an active homeowner keeps edit access if it is already on), and marks the request approved. When the address matches exactly one active lot and that lot has no owner, Approve links the person to it. A blank address, no match, more than one match, or a lot that already has an owner is left for Owners and lots. **Decline** marks the request declined and does not create a login. A declined request can still be approved later. **Delete** removes the request. It does not remove a login that Approve already created. **Mark reviewed** only changes the status. It does not create a login. A reviewed request can still be approved or declined later.
 
 Approve then sends a welcome email from `EMAIL_FROM` when `RESEND_API_KEY` is set. The message tells them to sign in at https://mytangomar.com/login with the same email. It does not include a magic-link token. If email is not configured or Resend fails, the login still exists and the admin flash says the welcome email was not sent.
 
@@ -293,9 +293,9 @@ Preview URLs are public unless you put access control in front of them.
 | Role | What they can see |
 | --- | --- |
 | Public | Logged-out visitor. Public home, resident login, and request access. No documents and no balances. |
-| Homeowner | Their own lots, invoices, payments, and messages. Current resident documents. |
-| Board member | Same resident access, plus board-only documents. Admin pages open view-only: Overview, ledgers, documents, and the other read pages. Create, edit, and delete stay off. |
-| Edit access | Checkbox on the person page (`is_admin`). A board member with it can use the admin write tools. New board members are view-only until it is checked. Keep at least one person with edit access. |
+| Homeowner | Their own lots, invoices, payments, and messages. Current resident documents. With edit access, they can also open admin tools and change them. |
+| Board member | Same resident access, plus board-only documents. Admin pages open view-only: Overview, ledgers, documents, and the other read pages. Create, edit, and delete stay off until edit access is checked. |
+| Edit access | Checkbox on the person page (`is_admin`). A homeowner or a board member with it can use the admin write tools. New people do not have it until it is checked. A board member without it can still view admin pages. A homeowner without it only sees their own lots. Keep at least one person with edit access. |
 
 A board member's dashboard still shows only their own lots. Other residents' balances are on the admin ledger. View-only board members can open that ledger but cannot change it.
 
@@ -303,7 +303,7 @@ A board member's dashboard still shows only their own lots. Other residents' bal
 
 Migrations live in `migrations/`.
 
-- `associations`, `users`, `roles`, `memberships` (`is_admin` is edit access on a board member; without it the board member is view-only)
+- `associations`, `users`, `roles`, `memberships` (`is_admin` is edit access on a homeowner or a board member; a board member without it is view-only)
 - `properties` (lots, with `lot_type` of `improved` or `unimproved`) and `property_owners`
 - `assessments` (`opens_on`, `lot_type`, amount, due date), `invoices`, `payments` (amounts in cents; payments are recorded, not charged online)
 - `documents` and `document_versions` (`current_version_id` is what residents see; `visibility` is `residents` or `board`)
@@ -314,7 +314,7 @@ Migrations live in `migrations/`.
 - `magic_links`, `sessions`
 - `join_requests` (public request to join: pending, reviewed, approved, or declined)
 
-Every tenant-owned row carries `association_id`. Financial queries also require that association id, and homeowner queries join `property_owners` for the signed-in user. Admin read pages require an active board member in that association. Creating, editing, and deleting also require edit access.
+Every tenant-owned row carries `association_id`. Financial queries also require that association id, and homeowner queries join `property_owners` for the signed-in user. Admin read pages require an active board member, or a homeowner with edit access, in that association. Creating, editing, and deleting also require edit access.
 
 Balance = non-void invoice amounts + late fees − recorded payments.
 

@@ -166,6 +166,9 @@ describe("join approval planning", () => {
     expect(planUserName(null, "Pat Example")).toBe("Pat Example");
     expect(planMembership(null)).toEqual({ roleId: "homeowner", isAdmin: 0 });
     expect(planMembership({ role_id: "homeowner", status: "inactive" })).toEqual({ roleId: "homeowner", isAdmin: 0 });
+    expect(planMembership({ role_id: "homeowner", status: "inactive", is_admin: 1 })).toEqual({ roleId: "homeowner", isAdmin: 0 });
+    expect(planMembership({ role_id: "homeowner", status: "active", is_admin: 0 })).toEqual({ roleId: "homeowner", isAdmin: 0 });
+    expect(planMembership({ role_id: "homeowner", status: "active", is_admin: 1 })).toEqual({ roleId: "homeowner", isAdmin: 1 });
     expect(planMembership({ role_id: "officer", status: "active" })).toEqual({ roleId: "board", isAdmin: 1 });
     expect(planMembership({ role_id: "board", status: "active", is_admin: 1 })).toEqual({ roleId: "board", isAdmin: 1 });
     expect(planMembership({ role_id: "board", status: "active", is_admin: 0 })).toEqual({ roleId: "board", isAdmin: 0 });
@@ -640,6 +643,153 @@ describe("owner name and phone", () => {
       expect(sqlite.prepare("SELECT name, phone FROM users WHERE id = 'user_sam'").get()).toEqual({
         name: "Sam Rivera",
         phone: "850-555-0102",
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe("homeowner edit access", () => {
+  function portalEnv(db: D1Database): Env {
+    return {
+      DB: db,
+      APP_ENV: "production",
+      EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+      DOCUMENTS: {} as R2Bucket,
+    } as Env;
+  }
+
+  async function signIn(sqlite: DatabaseSync, userId: string): Promise<string> {
+    const token = `session-${userId}`;
+    sqlite
+      .prepare("INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(`sess_${userId}_${crypto.randomUUID()}`, userId, await sha256Hex(token), "2099-01-01T00:00:00.000Z", "2026-10-06T00:00:00.000Z");
+    return token;
+  }
+
+  function post(token: string, body: Record<string, string>): RequestInit {
+    return {
+      method: "POST",
+      headers: {
+        Cookie: `tango_session=${token}`,
+        Origin: "http://localhost",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams(body),
+    };
+  }
+
+  it("saves edit access on a homeowner, keeps it after reload, and unlocks admin writes", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const adminToken = await signIn(sqlite, "user_jordan");
+    const ownerToken = await signIn(sqlite, "user_sam");
+    try {
+      const before = await app.request("http://localhost/a/tango-mar/admin", { headers: { Cookie: `tango_session=${ownerToken}` } }, env);
+      expect(before.status).toBe(403);
+
+      const saved = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_sam/role",
+        post(adminToken, { role_id: "homeowner", status: "active", is_admin: "1" }),
+        env,
+      );
+      expect(saved.status).toBe(303);
+      expect(saved.headers.get("Location")).toBe("/a/tango-mar/admin/owners/user_sam");
+      expect(decodeURIComponent(saved.headers.get("Set-Cookie") ?? "")).toContain("ok:Role saved.");
+      expect(sqlite.prepare("SELECT role_id, is_admin, status FROM memberships WHERE user_id = 'user_sam'").get()).toEqual({
+        role_id: "homeowner",
+        is_admin: 1,
+        status: "active",
+      });
+
+      const page = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_sam",
+        { headers: { Cookie: `tango_session=${adminToken}` } },
+        env,
+      );
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain("Homeowner, edit access");
+      expect(html).toContain('name="is_admin" value="1" checked');
+      expect(html).toContain("Edit access can be given to a homeowner or a board member.");
+
+      const overview = await app.request("http://localhost/a/tango-mar/admin", { headers: { Cookie: `tango_session=${ownerToken}` } }, env);
+      expect(overview.status).toBe(200);
+      expect(await overview.text()).toContain('href="/a/tango-mar/admin/owners/user_sam">Sam Rivera</a>');
+
+      const write = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_casey/profile",
+        post(ownerToken, { name: "Casey N.", phone: "850-555-0142" }),
+        env,
+      );
+      expect(write.status).toBe(303);
+      expect(sqlite.prepare("SELECT name FROM users WHERE id = 'user_casey'").get()).toEqual({ name: "Casey N." });
+
+      const cleared = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_sam/role",
+        post(adminToken, { role_id: "homeowner", status: "active" }),
+        env,
+      );
+      expect(cleared.status).toBe(303);
+      expect(decodeURIComponent(cleared.headers.get("Set-Cookie") ?? "")).toContain("ok:Role saved.");
+      expect(sqlite.prepare("SELECT role_id, is_admin FROM memberships WHERE user_id = 'user_sam'").get()).toEqual({
+        role_id: "homeowner",
+        is_admin: 0,
+      });
+      const reloaded = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_sam",
+        { headers: { Cookie: `tango_session=${adminToken}` } },
+        env,
+      );
+      const reloadedHtml = await reloaded.text();
+      expect(reloadedHtml).not.toContain('name="is_admin" value="1" checked');
+      expect(reloadedHtml).toContain("Homeowner · active");
+      expect(reloadedHtml).not.toContain("Homeowner, edit access");
+      const locked = await app.request("http://localhost/a/tango-mar/admin", { headers: { Cookie: `tango_session=${ownerToken}` } }, env);
+      expect(locked.status).toBe(403);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("counts a homeowner with edit access toward the last admin", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const adminToken = await signIn(sqlite, "user_jordan");
+    const ownerToken = await signIn(sqlite, "user_sam");
+    try {
+      const granted = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_sam/role",
+        post(adminToken, { role_id: "homeowner", status: "active", is_admin: "1" }),
+        env,
+      );
+      expect(granted.status).toBe(303);
+
+      const demoted = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_jordan/role",
+        post(adminToken, { role_id: "board", status: "active" }),
+        env,
+      );
+      expect(demoted.status).toBe(303);
+      expect(decodeURIComponent(demoted.headers.get("Set-Cookie") ?? "")).toContain("ok:Role saved.");
+      expect(sqlite.prepare("SELECT role_id, is_admin FROM memberships WHERE user_id = 'user_jordan'").get()).toEqual({
+        role_id: "board",
+        is_admin: 0,
+      });
+
+      const last = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_sam/role",
+        post(ownerToken, { role_id: "homeowner", status: "active" }),
+        env,
+      );
+      expect(last.status).toBe(303);
+      expect(decodeURIComponent(last.headers.get("Set-Cookie") ?? "")).toContain("warn:Keep at least one person with edit access.");
+      expect(sqlite.prepare("SELECT role_id, is_admin FROM memberships WHERE user_id = 'user_sam'").get()).toEqual({
+        role_id: "homeowner",
+        is_admin: 1,
       });
     } finally {
       sqlite.close();

@@ -103,7 +103,7 @@ export function adminHome(options: {
   return `${adminNav(options.association.slug, "overview", canEdit)}
     <section class="panel">
       <h1>Board admin</h1>
-      <p class="muted">Board members can view these tools. Edit access is required to change them.</p>
+      <p class="muted">Board members can view these tools. Edit access can be given to a homeowner or a board member, and it is required to change them.</p>
     </section>
     <section class="grid">
       ${statCard(formatMoney(options.outstandingCents), "Total Outstanding", `${base}/ledger`)}
@@ -125,7 +125,7 @@ export function adminHome(options: {
 }
 
 const ACCESS_EXPLAINER =
-  "Board members can view these tools. Edit access is required to create, edit, or delete. Homeowners only see their own lots. Keep at least one person with edit access.";
+  "Board members can view these tools. Edit access can be given to a homeowner or a board member. It is required to create, edit, or delete. A homeowner without edit access only sees their own lots. Keep at least one person with edit access.";
 
 function accessExplainer(): string {
   // WebKit triple-click walks past a paragraph into later elements until it finds a line break.
@@ -278,8 +278,8 @@ export function ownerDetailPage(options: {
             { value: "homeowner", label: "Homeowner" },
             { value: "board", label: "Board member" },
           ], owner.role_id === "board" ? "board" : "homeowner")}
-          <label><input type="checkbox" name="is_admin" value="1" ${owner.role_id === "board" && owner.is_admin === 1 ? "checked" : ""}> Edit access</label>
-          <p class="muted">Edit access lets a board member create, edit, and delete. Without it, they can view these pages. Keep at least one person with edit access.</p>
+          <label><input type="checkbox" name="is_admin" value="1" ${owner.is_admin === 1 ? "checked" : ""}> Edit access</label>
+          <p class="muted">Edit access can be given to a homeowner or a board member. It lets them create, edit, and delete. A board member without it can still view these pages. A homeowner without it only sees their own lots. Keep at least one person with edit access.</p>
           ${selectField("Status", "status", [
             { value: "active", label: "Active" },
             { value: "invited", label: "Invited" },
@@ -354,7 +354,7 @@ export function importPage(
       <h1>Import owners from CSV</h1>
       <p>Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>.</p>
       <p>A positive starting balance adds one opening invoice per lot (re-import will not double it).</p>
-      <p>The admin column is edit access. Leave it blank for a view-only board member.</p>
+      <p>The admin column is edit access for a homeowner or a board member. Leave it blank to keep an existing flag. A new person with a blank admin cell does not get edit access.</p>
       <p><a href="/a/${esc(association.slug)}/admin/import/template.csv">Download template</a></p>
       ${summary}
       ${issueList ? `<ul>${issueList}</ul>` : ""}

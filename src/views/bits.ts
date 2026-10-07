@@ -25,7 +25,7 @@ export function categoryCell(category: string): string {
 export function roleLabel(role: string, isAdmin = false): string {
   if (role === "officer") return "Board member, edit access";
   if (role === "board") return isAdmin ? "Board member, edit access" : "Board member";
-  if (role === "homeowner") return "Homeowner";
+  if (role === "homeowner") return isAdmin ? "Homeowner, edit access" : "Homeowner";
   if (role === "public") return "Public";
   return role;
 }

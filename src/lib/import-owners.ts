@@ -96,15 +96,12 @@ async function importRow(
     .prepare("SELECT role_id, is_admin, status FROM memberships WHERE association_id = ? AND user_id = ?")
     .bind(association.id, user.id)
     .first<{ role_id: string; is_admin: number; status: string }>();
-  const isAdmin =
-    row.role === "board" ? (row.isAdmin === null ? (Number(existingMembership?.is_admin) === 1 ? 1 : 0) : row.isAdmin ? 1 : 0) : 0;
-  const currentlyAdmin =
-    !!existingMembership &&
-    (existingMembership.role_id === "board" || existingMembership.role_id === "officer") &&
-    (existingMembership.role_id === "officer" || Number(existingMembership.is_admin) === 1) &&
-    existingMembership.status === "active";
+  const keptAdmin =
+    existingMembership?.role_id === "officer" || Number(existingMembership?.is_admin) === 1 ? 1 : 0;
+  const isAdmin = row.isAdmin === null ? keptAdmin : row.isAdmin ? 1 : 0;
+  const currentlyAdmin = !!existingMembership && existingMembership.status === "active" && keptAdmin === 1;
   const activeAdmins = await countActiveAdmins(db, association.id);
-  if (!keepsAnAdmin({ activeAdminCount: activeAdmins, currentlyAdmin, nextAdmin: row.role === "board" && isAdmin === 1 })) {
+  if (!keepsAnAdmin({ activeAdminCount: activeAdmins, currentlyAdmin, nextAdmin: isAdmin === 1 })) {
     throw new LastAdminError("Keep at least one person with edit access.");
   }
 

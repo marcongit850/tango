@@ -200,8 +200,8 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     if (!ROLES.has(role as MembershipRole) || !STATUSES.has(status as MembershipStatus)) {
       return redirectTo(c, ownerPath(association.slug, owner.user_id), "Choose a valid role and status.", "warn");
     }
-    const nextAdmin = role === "board" && fields.is_admin === "1";
-    const currentlyAdmin = owner.role_id === "board" && owner.is_admin === 1 && owner.status === "active";
+    const nextAdmin = fields.is_admin === "1";
+    const currentlyAdmin = owner.is_admin === 1 && owner.status === "active";
     if (!keepsAnAdmin({ activeAdminCount: await countActiveAdmins(c.env.DB, association.id), currentlyAdmin, nextAdmin: nextAdmin && status === "active" })) {
       return redirectTo(c, ownerPath(association.slug, owner.user_id), "Keep at least one person with edit access.", "warn");
     }
@@ -441,7 +441,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     if (!owner) throw new NotFoundError();
     const back = ownerPath(association.slug, owner.user_id);
     if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, back, "Confirm the delete first.", "warn");
-    const currentlyAdmin = owner.role_id === "board" && owner.is_admin === 1 && owner.status === "active";
+    const currentlyAdmin = owner.is_admin === 1 && owner.status === "active";
     if (
       !keepsAnAdmin({
         activeAdminCount: await countActiveAdmins(c.env.DB, association.id),

@@ -16,6 +16,11 @@ import { lotsToInvoice } from "./lib/dues";
 import { isForeignKey, isMissingColumn, isMissingTable } from "./lib/errors";
 import { balanceCents, invoiceStatus, isDelinquent } from "./lib/money";
 
+/** People who can create, edit, and delete: officers, or homeowners and board members with the flag. */
+const EDIT_ACCESS_SQL = "(role_id = 'officer' OR (role_id IN ('board', 'homeowner') AND is_admin = 1))";
+const EDIT_ACCESS_MEMBER_SQL =
+  "(m.role_id = 'officer' OR (m.role_id IN ('board', 'homeowner') AND m.is_admin = 1))";
+
 async function hasColumn(
   db: D1Database,
   table: "memberships" | "properties" | "assessments" | "messages",
@@ -57,7 +62,7 @@ function asMembership(
       user_id: row.user_id,
       role_id: "homeowner",
       status: row.status,
-      is_admin: 0,
+      is_admin: legacyStaff ? 0 : Number(row.is_admin) === 1 ? 1 : 0,
     };
   }
   return null;
@@ -1130,7 +1135,7 @@ export async function listOwners(db: D1Database, associationId: string): Promise
   return results.map((row) => ({
     ...row,
     role_id: row.role_id === "officer" ? "board" : row.role_id === "board" ? "board" : "homeowner",
-    is_admin: row.role_id === "officer" || (row.role_id === "board" && Number(row.is_admin) === 1) ? 1 : 0,
+    is_admin: row.role_id === "officer" || Number(row.is_admin) === 1 ? 1 : 0,
   }));
 }
 
@@ -1140,7 +1145,7 @@ export async function countActiveAdmins(db: D1Database, associationId: string): 
     .prepare(
       flagged
         ? `SELECT COUNT(*) AS n FROM memberships
-           WHERE association_id = ? AND role_id = 'board' AND is_admin = 1 AND status = 'active'`
+           WHERE association_id = ? AND status = 'active' AND ${EDIT_ACCESS_SQL}`
         : `SELECT COUNT(*) AS n FROM memberships
            WHERE association_id = ? AND role_id IN ('board', 'officer') AND status = 'active'`,
     )
@@ -1163,7 +1168,7 @@ export async function listStaffContacts(db: D1Database, associationId: string): 
         ? `SELECT m.user_id, u.email, u.name
            FROM memberships m
            JOIN users u ON u.id = m.user_id
-           WHERE m.association_id = ? AND m.role_id = 'board' AND m.is_admin = 1 AND m.status != 'inactive'
+           WHERE m.association_id = ? AND m.status != 'inactive' AND ${EDIT_ACCESS_MEMBER_SQL}
            ORDER BY u.name`
         : `SELECT m.user_id, u.email, u.name
            FROM memberships m
@@ -1290,7 +1295,7 @@ export async function staffUserIds(db: D1Database, associationId: string): Promi
     .prepare(
       flagged
         ? `SELECT user_id FROM memberships
-           WHERE association_id = ? AND role_id = 'board' AND is_admin = 1 AND status != 'inactive'`
+           WHERE association_id = ? AND status != 'inactive' AND ${EDIT_ACCESS_SQL}`
         : `SELECT user_id FROM memberships
            WHERE association_id = ? AND role_id IN ('board', 'officer') AND status != 'inactive'`,
     )

@@ -5,7 +5,7 @@ export const DOCUMENT_CATEGORIES: readonly { id: DocumentCategory; label: string
   { id: "bylaws", label: "Bylaws" },
   { id: "guidelines", label: "Architectural guidelines" },
   { id: "rules", label: "Rules and regulations" },
-  { id: "minutes", label: "Meeting minutes" },
+  { id: "minutes", label: "Meeting Minutes / Agendas" },
   { id: "budgets", label: "Budgets and financial reports" },
   { id: "forms", label: "Forms and applications" },
   { id: "insurance", label: "Other" },

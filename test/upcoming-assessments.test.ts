@@ -143,33 +143,84 @@ function openTypedLots(): { sqlite: DatabaseSync; db: D1Database } {
 
 function addLot(
   sqlite: DatabaseSync,
-  row: { id: string; ownerId: string; lotType: string | null; lotNumber: string },
+  row: { id: string; ownerId: string; lotType: string | null; lotNumber: string; associationId?: string },
 ): void {
+  const associationId = row.associationId ?? "assoc_tango_mar";
   sqlite
     .prepare(
       `INSERT INTO properties (id, association_id, lot_number, street_address, lot_type)
-       VALUES (?, 'assoc_tango_mar', ?, 'Tang O Mar Drive', ?)`,
+       VALUES (?, ?, ?, 'Tang O Mar Drive', ?)`,
     )
-    .run(row.id, row.lotNumber, row.lotType);
+    .run(row.id, associationId, row.lotNumber, row.lotType);
   sqlite
     .prepare(
       `INSERT INTO property_owners (id, association_id, property_id, user_id)
-       VALUES (?, 'assoc_tango_mar', ?, ?)`,
+       VALUES (?, ?, ?, ?)`,
     )
-    .run(`own_${row.id}`, row.id, row.ownerId);
+    .run(`own_${row.id}`, associationId, row.id, row.ownerId);
 }
 
 function addAssessment(
   sqlite: DatabaseSync,
-  row: { id: string; name: string; dueOn: string; opensOn: string | null; lotType: string | null; amount?: number },
+  row: {
+    id: string;
+    name: string;
+    dueOn: string;
+    opensOn: string | null;
+    lotType: string | null;
+    amount?: number;
+    associationId?: string;
+  },
 ): void {
   sqlite
     .prepare(
       `INSERT INTO assessments (id, association_id, name, description, amount_cents, due_on, opens_on, lot_type)
-       VALUES (?, 'assoc_tango_mar', ?, '', ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, '', ?, ?, ?, ?)`,
     )
-    .run(row.id, row.name, row.amount ?? 62500, row.dueOn, row.opensOn, row.lotType);
+    .run(
+      row.id,
+      row.associationId ?? "assoc_tango_mar",
+      row.name,
+      row.amount ?? 62500,
+      row.dueOn,
+      row.opensOn,
+      row.lotType,
+    );
 }
+
+function addAnnualRows(sqlite: DatabaseSync, associationId = "assoc_tango_mar"): void {
+  addAssessment(sqlite, {
+    id: `dues_2027_all_${associationId}`,
+    name: "2027 annual assessment (all lots)",
+    dueOn: "2027-03-01",
+    opensOn: "2027-01-01",
+    lotType: null,
+    associationId,
+  });
+  addAssessment(sqlite, {
+    id: `dues_2027_improved_${associationId}`,
+    name: "2027 annual assessment (improved lots)",
+    dueOn: "2027-03-01",
+    opensOn: "2027-01-01",
+    lotType: "improved",
+    associationId,
+  });
+  addAssessment(sqlite, {
+    id: `dues_2027_unimproved_${associationId}`,
+    name: "2027 annual assessment (unimproved lots)",
+    dueOn: "2027-03-01",
+    opensOn: "2027-01-01",
+    lotType: "unimproved",
+    amount: 10000,
+    associationId,
+  });
+}
+
+const annualNames = [
+  "2027 annual assessment (all lots)",
+  "2027 annual assessment (improved lots)",
+  "2027 annual assessment (unimproved lots)",
+];
 
 async function names(db: D1Database, userId: string, today: string): Promise<string[]> {
   const rows = await upcomingAssessments(db, "assoc_tango_mar", userId, today);
@@ -179,60 +230,26 @@ async function names(db: D1Database, userId: string, today: string): Promise<str
 describe("upcoming assessments", () => {
   const today = "2026-10-07";
 
-  it("shows a future assessment when the owner's lot type matches", async () => {
+  it("shows improved, unimproved, and all-lot rows to an owner with only an improved lot", async () => {
     const { sqlite, db } = openTypedLots();
     addLot(sqlite, { id: "prop_improved", ownerId: "user_marc", lotType: "improved", lotNumber: "14" });
-    addAssessment(sqlite, {
-      id: "dues_2027_improved",
-      name: "2027 annual assessment (improved lots)",
-      dueOn: "2027-03-01",
-      opensOn: "2027-01-01",
-      lotType: "improved",
-    });
-    addAssessment(sqlite, {
-      id: "dues_2027_unimproved",
-      name: "2027 annual assessment (unimproved lots)",
-      dueOn: "2027-03-01",
-      opensOn: "2027-01-01",
-      lotType: "unimproved",
-      amount: 10000,
-    });
+    addAnnualRows(sqlite);
 
     const rows = await upcomingAssessments(db, "assoc_tango_mar", "user_marc", today);
-    expect(rows.map((row) => row.name)).toEqual(["2027 annual assessment (improved lots)"]);
-    expect(rows[0]?.invoice_count).toBe(0);
+    expect(rows.map((row) => row.name)).toEqual(annualNames);
+    expect(rows.every((row) => row.invoice_count === 0)).toBe(true);
     sqlite.close();
   });
 
-  it("shows improved and unimproved rows when the owner's lot type is missing", async () => {
+  it("shows every upcoming row when the owner's lot type is missing", async () => {
     const { sqlite, db } = openTypedLots();
     addLot(sqlite, { id: "prop_blank", ownerId: "user_marc", lotType: null, lotNumber: "14" });
-    addAssessment(sqlite, {
-      id: "dues_2027_improved",
-      name: "2027 annual assessment (improved lots)",
-      dueOn: "2027-03-01",
-      opensOn: "2027-01-01",
-      lotType: "improved",
-    });
-    addAssessment(sqlite, {
-      id: "dues_2027_unimproved",
-      name: "2027 annual assessment (unimproved lots)",
-      dueOn: "2027-03-01",
-      opensOn: "2027-01-01",
-      lotType: "unimproved",
-      amount: 10000,
-    });
+    addAnnualRows(sqlite);
 
-    expect(await names(db, "user_marc", today)).toEqual([
-      "2027 annual assessment (improved lots)",
-      "2027 annual assessment (unimproved lots)",
-    ]);
+    expect(await names(db, "user_marc", today)).toEqual(annualNames);
 
     sqlite.prepare("UPDATE properties SET lot_type = '' WHERE id = 'prop_blank'").run();
-    expect(await names(db, "user_marc", today)).toEqual([
-      "2027 annual assessment (improved lots)",
-      "2027 annual assessment (unimproved lots)",
-    ]);
+    expect(await names(db, "user_marc", today)).toEqual(annualNames);
     sqlite.close();
   });
 
@@ -265,53 +282,51 @@ describe("upcoming assessments", () => {
     sqlite.close();
   });
 
-  it("hides an improved assessment from an owner who only has unimproved lots", async () => {
+  it("shows improved, unimproved, and all-lot rows to an owner with only an unimproved lot", async () => {
     const { sqlite, db } = openTypedLots();
     addLot(sqlite, { id: "prop_unimproved", ownerId: "user_casey", lotType: "unimproved", lotNumber: "27" });
-    addAssessment(sqlite, {
-      id: "dues_2027_improved",
-      name: "2027 annual assessment (improved lots)",
-      dueOn: "2027-03-01",
-      opensOn: "2027-01-01",
-      lotType: "improved",
-    });
-    addAssessment(sqlite, {
-      id: "dues_2027_unimproved",
-      name: "2027 annual assessment (unimproved lots)",
-      dueOn: "2027-03-01",
-      opensOn: "2027-01-01",
-      lotType: "unimproved",
-      amount: 10000,
-    });
+    addAnnualRows(sqlite);
 
-    expect(await names(db, "user_casey", today)).toEqual(["2027 annual assessment (unimproved lots)"]);
+    expect(await names(db, "user_casey", today)).toEqual(annualNames);
     sqlite.close();
   });
 
-  it("shows both rows when the owner has an improved lot and an unimproved lot", async () => {
+  it("shows every upcoming row when the owner has an improved lot and an unimproved lot", async () => {
     const { sqlite, db } = openTypedLots();
     addLot(sqlite, { id: "prop_improved", ownerId: "user_marc", lotType: "improved", lotNumber: "14" });
     addLot(sqlite, { id: "prop_unimproved", ownerId: "user_marc", lotType: "unimproved", lotNumber: "15" });
-    addAssessment(sqlite, {
-      id: "dues_2027_improved",
-      name: "2027 annual assessment (improved lots)",
-      dueOn: "2027-03-01",
-      opensOn: "2027-01-01",
-      lotType: "improved",
-    });
-    addAssessment(sqlite, {
-      id: "dues_2027_unimproved",
-      name: "2027 annual assessment (unimproved lots)",
-      dueOn: "2027-03-01",
-      opensOn: "2027-01-01",
-      lotType: "unimproved",
-      amount: 10000,
-    });
+    addAnnualRows(sqlite);
 
-    expect(await names(db, "user_marc", today)).toEqual([
-      "2027 annual assessment (improved lots)",
-      "2027 annual assessment (unimproved lots)",
-    ]);
+    expect(await names(db, "user_marc", today)).toEqual(annualNames);
+    sqlite.close();
+  });
+
+  it("shows nothing when the owner has no linked lot", async () => {
+    const { sqlite, db } = openTypedLots();
+    addAnnualRows(sqlite);
+
+    expect(await names(db, "user_marc", today)).toEqual([]);
+    sqlite.close();
+  });
+
+  it("keeps each association's upcoming list to lots in that association", async () => {
+    const { sqlite, db } = openTypedLots();
+    addLot(sqlite, { id: "prop_tango", ownerId: "user_marc", lotType: "improved", lotNumber: "14" });
+    addLot(sqlite, {
+      id: "prop_other",
+      ownerId: "user_pat",
+      lotType: "unimproved",
+      lotNumber: "2",
+      associationId: "assoc_other",
+    });
+    addAnnualRows(sqlite);
+    addAnnualRows(sqlite, "assoc_other");
+
+    expect(await names(db, "user_marc", today)).toEqual(annualNames);
+    const other = await upcomingAssessments(db, "assoc_other", "user_pat", today);
+    expect(other.map((row) => row.name)).toEqual(annualNames);
+    expect(await upcomingAssessments(db, "assoc_tango_mar", "user_pat", today)).toEqual([]);
+    expect(await upcomingAssessments(db, "assoc_other", "user_marc", today)).toEqual([]);
     sqlite.close();
   });
 
@@ -436,8 +451,9 @@ describe("assigning a future assessment", () => {
     const upcoming = await upcomingAssessments(db, "assoc_tango_mar", "user_sam", "2026-10-07");
     const improved = upcoming.find((row) => row.id === "assessment_2027_improved");
     expect(improved).toMatchObject({ invoice_count: 1, due_on: "2027-03-01", opens_on: "2027-01-01" });
-    expect(upcoming.some((row) => row.id === "assessment_2027_unimproved")).toBe(false);
+    expect(upcoming.some((row) => row.id === "assessment_2027_unimproved")).toBe(true);
     expect(upcoming.some((row) => row.due_on < "2026-10-07")).toBe(false);
+    expect(upcoming.some((row) => row.due_on === "2026-10-07")).toBe(false);
 
     const history = await invoicesForUser(db, "assoc_tango_mar", "user_sam", "2026-10-07");
     expect(history.some((row) => row.description.includes("2027"))).toBe(false);
@@ -446,9 +462,9 @@ describe("assigning a future assessment", () => {
     expect(opened[0]).toMatchObject({ balance_cents: 62500, delinquent: false });
 
     sqlite.prepare("UPDATE properties SET lot_type = 'unimproved' WHERE id = 'prop_14'").run();
-    const typedAway = await upcomingAssessments(db, "assoc_tango_mar", "user_sam", "2026-10-07");
-    expect(typedAway.some((row) => row.id === "assessment_2027_improved")).toBe(false);
-    expect(typedAway.some((row) => row.id === "assessment_2027_unimproved")).toBe(true);
+    const retyped = await upcomingAssessments(db, "assoc_tango_mar", "user_sam", "2026-10-07");
+    expect(retyped.some((row) => row.id === "assessment_2027_improved")).toBe(true);
+    expect(retyped.some((row) => row.id === "assessment_2027_unimproved")).toBe(true);
     sqlite.close();
   });
 });

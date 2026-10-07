@@ -1156,10 +1156,28 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     if (!(await duesColumnsReady(c.env.DB))) {
       return redirectTo(c, back, "Apply the admin migration in D1, then try again. The steps are in the README under Admin improvements.", "warn");
     }
+    const improvedAmount = parseMoneyToCents(textValue(fields, "improved_amount", 40));
+    const unimprovedAmount = parseMoneyToCents(textValue(fields, "unimproved_amount", 40));
+    const opensOn = textValue(fields, "opens_on", 20);
+    const dueOn = textValue(fields, "due_on", 20);
+    if (
+      improvedAmount === null ||
+      improvedAmount <= 0 ||
+      unimprovedAmount === null ||
+      unimprovedAmount <= 0 ||
+      !isIsoDate(opensOn) ||
+      !isIsoDate(dueOn)
+    ) {
+      return redirectTo(c, back, "Enter positive amounts and valid open and due dates.", "warn");
+    }
     const created: string[] = [];
     const existing: string[] = [];
     for (const lotType of ["improved", "unimproved"] as const) {
-      const dues = annualDues(year, lotType);
+      const dues = annualDues(year, lotType, {
+        amountCents: lotType === "improved" ? improvedAmount : unimprovedAmount,
+        opensOn,
+        dueOn,
+      });
       const found = await c.env.DB
         .prepare("SELECT id FROM assessments WHERE association_id = ? AND due_on = ? AND lot_type = ?")
         .bind(association.id, dues.dueOn, dues.lotType)

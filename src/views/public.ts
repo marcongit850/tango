@@ -77,7 +77,9 @@ function homeBelow(): string {
           <h2 id="home-welcome-title">Tango Mar</h2>
           <p>This website serves as the central online resource for Tango Mar property owners, providing convenient access to association information, community documents, neighborhood updates, and homeowner resources.</p>
         </div>
-        <img class="home-beach" src="/tango-mar-boardwalk.png" alt="Sea oats and a dune fence above the gulf at Tango Mar" width="1802" height="872">
+        <div class="home-beach-frame">
+          <img class="home-beach" src="/tango-mar-dunes.webp" alt="Sea oats and a dune fence above the gulf at Tango Mar" width="832" height="428">
+        </div>
       </div>
     </section>`;
 }

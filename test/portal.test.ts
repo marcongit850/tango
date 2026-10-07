@@ -365,7 +365,7 @@ describe("public home", () => {
     expect(html).toContain("Contact Us");
     expect(html).toContain("Welcome Home");
     expect(html).toContain("This website serves as the central online resource for Tango Mar property owners, providing convenient access to association information, community documents, neighborhood updates, and homeowner resources.");
-    expect(html).toContain('class="home-beach" src="/tango-mar-boardwalk.png"');
+    expect(html).toContain('class="home-beach" src="/tango-mar-dunes.webp"');
     expect(html).not.toContain("\u2013");
     expect(html).toContain('src="/tango-mar-boardwalk.png"');
     expect(html).toContain('src="/tango-mar-mark.png"');

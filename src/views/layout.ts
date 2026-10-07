@@ -174,83 +174,98 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
 .home-cards {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1rem;
-  text-align: left;
+  gap: 1.15rem;
+  text-align: center;
 }
 .home-card {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
+  text-align: center;
   background: #fff;
   border-radius: 0.85rem;
-  padding: 1.35rem 1.15rem 1.25rem;
-  box-shadow: 0 10px 28px rgba(28, 40, 48, 0.05);
+  padding: 1.85rem 1.35rem 1.6rem;
+  box-shadow: 0 8px 22px rgba(28, 40, 48, 0.07);
 }
 .home-icon {
-  width: 3.25rem;
-  height: 3.25rem;
+  width: 4.5rem;
+  height: 4.5rem;
   border-radius: 50%;
   display: grid;
   place-items: center;
-  margin-bottom: 0.9rem;
+  margin: 0 auto 1.05rem;
   color: #1c3558;
 }
-.home-icon svg { width: 1.45rem; height: 1.45rem; display: block; }
-.home-card-megaphone .home-icon { background: #e3eef8; }
-.home-card-document .home-icon { background: #e5f3e8; }
-.home-card-person .home-icon { background: #f6efe2; }
-.home-card-envelope .home-icon { background: #e7eef5; }
+.home-icon svg { width: 2rem; height: 2rem; display: block; }
+.home-card-megaphone .home-icon { background: #d7e7f8; }
+.home-card-document .home-icon { background: #dff3e4; }
+.home-card-person .home-icon { background: #f8ead9; }
+.home-card-envelope .home-icon { background: #d9e8f6; }
 .home-card h3 {
   font-family: var(--sans);
   font-weight: 700;
-  letter-spacing: 0.07em;
-  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  font-size: 1.125rem;
+  line-height: 1.25;
   text-transform: uppercase;
   color: #1a2744;
-  margin: 0 0 0.45rem;
+  margin: 0 0 0.7rem;
 }
-.home-card p { flex: 1; margin: 0 0 1rem; color: #4e5c66; font-size: 0.95rem; }
+.home-card p { flex: 1; margin: 0 0 1.15rem; color: #4e5c66; font-size: 0.98rem; }
 .home-card a {
   color: #1c3558;
   font-weight: 650;
-  text-decoration: none;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.35rem;
 }
-.home-card a:hover, .home-card a:focus { text-decoration: underline; }
-.home-welcome { padding: 1.5rem 0 3.25rem; }
+.home-welcome { padding: 2.25rem 0 3.25rem; background: #f7f4ef; }
 .home-welcome-inner {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-  gap: 2.5rem;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 28rem);
+  gap: 2.75rem;
   align-items: center;
 }
 .home-kicker {
-  margin: 0 0 0.35rem;
+  margin: 0 0 0.4rem;
   color: #c6a15a;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 .home-welcome h2 {
-  font-size: clamp(2.6rem, 5vw, 3.5rem);
+  font-size: clamp(3.15rem, 6vw, 4.35rem);
   color: #1a2744;
-  margin: 0 0 0.65rem;
+  margin: 0 0 0.75rem;
+  line-height: 1.05;
 }
 .home-welcome-copy > p:last-child {
   margin: 0;
   max-width: 36rem;
   color: #3d4a56;
-  font-size: 1.02rem;
+  font-size: 1.05rem;
+  line-height: 1.6;
 }
-.home-beach {
+.home-beach-frame {
+  align-self: center;
+  justify-self: center;
   width: 100%;
   aspect-ratio: 16 / 10;
-  object-fit: cover;
-  object-position: 58% 30%;
   border-radius: 1.15rem;
+  overflow: hidden;
+  position: relative;
+}
+.home-beach {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
   display: block;
 }
 .home-demo { padding: 0 0 2.5rem; }

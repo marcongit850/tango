@@ -1034,6 +1034,7 @@ describe("pending join requests and notices", () => {
       waiting: 0,
       pendingJoins: await countPendingJoinRequests(db, ASSOCIATION),
       outstandingCents: 0,
+      admins: [],
       audit: [],
     });
     expect(home).toContain("Join requests waiting");

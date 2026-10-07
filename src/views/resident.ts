@@ -252,6 +252,36 @@ function noticeFileLinks(slug: string, row: NoticeRow): string {
   return documentFileLinks(`/a/${slug}/notices/${row.id}/file`, row.attachment_content_type);
 }
 
+function noticeHrefPath(href: string): string {
+  const trimmed = href.trim();
+  if (!trimmed) return "";
+  const noHash = trimmed.split("#", 1)[0] ?? "";
+  let path = noHash;
+  if (/^https?:\/\//i.test(noHash)) {
+    try {
+      path = new URL(noHash).pathname;
+    } catch {
+      return "";
+    }
+  } else {
+    path = noHash.split("?", 1)[0] ?? "";
+  }
+  if (path.length > 1) path = path.replace(/\/+$/, "");
+  return path;
+}
+
+/**
+ * Open stays only for an unread notice that has no text on this page and links somewhere else.
+ * A read notice, a notice whose body is already shown, or a link back to this list omits it.
+ */
+function noticeOpenLink(slug: string, row: NoticeRow): string {
+  const href = row.href.trim();
+  if (!href || row.read_at) return "";
+  if (row.body.trim()) return "";
+  if (noticeHrefPath(href) === `/a/${slug}/notices`) return "";
+  return `<p><a href="${esc(href)}">Open</a></p>`;
+}
+
 export function noticesPage(association: Association, notices: NoticeRow[]): string {
   const rows = notices
     .map(
@@ -260,7 +290,7 @@ export function noticesPage(association: Association, notices: NoticeRow[]): str
         <p class="muted">${dateTimeCell(row.created_at, association.timezone)} · ${row.read_at ? `Opened ${dateTimeCell(row.read_at, association.timezone)}` : "Unread"}</p>
         ${row.body ? paragraphs(row.body) : ""}
         ${row.attachment_filename ? `<p>${esc(row.attachment_filename)}</p><p>${noticeFileLinks(association.slug, row)}</p>` : ""}
-        ${row.href ? `<p><a href="${esc(row.href)}">Open</a></p>` : ""}
+        ${noticeOpenLink(association.slug, row)}
         ${row.read_at ? "" : `<form method="post" action="/a/${esc(association.slug)}/notices/${esc(row.id)}/read"><button class="secondary" type="submit">Mark read</button></form>`}
       </article>`,
     )
@@ -372,7 +402,6 @@ export function messagesPage(
   association: Association,
   threads: MessageRow[],
   properties: { id: string; lot_number: string }[],
-  adminInboxHref = "",
 ): string {
   const rows = threads
     .map((thread) => {
@@ -383,14 +412,10 @@ export function messagesPage(
   const lotOptions = properties
     .map((property) => `<option value="${esc(property.id)}">Lot ${esc(property.lot_number)}</option>`)
     .join("");
-  const adminPlace = adminInboxHref
-    ? `<a href="${esc(adminInboxHref)}">Admin → Messages</a>`
-    : "Admin → Messages";
   return `<section class="split">
     <article class="panel">
       <h1>Messages</h1>
       <p class="muted">Send a private message to the Board. Messages are not visible to other residents.</p>
-      <p class="muted">Board members and authorized administrators can review incoming owner messages under ${adminPlace}.</p>
       ${rows ? `<table><thead><tr><th>Subject</th><th>Latest from</th><th>When</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No messages yet.")}
     </article>
     <article class="panel">

@@ -537,8 +537,14 @@ describe("admin overview outstanding", () => {
       const overview = await app.request("http://localhost/a/tango-mar/admin", { headers: { Cookie: `tango_session=${token}` } }, env);
       expect(overview.status).toBe(200);
       const html = await overview.text();
-      expect(html).toContain("<h2>Total outstanding</h2>");
-      expect(html).toContain("$1,600.50");
+      expect(html).toContain('<a class="card" href="/a/tango-mar/admin/ledger"><h2>$1,600.50</h2><p>Total Outstanding</p></a>');
+      expect(html).not.toContain("<h2>Total outstanding</h2>");
+      const accessStart = html.indexOf("<summary>Current admins</summary>");
+      const access = html.slice(accessStart, html.indexOf("</details>", accessStart));
+      expect(access).toContain('href="/a/tango-mar/admin/owners/user_jordan">Jordan Lee</a>');
+      expect(access).toContain("jordan.lee@example.com");
+      expect(access).not.toContain("Sam Rivera");
+      expect(access).not.toContain("Casey Nguyen");
       expect(html).not.toContain("$2,800.50");
 
       sqlite

@@ -595,6 +595,7 @@ describe("admin overview", () => {
       waiting: 0,
       pendingJoins: null,
       outstandingCents: 160050,
+      admins: [{ user_id: "user_jordan", name: "Jordan Lee", email: "jordan.lee@example.com" }],
       audit: [],
     });
     const blurb =
@@ -603,13 +604,19 @@ describe("admin overview", () => {
     expect(html).toContain("<h2>Access</h2>");
     expect(html).toContain(blurb);
     expect(html).not.toContain("<h2>Roles</h2>");
-    expect(html).toContain("<h2>Total outstanding</h2>");
-    expect(html).toContain("$1,600.50");
-    expect(html.indexOf("<h1>Board admin</h1>")).toBeLessThan(html.indexOf("<h2>Total outstanding</h2>"));
-    expect(html.indexOf("<h2>Total outstanding</h2>")).toBeLessThan(html.indexOf(">Lots<"));
+    expect(html).toContain('<a class="card" href="/a/tango-mar/admin/ledger"><h2>$1,600.50</h2><p>Total Outstanding</p></a>');
+    expect(html).not.toContain("<h2>Total outstanding</h2>");
+    expect(html).not.toContain('class="figure"');
+    expect(html.indexOf("<h1>Board admin</h1>")).toBeLessThan(html.indexOf(">Total Outstanding<"));
+    expect(html.indexOf(">Total Outstanding<")).toBeLessThan(html.indexOf(">Lots<"));
     expect(html.indexOf("<h1>Board admin</h1>")).toBeLessThan(html.indexOf("<h2>Access</h2>"));
     expect(html.indexOf("<h2>Access</h2>")).toBeLessThan(html.indexOf(blurb));
-    expect(html.indexOf(blurb)).toBeLessThan(html.indexOf("Export ledger for the accountant"));
+    expect(html.indexOf(blurb)).toBeLessThan(html.indexOf("<summary>Current admins</summary>"));
+    expect(html).toContain(
+      '<li><a href="/a/tango-mar/admin/owners/user_jordan">Jordan Lee</a><div class="muted">jordan.lee@example.com</div></li>',
+    );
+    expect(html).not.toContain("<details open>");
+    expect(html.indexOf("<summary>Current admins</summary>")).toBeLessThan(html.indexOf("Export ledger for the accountant"));
     expect(html.indexOf("Export ledger for the accountant")).toBeLessThan(html.indexOf("<h2>Recent activity</h2>"));
   });
 });
@@ -800,7 +807,37 @@ describe("personal notices", () => {
     expect(noticesPage(association, [])).toContain("No notices from the Board.");
     expect(html).toContain(`<p class="muted">${created} · Opened ${opened}</p>`);
     expect(html).toContain(`<p class="muted">${created} · Unread</p>`);
+    expect(html).not.toContain(">Open</a>");
     expect(html).not.toContain(">Read<");
+  });
+
+  it("hides Open when the notice is already read or its text is already on the page", () => {
+    const readHere = noticesPage(association, [notice({ read_at: readAt, href: "/a/tango-mar/notices" })]);
+    expect(readHere).toContain("Opened");
+    expect(readHere).toContain("Please mail a check.");
+    expect(readHere).not.toContain(">Open</a>");
+    expect(readHere).not.toContain("Mark read");
+
+    const visibleHere = noticesPage(association, [notice({ read_at: null, href: "https://mytangomar.com/a/tango-mar/notices/" })]);
+    expect(visibleHere).toContain("Unread");
+    expect(visibleHere).toContain("Please mail a check.");
+    expect(visibleHere).toContain("Mark read");
+    expect(visibleHere).not.toContain(">Open</a>");
+
+    const shownElsewhere = noticesPage(association, [
+      notice({ id: "note-balance", body: "See your invoices.", read_at: null, href: "/a/tango-mar/invoices" }),
+    ]);
+    expect(shownElsewhere).toContain("See your invoices.");
+    expect(shownElsewhere).toContain("Mark read");
+    expect(shownElsewhere).not.toContain(">Open</a>");
+
+    const elsewhere = noticesPage(association, [
+      notice({ id: "note-invoice", body: "", read_at: null, href: "/a/tango-mar/invoices" }),
+      notice({ id: "note-paid", body: "", read_at: readAt, href: "/a/tango-mar/payments/pay-1" }),
+    ]);
+    expect(elsewhere).toContain('<p><a href="/a/tango-mar/invoices">Open</a></p>');
+    expect(elsewhere).not.toContain('href="/a/tango-mar/payments/pay-1"');
+    expect(elsewhere).not.toContain("\u2014");
   });
 });
 

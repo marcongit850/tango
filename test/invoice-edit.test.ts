@@ -148,6 +148,15 @@ describe("ledger invoice edit", () => {
       expect(html).toContain('value="2026-03-01"');
       expect(html).toContain("1042");
       expect(html).toContain('type="checkbox" name="confirm" value="yes" required');
+      expect(html).toContain('href="#edit-payment-payment_sam_2026">Edit</a>');
+      expect(html).toContain(
+        'id="edit-payment-payment_sam_2026" method="post" action="/a/tango-mar/admin/invoices/invoice_sam_2026/payments/payment_sam_2026"',
+      );
+      expect(html).toContain('name="paid_on"');
+      expect(html).toContain('value="2026-02-20"');
+      expect(html).toContain('value="1042"');
+      expect(html).toContain("Recorded from the January dues mailing.");
+      expect(html).toContain("Save payment");
       expect(html).toContain("Delete this payment");
       expect(html).toContain('action="/a/tango-mar/admin/invoices/invoice_sam_2026/payments/payment_sam_2026/delete"');
       expect(html).not.toContain("confirm(");
@@ -398,6 +407,248 @@ describe("ledger invoice edit", () => {
         env,
       );
       expect(boardWrite.status).toBe(403);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("edits a recorded payment and refreshes invoice status and the lot balance", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const token = await signIn(sqlite, "user_jordan");
+    const invoiceUrl = "http://localhost/a/tango-mar/admin/invoices/invoice_sam_2026";
+    try {
+      const edited = await app.request(
+        `${invoiceUrl}/payments/payment_sam_2026`,
+        post(token, {
+          amount: "400.00",
+          method: "cash",
+          reference: "88",
+          paid_on: "2026-03-02",
+          notes: "Corrected from the January mailing.",
+        }),
+        env,
+      );
+      expect(edited.status).toBe(303);
+      expect(edited.headers.get("Location")).toBe("/a/tango-mar/admin/invoices/invoice_sam_2026");
+      expect(decodeURIComponent(edited.headers.get("Set-Cookie") ?? "")).toContain("Payment saved.");
+      expect(
+        sqlite
+          .prepare(
+            "SELECT amount_cents, method, reference, paid_on, notes, property_id, invoice_id, association_id, recorded_by_user_id FROM payments WHERE id = 'payment_sam_2026'",
+          )
+          .get(),
+      ).toEqual({
+        amount_cents: 40000,
+        method: "cash",
+        reference: "88",
+        paid_on: "2026-03-02",
+        notes: "Corrected from the January mailing.",
+        property_id: "prop_14",
+        invoice_id: "invoice_sam_2026",
+        association_id: "assoc_tango_mar",
+        recorded_by_user_id: "user_jordan",
+      });
+      expect(sqlite.prepare("SELECT status FROM invoices WHERE id = 'invoice_sam_2026'").get()).toEqual({ status: "partial" });
+      expect(sqlite.prepare("SELECT action, actor_user_id, entity_type, entity_id, detail FROM audit_log WHERE action = 'payment_update'").get()).toEqual({
+        action: "payment_update",
+        actor_user_id: "user_jordan",
+        entity_type: "payment",
+        entity_id: "payment_sam_2026",
+        detail: "Lot 14 · 2026-14-ANNUAL · $400.00 · cash 88",
+      });
+
+      const invoice = await app.request(invoiceUrl, { headers: { Cookie: `tango_session=${token}` } }, env);
+      expect(invoice.status).toBe(200);
+      const html = await invoice.text();
+      expect(html).toContain('<span class="badge">partial</span>');
+      expect(html).toContain('value="400.00"');
+      expect(html).toContain('value="2026-03-02"');
+      expect(html).toContain("Corrected from the January mailing.");
+      expect(html).toContain('action="/a/tango-mar/admin/invoices/invoice_sam_2026/payments/payment_sam_2026/delete"');
+
+      const lot = await app.request("http://localhost/a/tango-mar/admin/ledger/prop_14", { headers: { Cookie: `tango_session=${token}` } }, env);
+      expect(lot.status).toBe(200);
+      expect(await lot.text()).toContain('<span class="money owe">$800.00</span>');
+
+      const restored = await app.request(
+        `${invoiceUrl}/payments/payment_sam_2026`,
+        post(token, {
+          amount: "1200.00",
+          method: "check",
+          reference: "1042",
+          paid_on: "2026-02-20",
+          notes: "Recorded from the January dues mailing.",
+        }),
+        env,
+      );
+      expect(restored.status).toBe(303);
+      expect(sqlite.prepare("SELECT amount_cents, status FROM invoices WHERE id = 'invoice_sam_2026'").get()).toEqual({
+        amount_cents: 120000,
+        status: "paid",
+      });
+      expect(sqlite.prepare("SELECT amount_cents, method FROM payments WHERE id = 'payment_sam_2026'").get()).toEqual({
+        amount_cents: 120000,
+        method: "check",
+      });
+
+      const voided = await app.request(
+        invoiceUrl,
+        post(token, {
+          description: "2026 annual assessment",
+          amount: "1200.00",
+          late_fee: "0",
+          issued_on: "2026-01-15",
+          due_on: "2026-03-01",
+          status: "void",
+        }),
+        env,
+      );
+      expect(voided.status).toBe(303);
+      const editedWhileVoid = await app.request(
+        `${invoiceUrl}/payments/payment_sam_2026`,
+        post(token, {
+          amount: "100.00",
+          method: "other",
+          reference: "",
+          paid_on: "2026-03-04",
+          notes: "",
+        }),
+        env,
+      );
+      expect(editedWhileVoid.status).toBe(303);
+      expect(sqlite.prepare("SELECT status FROM invoices WHERE id = 'invoice_sam_2026'").get()).toEqual({ status: "void" });
+      expect(sqlite.prepare("SELECT amount_cents, method, reference, notes FROM payments WHERE id = 'payment_sam_2026'").get()).toEqual({
+        amount_cents: 10000,
+        method: "other",
+        reference: "",
+        notes: "",
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("rejects a bad payment edit, another association, and anyone without edit access", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const admin = await signIn(sqlite, "user_jordan");
+    const owner = await signIn(sqlite, "user_sam");
+    sqlite.exec(`
+      INSERT INTO associations (id, slug, name, legal_name, created_at)
+      VALUES ('assoc_other', 'other-shore', 'Other Shore', 'Other Shore POA', '2026-10-01T00:00:00Z');
+      INSERT INTO properties (id, association_id, lot_number, street_address, status, created_at)
+      VALUES ('prop_other', 'assoc_other', '1', '1 Other Lane', 'active', '2026-10-01T00:00:00Z');
+      INSERT INTO invoices (
+        id, association_id, property_id, invoice_number, description,
+        amount_cents, late_fee_cents, issued_on, due_on, status, created_at
+      ) VALUES (
+        'invoice_other', 'assoc_other', 'prop_other', 'OTHER-1', 'Other dues',
+        5000, 0, '2026-01-15', '2026-03-01', 'open', '2026-01-15T00:00:00Z'
+      );
+      INSERT INTO payments (
+        id, association_id, property_id, invoice_id, amount_cents, method, reference,
+        paid_on, notes, recorded_by_user_id, created_at
+      ) VALUES (
+        'payment_other', 'assoc_other', 'prop_other', 'invoice_other',
+        5000, 'check', '9', '2026-02-01', 'Other note', NULL, '2026-02-01T00:00:00Z'
+      );
+    `);
+    const original = {
+      amount_cents: 120000,
+      method: "check",
+      reference: "1042",
+      paid_on: "2026-02-20",
+      notes: "Recorded from the January dues mailing.",
+    };
+    try {
+      const badAmount = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_sam_2026/payments/payment_sam_2026",
+        post(admin, { amount: "0", method: "check", reference: "1042", paid_on: "2026-02-20", notes: "nope" }),
+        env,
+      );
+      expect(badAmount.status).toBe(303);
+      expect(decodeURIComponent(badAmount.headers.get("Set-Cookie") ?? "")).toContain("Check the amount, method, and date.");
+      expect(sqlite.prepare("SELECT amount_cents, method, reference, paid_on, notes FROM payments WHERE id = 'payment_sam_2026'").get()).toEqual(original);
+
+      const badMethod = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_sam_2026/payments/payment_sam_2026",
+        post(admin, { amount: "10.00", method: "card", reference: "", paid_on: "2026-02-20", notes: "" }),
+        env,
+      );
+      expect(badMethod.status).toBe(303);
+      expect(sqlite.prepare("SELECT amount_cents FROM payments WHERE id = 'payment_sam_2026'").get()).toEqual({ amount_cents: 120000 });
+
+      const badDate = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_sam_2026/payments/payment_sam_2026",
+        post(admin, { amount: "10.00", method: "cash", reference: "", paid_on: "2026-02-31", notes: "" }),
+        env,
+      );
+      expect(badDate.status).toBe(303);
+      expect(sqlite.prepare("SELECT status FROM invoices WHERE id = 'invoice_sam_2026'").get()).toEqual({ status: "paid" });
+      expect(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'payment_update'").get()).toEqual({ n: 0 });
+
+      const otherInvoice = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_casey_open/payments/payment_sam_2026",
+        post(admin, { amount: "10.00", method: "cash", reference: "", paid_on: "2026-02-20", notes: "" }),
+        env,
+      );
+      expect(otherInvoice.status).toBe(404);
+      expect(sqlite.prepare("SELECT amount_cents FROM payments WHERE id = 'payment_sam_2026'").get()).toEqual({ amount_cents: 120000 });
+
+      const otherAssociation = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_sam_2026/payments/payment_other",
+        post(admin, { amount: "10.00", method: "cash", reference: "", paid_on: "2026-02-20", notes: "" }),
+        env,
+      );
+      expect(otherAssociation.status).toBe(404);
+      expect(sqlite.prepare("SELECT amount_cents, association_id FROM payments WHERE id = 'payment_other'").get()).toEqual({
+        amount_cents: 5000,
+        association_id: "assoc_other",
+      });
+
+      const otherSlug = await app.request(
+        "http://localhost/a/other-shore/admin/invoices/invoice_other/payments/payment_other",
+        post(admin, { amount: "10.00", method: "cash", reference: "", paid_on: "2026-02-20", notes: "" }),
+        env,
+      );
+      expect(otherSlug.status).toBe(303);
+      expect(otherSlug.headers.get("Location")).toContain("/login");
+      expect(sqlite.prepare("SELECT amount_cents FROM payments WHERE id = 'payment_other'").get()).toEqual({ amount_cents: 5000 });
+
+      const resident = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_sam_2026/payments/payment_sam_2026",
+        post(owner, { amount: "10.00", method: "cash", reference: "", paid_on: "2026-02-20", notes: "" }),
+        env,
+      );
+      expect(resident.status).toBe(403);
+      expect(sqlite.prepare("SELECT amount_cents, method FROM payments WHERE id = 'payment_sam_2026'").get()).toEqual({
+        amount_cents: 120000,
+        method: "check",
+      });
+
+      sqlite.prepare("UPDATE memberships SET is_admin = 0 WHERE user_id = 'user_jordan'").run();
+      const boardPage = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_sam_2026",
+        { headers: { Cookie: `tango_session=${admin}` } },
+        env,
+      );
+      expect(boardPage.status).toBe(200);
+      const viewOnly = await boardPage.text();
+      expect(viewOnly).toContain("View only. Edit access is required to create, edit, or delete.");
+      expect(viewOnly).not.toContain("Save payment");
+      expect(viewOnly).not.toContain('href="#edit-payment-payment_sam_2026"');
+      expect(viewOnly).not.toContain("Delete this payment");
+      const boardWrite = await app.request(
+        "http://localhost/a/tango-mar/admin/invoices/invoice_sam_2026/payments/payment_sam_2026",
+        post(admin, { amount: "10.00", method: "cash", reference: "", paid_on: "2026-02-20", notes: "" }),
+        env,
+      );
+      expect(boardWrite.status).toBe(403);
+      expect(sqlite.prepare("SELECT amount_cents FROM payments WHERE id = 'payment_sam_2026'").get()).toEqual({ amount_cents: 120000 });
+      expect(sqlite.prepare("SELECT status FROM invoices WHERE id = 'invoice_sam_2026'").get()).toEqual({ status: "paid" });
     } finally {
       sqlite.close();
     }

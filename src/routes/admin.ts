@@ -894,6 +894,53 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     return redirectTo(c, back, "Payment deleted.");
   });
 
+  app.post("/a/:slug/admin/invoices/:invoiceId/payments/:paymentId", async (c) => {
+    const { association, user } = requireEditor(c);
+    const fields = await readForm(c);
+    const invoiceId = c.req.param("invoiceId");
+    const paymentId = c.req.param("paymentId");
+    const invoice = await invoiceById(c.env.DB, association.id, invoiceId);
+    if (!invoice) throw new NotFoundError();
+    const back = `/a/${association.slug}/admin/invoices/${invoiceId}`;
+    const payment = await c.env.DB
+      .prepare(
+        `SELECT id
+         FROM payments
+         WHERE association_id = ? AND invoice_id = ? AND id = ?`,
+      )
+      .bind(association.id, invoiceId, paymentId)
+      .first<{ id: string }>();
+    if (!payment) throw new NotFoundError();
+    const amount = parseMoneyToCents(textValue(fields, "amount", 40));
+    const method = textValue(fields, "method", 20);
+    const reference = textValue(fields, "reference", 80);
+    const paidOn = textValue(fields, "paid_on", 20);
+    const notes = textValue(fields, "notes", 1000);
+    if (amount === null || amount <= 0 || !METHODS.has(method) || !isIsoDate(paidOn)) {
+      return redirectTo(c, back, "Check the amount, method, and date.", "warn");
+    }
+    const result = await c.env.DB
+      .prepare(
+        `UPDATE payments
+         SET amount_cents = ?, method = ?, reference = ?, paid_on = ?, notes = ?
+         WHERE association_id = ? AND invoice_id = ? AND id = ?`,
+      )
+      .bind(amount, method, reference, paidOn, notes, association.id, invoiceId, paymentId)
+      .run();
+    if ((result.meta.changes ?? 0) === 0) throw new NotFoundError();
+    await refreshInvoiceStatus(c.env.DB, association.id, invoiceId);
+    const referenceDetail = reference ? ` ${reference}` : "";
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "payment_update",
+      entityType: "payment",
+      entityId: payment.id,
+      detail: `Lot ${invoice.lot_number} · ${invoice.invoice_number} · ${formatMoney(amount)} · ${method}${referenceDetail}`,
+    });
+    return redirectTo(c, back, "Payment saved.");
+  });
+
   app.post("/a/:slug/admin/assessments", async (c) => {
     const { association, user } = requireEditor(c);
     const fields = await readForm(c);

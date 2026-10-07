@@ -377,6 +377,13 @@ export function importPage(
     </section>`;
 }
 
+const PAYMENT_METHODS = [
+  { value: "check", label: "Check" },
+  { value: "cash", label: "Cash" },
+  { value: "ach_recorded", label: "ACH (recorded)" },
+  { value: "other", label: "Other" },
+];
+
 export function paymentInvoiceVisible(selectedLotId: string, propertyId: string): boolean {
   return propertyId === selectedLotId;
 }
@@ -440,12 +447,7 @@ export function ledgerPage(options: {
             })),
           ])}
           ${textField("Amount", "amount", { required: true })}
-          ${selectField("Method", "method", [
-            { value: "check", label: "Check" },
-            { value: "cash", label: "Cash" },
-            { value: "ach_recorded", label: "ACH (recorded)" },
-            { value: "other", label: "Other" },
-          ])}
+          ${selectField("Method", "method", PAYMENT_METHODS)}
           ${textField("Reference", "reference")}
           ${textField("Paid on", "paid_on", { type: "date", required: true })}
           ${areaField("Notes", "notes")}
@@ -551,17 +553,23 @@ export function invoiceAdminPage(options: {
   const paid = Number(invoice.paid_cents);
   const remaining = Number(invoice.amount_cents) + Number(invoice.late_fee_cents) - paid;
   const paymentRows = options.payments
-    .map(
-      (payment) => `<tr>
+    .map((payment) => {
+      const actions = canEdit
+        ? `<div class="actions"><a href="#edit-payment-${esc(payment.id)}">Edit</a>${confirmDeleteButton(`/a/${association.slug}/admin/invoices/${invoice.id}/payments/${payment.id}/delete`, "Delete payment", "Delete this payment")}</div>`
+        : "";
+      return `<tr>
         <td>${dateCell(payment.paid_on, association.timezone)}</td>
         <td>${esc(methodLabel(payment.method))}</td>
         <td>${esc(payment.reference)}</td>
         <td>${moneySpan(Number(payment.amount_cents))}</td>
         <td>${esc(payment.notes)}</td>
-        <td>${canEdit ? confirmDeleteButton(`/a/${association.slug}/admin/invoices/${invoice.id}/payments/${payment.id}/delete`, "Delete payment", "Delete this payment") : ""}</td>
-      </tr>`,
-    )
+        <td>${actions}</td>
+      </tr>`;
+    })
     .join("");
+  const paymentForms = canEdit
+    ? options.payments.map((payment) => paymentEditForm(association.slug, invoice.id, payment, association.timezone)).join("")
+    : "";
   const remove =
     options.payments.length > 0
       ? `<p class="muted">A payment is recorded on this invoice, so delete stays blocked. Delete that payment above first if it was recorded by mistake. You can still change the amount, dates, description, and status.</p>`
@@ -601,13 +609,27 @@ export function invoiceAdminPage(options: {
     </section>
     <section class="panel">
       <h2>Payments on this invoice</h2>
+      ${canEdit && options.payments.length > 0 ? `<p class="muted">Edit a payment to correct the amount, date, method, reference, or notes.</p>` : ""}
       ${
         paymentRows
-          ? `<table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th><th>Notes</th><th></th></tr></thead><tbody>${paymentRows}</tbody></table>`
+          ? `<table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th><th>Notes</th><th></th></tr></thead><tbody>${paymentRows}</tbody></table>${paymentForms}`
           : empty("No payment is recorded on this invoice.")
       }
     </section>
     ${deleteSection}`;
+}
+
+function paymentEditForm(slug: string, invoiceId: string, payment: InvoicePaymentRow, timeZone: string): string {
+  const action = `/a/${esc(slug)}/admin/invoices/${esc(invoiceId)}/payments/${esc(payment.id)}`;
+  return `<form class="fields" id="edit-payment-${esc(payment.id)}" method="post" action="${action}">
+    <h3>Edit payment from ${dateCell(payment.paid_on, timeZone)}</h3>
+    ${textField("Amount", "amount", { value: dollarsInput(payment.amount_cents), required: true })}
+    ${selectField("Method", "method", PAYMENT_METHODS, payment.method)}
+    ${textField("Reference", "reference", { value: payment.reference })}
+    ${textField("Paid on", "paid_on", { type: "date", value: payment.paid_on, required: true })}
+    ${areaField("Notes", "notes", payment.notes)}
+    <button type="submit">Save payment</button>
+  </form>`;
 }
 
 function folderField(value = ""): string {

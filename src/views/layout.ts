@@ -35,7 +35,7 @@ body { margin: 0; line-height: 1.5; background: var(--sand); }
 a { color: var(--gulf); }
 .skip { position: absolute; left: -999px; }
 .skip:focus { left: 1rem; top: 1rem; background: white; padding: 0.4rem 0.7rem; z-index: 2; }
-.site-header, .site-footer, .wrap { width: min(1080px, calc(100% - 2rem)); margin: 0 auto; }
+.site-header, .wrap { width: min(1080px, calc(100% - 2rem)); margin: 0 auto; }
 .site-header { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; align-items: center; padding: 1rem 0 0.75rem; }
 .brand { display: block; line-height: 0; }
 .brand img { display: block; height: 108px; width: auto; }
@@ -394,9 +394,6 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
 }
 .shore .button.secondary { background: rgba(255, 255, 255, 0.9); color: #1c3558; }
 .hp { position: absolute; left: -999px; width: 1px; height: 1px; overflow: hidden; }
-.site-footer { color: var(--muted); font-size: 0.92rem; padding: 0 0 2rem; }
-.site-footer p { margin: 0.2rem 0; }
-.footer-links { display: flex; flex-wrap: wrap; gap: 0.2rem 1.15rem; }
 .panel.legal {
   border-radius: 0;
   max-width: 42rem;
@@ -552,16 +549,7 @@ body:has(.ask-portal) main { padding-bottom: 5rem; }
 const HOME_SLUG = "tango-mar";
 const MEMBER_HEADER_PATHS = new Set(["/privacy", "/terms"]);
 
-export function siteFooter(supportHref: string): string {
-  const links = [
-    supportHref ? `<a href="${esc(supportHref)}">Support</a>` : "",
-    `<a href="/privacy">Privacy Policy</a>`,
-    `<a href="/terms">Terms of Use</a>`,
-  ].filter(Boolean);
-  return `<footer class="site-footer wrap"><p class="footer-links">${links.join("")}</p></footer>`;
-}
-
-function landingFooter(): string {
+export function siteFooter(): string {
   const base = `/a/${HOME_SLUG}`;
   return `<footer class="home-footer">
     <div class="home-footer-inner">
@@ -584,11 +572,6 @@ function landingFooter(): string {
   </footer>`;
 }
 
-function memberSupportHref(slug: string, membership: { status?: string | null } | null | undefined): string {
-  if (!membership || membership.status === "inactive") return "";
-  return `/a/${slug}/support`;
-}
-
 function requestPath(c: AppContext): string {
   return new URL(c.req.url).pathname;
 }
@@ -606,16 +589,6 @@ async function lookupHomeMembership(
   } catch {
     return null;
   }
-}
-
-function supportHrefFor(
-  c: AppContext,
-  home: { association: Association; membership: Membership | null } | null,
-): string {
-  if (!c.get("user")) return "";
-  const association = c.get("association");
-  if (association) return memberSupportHref(association.slug, c.get("membership"));
-  return home ? memberSupportHref(home.association.slug, home.membership) : "";
 }
 
 function askPortalWidget(): string {
@@ -644,7 +617,6 @@ function shell(options: {
   account: string;
   body: string;
   landing?: boolean;
-  supportHref?: string;
   askPortal?: boolean;
 }): string {
   if (options.landing) {
@@ -666,7 +638,7 @@ function shell(options: {
   <a class="skip" href="#content">Skip to content</a>
   ${topbar}
   <main id="content">${options.body}</main>
-  ${landingFooter()}
+  ${siteFooter()}
 </body>
 </html>`;
   }
@@ -692,7 +664,7 @@ function shell(options: {
   </header>
   <main id="content" class="wrap stack">${options.body}</main>
   ${options.askPortal ? askPortalWidget() : ""}
-  ${siteFooter(options.supportHref ?? "")}
+  ${siteFooter()}
 </body>
 </html>`;
 }
@@ -796,14 +768,12 @@ export async function render(
       ? landingAccount(user.name || user.email, options.portal ?? null)
       : `${adminLink}${esc(user.name || user.email)} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`
     : "";
-  const supportHref = onPublicHome ? "" : supportHrefFor(c, home);
   const body = shell({
     title: options.title,
     brandHref: "/",
     nav: onPublicHome ? "" : nav,
     account,
     landing: onPublicHome,
-    supportHref,
     askPortal: resident,
     body: `${flashHtml}${options.body}`,
   });

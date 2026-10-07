@@ -63,8 +63,13 @@ export function isDuesSchedule(value: string): value is DuesSchedule {
 
 export function duesAmountFieldLabel(kind: "improved" | "unimproved", schedule: DuesSchedule): string {
   const lot = kind === "improved" ? "Improved" : "Unimproved";
-  const period = schedule === "annual" ? "per year" : "per installment";
-  return `${lot} lot amount ${period}`;
+  const period: Record<DuesSchedule, string> = {
+    annual: "per year",
+    semiannual: "per half year",
+    quarterly: "per quarter",
+    monthly: "per month",
+  };
+  return `${lot} lot amount ${period[schedule]}`;
 }
 
 /** Steps a calendar date by whole months and clamps the day (Jan 31 plus 1 month is Feb 28 or 29). */

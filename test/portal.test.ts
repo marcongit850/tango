@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { activeAdminContacts, canEditAdmin, canViewAdmin, canViewPropertyFinancials, isAdmin, keepsAnAdmin, masterKeepsAdminWrites, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
-import { addCalendarMonths, annualDues, assessmentDisplayName, compareDuesRows, defaultDuesYear, duesInstallments, latestDuesAmounts, latestDuesPrefill, lotsToInvoice, scheduledDues } from "../src/lib/dues";
+import { addCalendarMonths, annualDues, assessmentDisplayName, compareDuesRows, defaultDuesYear, duesAmountFieldLabel, duesInstallments, latestDuesAmounts, latestDuesPrefill, lotsToInvoice, scheduledDues } from "../src/lib/dues";
 import { landingAccount, loggedOutNav, render } from "../src/views/layout";
 import { adminHome, documentDetailPage, documentsAdminPage, importPage, ledgerPage, newsAdminPage, ownerDetailPage, paymentInvoiceVisible } from "../src/views/admin";
 import { newsEdit } from "../src/routes/admin";
@@ -475,11 +475,17 @@ describe("annual dues", () => {
     } = {};
     new Function("globalThis", source)(sandbox);
     const api = sandbox.tangoDuesSchedule;
+    expect(duesAmountFieldLabel("improved", "annual")).toBe("Improved lot amount per year");
+    expect(duesAmountFieldLabel("unimproved", "semiannual")).toBe("Unimproved lot amount per half year");
+    expect(duesAmountFieldLabel("improved", "quarterly")).toBe("Improved lot amount per quarter");
+    expect(duesAmountFieldLabel("unimproved", "monthly")).toBe("Unimproved lot amount per month");
     expect(api?.duesAmountLabels("annual")).toEqual({
       improved: "Improved lot amount per year",
       unimproved: "Unimproved lot amount per year",
     });
-    expect(api?.duesAmountLabels("quarterly").improved).toBe("Improved lot amount per installment");
+    expect(api?.duesAmountLabels("semiannual").unimproved).toBe("Unimproved lot amount per half year");
+    expect(api?.duesAmountLabels("quarterly").improved).toBe("Improved lot amount per quarter");
+    expect(api?.duesAmountLabels("monthly").improved).toBe("Improved lot amount per month");
     if (!api) return;
     const listeners: Record<string, () => void> = {};
     const texts: Record<string, { textContent: string }> = {
@@ -505,8 +511,8 @@ describe("annual dues", () => {
     });
     select.value = "monthly";
     listeners.change?.();
-    expect(texts.improved.textContent).toBe("Improved lot amount per installment");
-    expect(texts.unimproved.textContent).toBe("Unimproved lot amount per installment");
+    expect(texts.improved.textContent).toBe("Improved lot amount per month");
+    expect(texts.unimproved.textContent).toBe("Unimproved lot amount per month");
   });
 
   it("drops the lot type suffix from assessment titles", () => {

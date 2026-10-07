@@ -1,6 +1,12 @@
 (function (root) {
   function duesAmountLabels(schedule) {
-    const period = schedule === "annual" ? "per year" : "per installment";
+    const periods = {
+      annual: "per year",
+      semiannual: "per half year",
+      quarterly: "per quarter",
+      monthly: "per month",
+    };
+    const period = periods[schedule] || "per year";
     return {
       improved: "Improved lot amount " + period,
       unimproved: "Unimproved lot amount " + period,

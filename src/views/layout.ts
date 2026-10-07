@@ -189,6 +189,25 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
 .hp { position: absolute; left: -999px; width: 1px; height: 1px; overflow: hidden; }
 .site-footer { color: var(--muted); font-size: 0.92rem; padding: 0 0 2rem; }
 .site-footer p { margin: 0.2rem 0; }
+.footer-links { display: flex; flex-wrap: wrap; gap: 0.2rem 1.15rem; }
+.panel.legal {
+  border-radius: 0;
+  max-width: 42rem;
+  padding: 1.35rem 1.4rem 1.6rem;
+  line-height: 1.65;
+}
+.panel.legal h1 { margin-bottom: 0.15rem; }
+.panel.legal .effective {
+  margin: 0 0 1.2rem;
+  padding-bottom: 0.95rem;
+  border-bottom: 1px solid var(--line);
+  line-height: 1.5;
+}
+.panel.legal h2 { font-size: 1.5rem; line-height: 1.25; margin: 1.45rem 0 0.4rem; }
+.panel.legal p, .panel.legal ul { margin: 0 0 0.8rem; }
+.panel.legal ul { padding-left: 1.2rem; }
+.panel.legal li { margin: 0.22rem 0; }
+.panel.legal > :last-child { margin-bottom: 0; }
 .split { display: grid; grid-template-columns: 1.4fr 0.8fr; gap: 1rem; }
 @media (max-width: 800px) {
   .split { grid-template-columns: 1fr; }
@@ -203,8 +222,12 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
 const HOME_SLUG = "tango-mar";
 
 export function siteFooter(supportHref: string): string {
-  if (!supportHref) return "";
-  return `<footer class="site-footer wrap"><p><a href="${esc(supportHref)}">Support</a></p></footer>`;
+  const links = [
+    supportHref ? `<a href="${esc(supportHref)}">Support</a>` : "",
+    `<a href="/privacy">Privacy Policy</a>`,
+    `<a href="/terms">Terms of Use</a>`,
+  ].filter(Boolean);
+  return `<footer class="site-footer wrap"><p class="footer-links">${links.join("")}</p></footer>`;
 }
 
 function memberSupportHref(slug: string, membership: { status?: string | null } | null | undefined): string {
@@ -255,6 +278,7 @@ function shell(options: {
   <a class="skip" href="#content">Skip to content</a>
   ${topbar}
   <main id="content">${options.body}</main>
+  ${siteFooter(options.supportHref ?? "")}
 </body>
 </html>`;
   }

@@ -1,0 +1,87 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { createApp } from "../src/app";
+import { privacyPage, termsPage } from "../src/views/legal";
+
+function legalText(html: string): string {
+  const start = html.indexOf('<article class="panel legal">');
+  const end = html.indexOf("</article>", start);
+  return html
+    .slice(start, end)
+    .replace(/>\s+</g, "><")
+    .replace(/<h1>/g, "")
+    .replace(/<\/h1>/g, "")
+    .replace(/<h2>/g, "\n\n")
+    .replace(/<\/h2>/g, "")
+    .replace(/<p[^>]*>/g, "\n\n")
+    .replace(/<\/p>/g, "")
+    .replace(/<ul>/g, "\n")
+    .replace(/<\/ul>/g, "")
+    .replace(/<li>/g, "\n- ")
+    .replace(/<\/li>/g, "")
+    .replace(/<[^>]+>/g, "")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&#39;", "'")
+    .replaceAll("&amp;", "&")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replace(/^\n+/, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function fixture(name: string): string {
+  return readFileSync(`test/fixtures/${name}`, "utf8").trim();
+}
+
+describe("legal pages", () => {
+  it("uses the provided privacy policy wording", () => {
+    const html = privacyPage();
+    expect(html).toContain('<article class="panel legal">');
+    expect(html).toContain("<h1>Privacy Policy</h1>");
+    expect(html).toContain("Effective Date: October 6, 2026");
+    expect(legalText(html)).toBe(fixture("privacy-policy.txt"));
+    expect(html).toContain("Tango Mar Property Owners Association, Inc.");
+    expect(html).not.toContain("\u2014");
+    expect(html).not.toContain("\u2013");
+  });
+
+  it("uses the provided terms of use wording", () => {
+    const html = termsPage();
+    expect(html).toContain("<h1>Terms of Use</h1>");
+    expect(html).toContain("Effective Date: October 6, 2026");
+    expect(legalText(html)).toBe(fixture("terms-of-use.txt"));
+    expect(html).toContain("laws of the State of Florida");
+  });
+
+  it("serves both pages to logged-out visitors and links them from the footer", async () => {
+    const app = createApp();
+    const env = {} as Env;
+
+    const home = await app.request("http://localhost/", {}, env);
+    expect(home.status).toBe(200);
+    const homeHtml = await home.text();
+    expect(homeHtml).toContain('<footer class="site-footer wrap"><p class="footer-links"><a href="/privacy">Privacy Policy</a><a href="/terms">Terms of Use</a></p></footer>');
+    expect(homeHtml).not.toContain(">Support</a>");
+    expect(homeHtml).toContain(".panel.legal {\n  border-radius: 0;");
+
+    const privacy = await app.request("http://localhost/privacy", {}, env);
+    expect(privacy.status).toBe(200);
+    const privacyHtml = await privacy.text();
+    expect(privacyHtml).toContain("<title>Privacy Policy · Tango Mar</title>");
+    expect(legalText(privacyHtml)).toBe(fixture("privacy-policy.txt"));
+    expect(privacyHtml).toContain('href="/privacy">Privacy Policy</a>');
+    expect(privacyHtml).toContain('href="/terms">Terms of Use</a>');
+    expect(privacyHtml).toContain(">Home</a>");
+    expect(privacyHtml).not.toContain(">Support</a>");
+    expect(privacyHtml).toContain('class="panel legal"');
+
+    const terms = await app.request("http://localhost/terms", {}, env);
+    expect(terms.status).toBe(200);
+    const termsHtml = await terms.text();
+    expect(termsHtml).toContain("<title>Terms of Use · Tango Mar</title>");
+    expect(legalText(termsHtml)).toBe(fixture("terms-of-use.txt"));
+    expect(termsHtml).toContain(">Home</a>");
+    expect(termsHtml).not.toContain(">Support</a>");
+  });
+});

@@ -89,13 +89,18 @@ async function signIn(sqlite: DatabaseSync, userId: string): Promise<string> {
   return token;
 }
 
+const legalFooterLinks = '<a href="/privacy">Privacy Policy</a><a href="/terms">Terms of Use</a>';
+
 describe("support footer", () => {
   it("uses a Support link and leaves out the association name", () => {
     const html = siteFooter("/a/tango-mar/support");
-    expect(html).toBe('<footer class="site-footer wrap"><p><a href="/a/tango-mar/support">Support</a></p></footer>');
+    expect(html).toBe(
+      `<footer class="site-footer wrap"><p class="footer-links"><a href="/a/tango-mar/support">Support</a>${legalFooterLinks}</p></footer>`,
+    );
     expect(html).not.toContain("Tango Mar");
     expect(html).not.toContain("Property Owners Association");
-    expect(siteFooter("")).toBe("");
+    expect(siteFooter("")).toBe(`<footer class="site-footer wrap"><p class="footer-links">${legalFooterLinks}</p></footer>`);
+    expect(siteFooter("")).not.toContain("Support");
   });
 });
 
@@ -173,11 +178,15 @@ describe("support access", () => {
       expect(loggedOut.headers.get("Location")).toBe("/login?next=%2Fa%2Ftango-mar%2Fsupport");
 
       const login = await app.request("http://localhost/login", {}, env);
-      expect(await login.text()).not.toContain("<footer");
+      const loggedOutLogin = await login.text();
+      expect(loggedOutLogin).toContain(`<footer class="site-footer wrap"><p class="footer-links">${legalFooterLinks}</p></footer>`);
+      expect(loggedOutLogin).not.toContain(">Support</a>");
 
       const residentLogin = await app.request("http://localhost/login", { headers: { Cookie: `tango_session=${token}` } }, env);
       const loginHtml = await residentLogin.text();
-      expect(loginHtml).toContain('<footer class="site-footer wrap"><p><a href="/a/tango-mar/support">Support</a></p></footer>');
+      expect(loginHtml).toContain(
+        `<footer class="site-footer wrap"><p class="footer-links"><a href="/a/tango-mar/support">Support</a>${legalFooterLinks}</p></footer>`,
+      );
 
       const page = await app.request("http://localhost/a/tango-mar/support", { headers: { Cookie: `tango_session=${token}` } }, env);
       expect(page.status).toBe(200);
@@ -185,8 +194,20 @@ describe("support access", () => {
       const footer = html.slice(html.indexOf("<footer"));
       const nav = html.slice(html.indexOf("<nav>"), html.indexOf("</nav>"));
       expect(footer).toContain('href="/a/tango-mar/support">Support</a>');
+      expect(footer).toContain('href="/privacy">Privacy Policy</a>');
+      expect(footer).toContain('href="/terms">Terms of Use</a>');
       expect(footer).not.toContain("Tango Mar");
       expect(nav).not.toContain("Support");
+
+      for (const path of ["/privacy", "/terms"]) {
+        const legal = await app.request(`http://localhost${path}`, { headers: { Cookie: `tango_session=${token}` } }, env);
+        expect(legal.status).toBe(200);
+        const legalHtml = await legal.text();
+        const legalFooter = legalHtml.slice(legalHtml.indexOf("<footer"));
+        expect(legalFooter).toContain('href="/a/tango-mar/support">Support</a>');
+        expect(legalFooter).toContain(legalFooterLinks);
+        expect(legalHtml).toContain(path === "/privacy" ? "<h1>Privacy Policy</h1>" : "<h1>Terms of Use</h1>");
+      }
       expect(html).toContain("Sam Rivera");
       expect(html).toContain("sam.rivera@example.com");
       expect(html).toContain('name="body"');

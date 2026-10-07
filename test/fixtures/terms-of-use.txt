@@ -1,0 +1,110 @@
+Terms of Use
+
+Effective Date: October 6, 2026
+
+These Terms of Use govern access to and use of the Tango Mar Property Owners Association website and owner portal.
+
+By using the website or portal, you agree to these Terms of Use.
+
+Authorized Use
+
+The owner portal is intended for Association members, property owners, authorized representatives, Association administrators, and other persons authorized by the Association.
+
+Users may access only the information and functions made available to their account.
+
+You may not attempt to access another owner's account, ledger, private information, or restricted Association records without authorization.
+
+Account Access and Security
+
+Users are responsible for maintaining control of the email account or other authentication method used to access the portal.
+
+If the portal uses one-time or passwordless sign-in links, those links are intended only for the recipient and should not be forwarded or shared.
+
+Users should notify the Association promptly if they believe their account or authentication method has been compromised.
+
+Property and Financial Information
+
+The portal may display information associated with properties linked to a user's account, including balances, assessments, payments, credits, and ledger activity.
+
+Other residents do not have access to another owner's private financial account information through the portal.
+
+Authorized administrators may access information necessary to administer this Association.
+
+Administrator access is limited to this Association and does not provide access to records belonging to unrelated associations using the same website platform or technology.
+
+Accuracy of Information
+
+The Association makes reasonable efforts to keep information on the website current and accurate.
+
+However, website information is provided for convenience and may occasionally contain delays, errors, omissions, pending transactions, or outdated information.
+
+The Association's official records, governing documents, recorded instruments, adopted resolutions, approved minutes, official financial records, and official account ledgers control in the event of any inconsistency.
+
+Assessments, Balances, and Payments
+
+Balances shown through the portal may be affected by pending payments, returned payments, late charges, adjustments, credits, collection activity, or other transactions that have not yet been reflected online.
+
+A balance displayed on the website should not be interpreted as a waiver of any amount lawfully owed to the Association.
+
+Payment processing may be provided by a third party and may be subject to that provider's terms and policies.
+
+Association Documents
+
+Documents made available through the portal are provided as a convenience to members.
+
+The Association may designate particular documents as current versions.
+
+If there is any conflict between a website copy and an official recorded or adopted document, the official document controls.
+
+No Legal, Accounting, or Professional Advice
+
+Information provided through the website is for Association and informational purposes only.
+
+Nothing on the website should be interpreted as legal, tax, accounting, engineering, insurance, or other professional advice.
+
+Members should consult the appropriate professional regarding matters requiring professional advice.
+
+Website Availability
+
+The Association does not guarantee that the website or portal will always be available, uninterrupted, secure, or error-free.
+
+Access may be temporarily suspended for maintenance, security, updates, technical issues, or other reasons.
+
+Prohibited Activities
+
+Users may not:
+
+- Attempt to gain unauthorized access to accounts, systems, or data
+- Use another person's account without permission
+- Interfere with the operation or security of the website
+- Introduce malicious code or harmful software
+- Scrape, harvest, or systematically extract restricted information
+- Misrepresent their identity or authority
+- Use portal information for unlawful purposes
+- Distribute another owner's private account or financial information without authorization
+
+Links and Third-Party Services
+
+The website may contain links to third-party websites or services.
+
+The Association is not responsible for the content, availability, privacy practices, security, or operation of third-party services.
+
+Limitation of Responsibility
+
+To the extent permitted by law, the Association is not responsible for losses arising solely from temporary website outages, unauthorized access caused by a user's failure to protect their email or authentication credentials, third-party service interruptions, or reliance on information that differs from an official Association record.
+
+Nothing in these Terms is intended to waive any legal right or responsibility that cannot lawfully be waived.
+
+Governing Law
+
+These Terms of Use are governed by the laws of the State of Florida, without regard to conflict-of-law principles.
+
+Changes to These Terms
+
+The Association may revise these Terms of Use from time to time.
+
+The current version will be posted on the website with an updated effective date.
+
+Contact
+
+Questions regarding these Terms of Use may be directed to the Association through the contact information provided on this website.

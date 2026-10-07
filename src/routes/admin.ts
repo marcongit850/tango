@@ -759,6 +759,42 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     return redirectTo(c, `/a/${association.slug}/admin/ledger/${invoice.property_id}`, `Invoice ${invoice.invoice_number} deleted.`);
   });
 
+  app.post("/a/:slug/admin/invoices/:invoiceId/payments/:paymentId/delete", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const invoiceId = c.req.param("invoiceId");
+    const paymentId = c.req.param("paymentId");
+    const invoice = await invoiceById(c.env.DB, association.id, invoiceId);
+    if (!invoice) throw new NotFoundError();
+    const back = `/a/${association.slug}/admin/invoices/${invoiceId}`;
+    const payment = await c.env.DB
+      .prepare(
+        `SELECT id, amount_cents, method, reference
+         FROM payments
+         WHERE association_id = ? AND invoice_id = ? AND id = ?`,
+      )
+      .bind(association.id, invoiceId, paymentId)
+      .first<{ id: string; amount_cents: number; method: string; reference: string }>();
+    if (!payment) throw new NotFoundError();
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, back, "Confirm the delete first.", "warn");
+    const result = await c.env.DB
+      .prepare("DELETE FROM payments WHERE association_id = ? AND invoice_id = ? AND id = ?")
+      .bind(association.id, invoiceId, paymentId)
+      .run();
+    if ((result.meta.changes ?? 0) === 0) throw new NotFoundError();
+    await refreshInvoiceStatus(c.env.DB, association.id, invoiceId);
+    const reference = payment.reference ? ` ${payment.reference}` : "";
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "payment_delete",
+      entityType: "payment",
+      entityId: payment.id,
+      detail: `Lot ${invoice.lot_number} · ${invoice.invoice_number} · ${formatMoney(Number(payment.amount_cents))} · ${payment.method}${reference}`,
+    });
+    return redirectTo(c, back, "Payment deleted.");
+  });
+
   app.post("/a/:slug/admin/assessments", async (c) => {
     const { association, user } = requireStaff(c);
     const fields = await readForm(c);

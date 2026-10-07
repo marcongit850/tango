@@ -15,7 +15,7 @@ This is the Phase 0 foundation and Phase 1 scaffold: magic-link sign-in, a D1 da
 - Documents in eight categories, with versions. Residents see the version the board marks current. Budgets can be board-only. Publishing a file can email a short portal link when Email owners is checked. Board-only files go only to board logins, and the email does not include the file.
 - News, emergency notices, meetings, calendar, FAQs, and board contacts. Posting or saving an announcement or event can email active logins the same way. FAQ and contacts do not.
 - Private resident-to-board messages, plus portal notifications. The resident who started a thread can delete that thread. Board admins can delete a thread or one reply. Deleting a thread removes its portal notifications. A portal notice can include an optional file the owner views or downloads in the portal. Posting a notice to one owner can also email that login when Email owner is checked. The note has the title, a short message, a link to Notices, and the file attached to the email. The box starts unchecked. If Resend is not configured, the notice is still saved and the flash says the email was not sent.
-- Board tools: owners and lots, delinquent accounts, homeowner and board roles with an admin flag, login email edits, CSV import, invoices, annual dues, recorded payments, news editing, documents (visibility and delete), an accountant CSV, join requests, incoming messages (delete a thread or a reply), and an activity log.
+- Board tools: owners and lots, delinquent accounts, homeowner and board roles with an admin flag, login email edits, CSV import, invoices, annual dues, recorded payments (delete a payment on an invoice), news editing, documents (visibility and delete), an accountant CSV, join requests, incoming messages (delete a thread or a reply), and an activity log.
 - Public home with resident login and request access.
 
 ## Not in this phase
@@ -175,7 +175,7 @@ No D1 migration. Marc does not paste SQL for this change. Amount, late fee, issu
 
 On Admin, Ledger, click a dollar amount under Assessments and balances. That opens the lot's invoices. The same amounts on Owners and lots, and on a person's page, open that lot too. Click an invoice amount to edit it or delete it. Only a board admin can open these pages.
 
-Save updates that bill. Open, partial, and paid follow payments recorded on it. Void leaves the invoice off the balance. A recorded payment stays on the lot either way. Delete asks for confirmation and stays blocked while a payment is recorded on that invoice. Deleting an invoice leaves its assessment in place. Deleting an assessment still removes its unpaid invoices and stays blocked when a payment is recorded on one of them.
+Save updates that bill. Open, partial, and paid follow payments recorded on it. Void leaves the invoice off the balance. A recorded payment stays on the lot when you save the invoice. Each payment on that invoice has the same confirm checkbox as invoice delete. Deleting a payment writes an activity log entry and sets the invoice status from the payments that remain. Invoice delete still asks for confirmation and stays blocked while a payment is recorded on that invoice. After the last payment is gone, the invoice can be deleted. Deleting an invoice leaves its assessment in place. Deleting an assessment still removes its unpaid invoices and stays blocked when a payment is recorded on one of them.
 
 ## Portal notice files (paste this before merge)
 

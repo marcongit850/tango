@@ -338,7 +338,7 @@ export function ledgerPage(options: {
   return `${adminNav(options.association.slug, "ledger")}
     <section class="panel">
       <h1>Assessments and balances</h1>
-      <p class="muted">Click a dollar amount to open that lot's invoices. From there you can edit an invoice or delete it. Delete stays blocked when a payment is recorded on that invoice.</p>
+      <p class="muted">Click a dollar amount to open that lot's invoices. From there you can edit an invoice or delete it. Delete stays blocked when a payment is recorded on that invoice. Delete the payment on the invoice page first.</p>
       <p><a href="/a/${esc(options.association.slug)}/admin/export.csv">Download CSV for the accountant</a></p>
       ${rows ? `<table><thead><tr><th>Lot</th><th>Primary owner</th><th>Charges</th><th>Late fees</th><th>Payments</th><th>Balance</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No lots.")}
     </section>
@@ -419,7 +419,7 @@ export function ledgerLotPage(options: {
       <h1>Lot ${esc(options.lotNumber)}</h1>
       ${who ? `<p>${esc(who)}</p>` : ""}
       ${balance}
-      <p class="muted">Click an amount to edit or delete that invoice. Delete stays blocked when a payment is recorded on that invoice.</p>
+      <p class="muted">Click an amount to edit or delete that invoice. Delete stays blocked when a payment is recorded on that invoice. Delete the payment on the invoice page first.</p>
       ${
         rows
           ? `<table><thead><tr><th>Invoice</th><th>Description</th><th>Due</th><th>Amount</th><th>Late fee</th><th>Paid</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`
@@ -445,12 +445,13 @@ export function invoiceAdminPage(options: {
         <td>${esc(payment.reference)}</td>
         <td>${moneySpan(Number(payment.amount_cents))}</td>
         <td>${esc(payment.notes)}</td>
+        <td>${confirmDeleteButton(`/a/${association.slug}/admin/invoices/${invoice.id}/payments/${payment.id}/delete`, "Delete payment", "Delete this payment")}</td>
       </tr>`,
     )
     .join("");
   const remove =
     options.payments.length > 0
-      ? `<p class="muted">A payment is recorded on this invoice, so delete stays blocked. You can still change the amount, dates, description, and status. The payment stays on the lot.</p>`
+      ? `<p class="muted">A payment is recorded on this invoice, so delete stays blocked. Delete that payment above first if it was recorded by mistake. You can still change the amount, dates, description, and status.</p>`
       : `<p class="muted">This removes the invoice from the lot.</p>
          ${confirmDeleteButton(`/a/${association.slug}/admin/invoices/${invoice.id}/delete`, "Delete invoice", "Delete this invoice")}`;
   return `${adminNav(association.slug, "ledger")}
@@ -480,7 +481,7 @@ export function invoiceAdminPage(options: {
       <h2>Payments on this invoice</h2>
       ${
         paymentRows
-          ? `<table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th><th>Notes</th></tr></thead><tbody>${paymentRows}</tbody></table>`
+          ? `<table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th><th>Notes</th><th></th></tr></thead><tbody>${paymentRows}</tbody></table>`
           : empty("No payment is recorded on this invoice.")
       }
     </section>

@@ -134,6 +134,9 @@ describe("lot details", () => {
     expect(parsed.errors).toEqual([]);
     expect(parsed.rows[0]).toMatchObject({
       houseName: "",
+      city: "",
+      state: "",
+      postalCode: "",
       mailingStreet: "",
       mailingCity: "",
       mailingState: "",
@@ -164,6 +167,9 @@ describe("lot details", () => {
           lot_type: "improved",
           status: "active",
           house_name: "MELOMAR",
+          city: "Santa Rosa Beach",
+          state: "FL",
+          postal_code: "32459",
           mailing_street: "100 Oak Street",
           mailing_city: "Destin",
           mailing_state: "FL",
@@ -175,8 +181,11 @@ describe("lot details", () => {
       );
       expect(saved.status).toBe(303);
       expect(saved.headers.get("Location")).toBe("/a/tango-mar/admin/ledger/prop_14");
-      expect(sqlite.prepare("SELECT house_name, mailing_street, mailing_city, admin_notes FROM properties WHERE id = 'prop_14'").get()).toEqual({
+      expect(sqlite.prepare("SELECT house_name, city, state, postal_code, mailing_street, mailing_city, admin_notes FROM properties WHERE id = 'prop_14'").get()).toEqual({
         house_name: "MELOMAR",
+        city: "Santa Rosa Beach",
+        state: "FL",
+        postal_code: "32459",
         mailing_street: "100 Oak Street",
         mailing_city: "Destin",
         admin_notes: NOTE,
@@ -187,6 +196,11 @@ describe("lot details", () => {
       const rosterHtml = await roster.text();
       expect(rosterHtml).toContain("<h1>Owners & lots</h1>");
       expect(rosterHtml).toContain("MELOMAR");
+      expect(rosterHtml).toContain("Lot 14, Tang O Mar Drive<br>Santa Rosa Beach, FL 32459");
+      expect(rosterHtml).toContain("Mailing address (if different)");
+      expect(rosterHtml).toContain('name="house_name"');
+      expect(rosterHtml).not.toContain("such as MELOMAR");
+      expect(rosterHtml).not.toContain("AVERITTS FAVORITE");
       expect(rosterHtml).toContain("100 Oak Street");
       expect(rosterHtml).toContain("850-555-0102");
       expect(rosterHtml).toContain(NOTE);
@@ -205,7 +219,14 @@ describe("lot details", () => {
       );
       const ledgerHtml = await ledger.text();
       expect(ledgerHtml).toContain("MELOMAR");
-      expect(ledgerHtml).toContain("Mailing address: 100 Oak Street, Destin, FL 32541");
+      expect(ledgerHtml).toContain("Lot 14, Tang O Mar Drive<br>Santa Rosa Beach, FL 32459");
+      expect(ledgerHtml).toContain("Mailing address (if different)<br>100 Oak Street<br>Destin, FL 32541");
+      expect(ledgerHtml).toContain('name="city"');
+      expect(ledgerHtml).toContain('value="Santa Rosa Beach"');
+      expect(ledgerHtml).toContain('name="postal_code"');
+      expect(ledgerHtml).not.toContain("such as MELOMAR");
+      expect(ledgerHtml).not.toContain("AVERITTS FAVORITE");
+      expect(ledgerHtml).not.toContain('placeholder="MELOMAR"');
       expect(ledgerHtml).toContain("850-555-0102");
       expect(ledgerHtml).toContain("850-555-0199");
       expect(ledgerHtml).toContain("Phone numbers");
@@ -216,7 +237,8 @@ describe("lot details", () => {
       expect(ownerLot.status).toBe(200);
       const ownerHtml = await ownerLot.text();
       expect(ownerHtml).toContain("MELOMAR");
-      expect(ownerHtml).toContain("Mailing address: 100 Oak Street, Destin, FL 32541");
+      expect(ownerHtml).toContain("Lot 14, Tang O Mar Drive<br>Santa Rosa Beach, FL 32459");
+      expect(ownerHtml).toContain("Mailing address (if different)<br>100 Oak Street<br>Destin, FL 32541");
       expect(ownerHtml).toContain("850-555-0102");
       expect(ownerHtml).toContain("850-555-0199");
       expect(ownerHtml).toContain("Sam Rivera (primary)");
@@ -228,7 +250,8 @@ describe("lot details", () => {
       const dashHtml = await dashboard.text();
       expect(dashHtml).toContain("MELOMAR");
       expect(dashHtml).toContain('href="/a/tango-mar/lots/prop_14"');
-      expect(dashHtml).toContain("Mailing 100 Oak Street, Destin, FL 32541");
+      expect(dashHtml).toContain("Santa Rosa Beach, FL 32459");
+      expect(dashHtml).toContain("Mailing address (if different): 100 Oak Street, Destin, FL 32541");
       expect(dashHtml).not.toContain(NOTE);
       expect(dashHtml).not.toContain("admin_notes");
 
@@ -286,14 +309,33 @@ describe("lot details", () => {
         admin_notes: NOTE,
       });
 
-      const kept = await importOwners(db, tango, actor, [{ ...row, houseName: "", mailingStreet: "", phone: "" }]);
+      const kept = await importOwners(db, tango, actor, [
+        { ...row, houseName: "", mailingStreet: "", phone: "", city: "", state: "", postalCode: "" },
+      ]);
       expect(kept.errors).toEqual([]);
-      expect(sqlite.prepare("SELECT house_name, mailing_street, phone FROM properties p JOIN property_owners po ON po.property_id = p.id JOIN users u ON u.id = po.user_id WHERE p.id = 'prop_27' AND po.is_primary = 1").get()).toEqual({
+      expect(sqlite.prepare("SELECT house_name, city, state, postal_code, mailing_street, phone FROM properties p JOIN property_owners po ON po.property_id = p.id JOIN users u ON u.id = po.user_id WHERE p.id = 'prop_27' AND po.is_primary = 1").get()).toEqual({
         house_name: "MELOMAR",
+        city: "Miramar Beach",
+        state: "FL",
+        postal_code: "32550",
         mailing_street: "100 Main Street",
         phone: "850-555-0142",
       });
       expect(sqlite.prepare("SELECT admin_notes FROM properties WHERE id = 'prop_27'").get()).toEqual({ admin_notes: NOTE });
+
+      const zipped = parseOwnersCsv(
+        "email,name,lot_number,street_address,zip\ncasey.nguyen@example.com,Casey Nguyen,27,\"Lot 27, Tang O Mar Drive\",32541\n",
+        { city: "Miramar Beach", state: "FL", postalCode: "32550", today: "2026-10-07" },
+      );
+      expect(zipped.errors).toEqual([]);
+      const applied = await importOwners(db, tango, actor, zipped.rows);
+      expect(applied.errors).toEqual([]);
+      expect(sqlite.prepare("SELECT city, state, postal_code, house_name FROM properties WHERE id = 'prop_27'").get()).toEqual({
+        city: "Miramar Beach",
+        state: "FL",
+        postal_code: "32541",
+        house_name: "MELOMAR",
+      });
     } finally {
       sqlite.close();
     }
@@ -315,9 +357,36 @@ describe("lot details", () => {
       contacts: [{ name: "Sam Rivera", phone: "850-555-0102", isPrimary: true }],
     });
     expect(html).toContain("MELOMAR");
+    expect(html).toContain("Lot 14, Tang O Mar Drive<br>Miramar Beach, FL 32550");
+    expect(html).toContain("Mailing address (if different)<br>100 Oak Street<br>Destin, FL 32541");
     expect(html).toContain("850-555-0102");
     expect(html).not.toContain("Admin notes");
     expect(html).not.toContain("admin_notes");
     expect(html).not.toContain("\u2014");
+    expect(html).not.toContain("\u2013");
+  });
+
+  it("shows only the stored property address and says mailing matches when mailing is blank", () => {
+    const html = propertyPage({
+      association: tango,
+      lotNumber: "14",
+      houseName: "",
+      streetAddress: "Lot 14, Tang O Mar Drive",
+      city: "",
+      state: "",
+      postalCode: "",
+      mailingStreet: "",
+      mailingCity: "",
+      mailingState: "",
+      mailingPostalCode: "",
+      contacts: [],
+    });
+    expect(html).toContain("Lot 14, Tang O Mar Drive");
+    expect(html).not.toContain("Miramar Beach");
+    expect(html).toContain("Mailing address matches the property address.");
+    expect(html).not.toContain("Mailing address (if different)<br>");
+    expect(html).not.toContain("such as MELOMAR");
+    expect(html).not.toContain("\u2014");
+    expect(html).not.toContain("\u2013");
   });
 });

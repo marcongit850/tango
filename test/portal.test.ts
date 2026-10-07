@@ -69,7 +69,9 @@ describe("owner csv", () => {
       streetAddress: "Lot 14, Tang O Mar Drive",
       startingBalanceCents: 37550,
       balanceAsOf: "2026-01-15",
-      city: "Miramar Beach",
+      city: "",
+      state: "",
+      postalCode: "",
     });
     expect(parsed.rows[1]).toMatchObject({ role: "homeowner", isAdmin: null, startingBalanceCents: 0, balanceAsOf: "2026-10-06" });
   });
@@ -116,8 +118,10 @@ describe("owner csv", () => {
       timezone: "America/Chicago",
     };
     const html = importPage(association);
-    expect(html).toContain("Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>, <code>house_name</code>, <code>mailing_street</code>, <code>mailing_city</code>, <code>mailing_state</code>, <code>mailing_postal_code</code>, <code>owner2_name</code>, <code>owner2_email</code>, <code>owner2_phone</code>.");
+    expect(html).toContain("Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>, <code>zip</code>, <code>house_name</code>, <code>mailing_street</code>, <code>mailing_city</code>, <code>mailing_state</code>, <code>mailing_postal_code</code>, <code>owner2_name</code>, <code>owner2_email</code>, <code>owner2_phone</code>.");
     expect(html).toContain("owner2_email</code> adds a second person on that lot.");
+    expect(html).toContain("A blank city, state, ZIP, house name, or mailing cell keeps the value already stored.");
+    expect(html).not.toContain("such as MELOMAR");
     expect(html).toContain("Admin notes are not part of this import.");
     expect(html).toContain("A positive starting balance adds one opening invoice per lot (re-import will not double it).");
     expect(html).toContain('<a href="/a/tango-mar/admin/import/template.csv">Download template</a>');
@@ -162,6 +166,30 @@ describe("owner csv", () => {
       isAdmin: true,
       startingBalanceCents: 0,
     });
+  });
+
+  it("reads zip as the physical postal code and leaves a blank city empty", () => {
+    const csv = [
+      "email,name,lot_number,street_address,city,state,zip",
+      "a@example.com,Ada,1,Street,Destin,FL,32541",
+      "b@example.com,Bea,2,Street,,,",
+    ].join("\n");
+    const parsed = parseOwnersCsv(csv, { city: "Miramar Beach", state: "FL", postalCode: "32550", today: "2026-10-07" });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.rows[0]).toMatchObject({ city: "Destin", state: "FL", postalCode: "32541" });
+    expect(parsed.rows[1]).toMatchObject({ city: "", state: "", postalCode: "" });
+  });
+
+  it("prefers postal_code when zip is also present", () => {
+    const csv = [
+      "email,name,lot_number,street_address,postal_code,zip",
+      "a@example.com,Ada,1,Street,32550,99999",
+      "b@example.com,Bea,2,Street,,32541",
+    ].join("\n");
+    const parsed = parseOwnersCsv(csv, { city: "Miramar Beach", state: "FL", postalCode: "32550", today: "2026-10-07" });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.rows[0].postalCode).toBe("32550");
+    expect(parsed.rows[1].postalCode).toBe("32541");
   });
 
   it("keeps quoted line breaks inside a cell", () => {
@@ -654,6 +682,9 @@ describe("owner dashboard", () => {
           property_id: "prop_14",
           lot_number: "14",
           street_address: "14 Tang O Mar Drive",
+          city: "Miramar Beach",
+          state: "FL",
+          postal_code: "32550",
           charges_cents: 120000,
           late_fee_cents: 0,
           payment_cents: 120000,
@@ -706,6 +737,8 @@ describe("owner dashboard", () => {
     expect(html).toContain("Account balance");
     expect(html).toContain("Lot dues");
     expect(html).toContain("Lot 14");
+    expect(html).toContain("14 Tang O Mar Drive");
+    expect(html).toContain("Miramar Beach, FL 32550");
     expect(html).toContain("Paid");
     expect(html).toContain("2027 annual assessment");
     expect(html).toContain("Opens October 1, 2026. Due March 1, 2027. Not due yet.");

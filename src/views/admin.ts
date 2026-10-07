@@ -31,6 +31,9 @@ import {
   dateCell,
   dateTimeCell,
   addressLine,
+  addressLines,
+  mailingAddressHtml,
+  propertyAddressHtml,
   confirmDeleteButton,
   contactPhones,
   documentFileLinks,
@@ -100,6 +103,9 @@ function notePreview(notes: string): string {
 type LotFormValues = {
   lot_number?: string;
   street_address?: string;
+  city?: string;
+  state?: string;
+  postal_code?: string;
   lot_type?: string;
   status?: string;
   house_name?: string;
@@ -125,13 +131,16 @@ function lotDetailFields(values: LotFormValues, mode: "add" | "edit"): string {
       : "";
   return `${textField("Lot number", "lot_number", { value: values.lot_number ?? "", required: true })}
     ${textField("House name", "house_name", { value: values.house_name ?? "" })}
-    <p class="muted">Name on the lot, such as MELOMAR or AVERITTS FAVORITE.</p>
     ${textField(mode === "add" ? "Street address" : "Street", "street_address", { value: values.street_address ?? "", required: true })}
+    ${textField("City", "city", { value: values.city ?? "" })}
+    ${textField("State", "state", { value: values.state ?? "" })}
+    ${textField("ZIP", "postal_code", { value: values.postal_code ?? "" })}
+    <p>Mailing address (if different)</p>
     ${textField("Mailing street", "mailing_street", { value: values.mailing_street ?? "" })}
     ${textField("Mailing city", "mailing_city", { value: values.mailing_city ?? "" })}
     ${textField("Mailing state", "mailing_state", { value: values.mailing_state ?? "" })}
     ${textField("Mailing postal code", "mailing_postal_code", { value: values.mailing_postal_code ?? "" })}
-    <p class="muted">Leave mailing blank when mail goes to the lot address.</p>
+    <p class="muted">Leave mailing blank when it matches the property address.</p>
     ${areaField("Admin notes", "admin_notes", values.admin_notes ?? "")}
     <p class="muted">Admin notes are visible only on admin pages. Owners do not see them.</p>
     ${selectField(
@@ -312,7 +321,7 @@ export function ownersPage(
       return `<tr>
         <td><a href="/a/${esc(association.slug)}/admin/ledger/${esc(lot.id)}">Lot ${esc(lot.lot_number)}</a>${lot.delinquent ? ` <span class="badge late">Past due</span>` : ""}</td>
         <td>${esc(lot.house_name)}</td>
-        <td>${esc(lot.street_address)}</td>
+        <td>${addressLines(lot.street_address, lot.city, lot.state, lot.postal_code)}</td>
         <td>${esc(mailing)}</td>
         <td>${esc(lotTypeLabel(lot.lot_type))}</td>
         <td>${lot.owner_name ? esc(lot.owner_name) : "No owner"}</td>
@@ -338,7 +347,7 @@ export function ownersPage(
   return `${adminNav(association.slug, "owners", canEdit)}
     <section class="panel" id="lots">
       <h1>Owners & lots</h1>
-      <p class="muted">This is the property roster. Each lot shows its house name, mailing address, primary owner, phone, and balance. Open a lot for every linked phone number. Open Edit on a lot to add another owner. That person can sign in with a magic link at their own email. Admin notes stay on this page and are not shown to owners. CSV import is still the bulk way to add a roster. Set improved or unimproved here before assigning annual dues.</p>
+      <p class="muted">This is the property roster. Each lot shows its house name, property address, mailing address, primary owner, phone, and balance. Open a lot for every linked phone number. Open Edit on a lot to add another owner. That person can sign in with a magic link at their own email. Admin notes stay on this page and are not shown to owners. CSV import is still the bulk way to add a roster. Set improved or unimproved here before assigning annual dues.</p>
       <p class="filters">
         <a ${delinquentOnly ? "" : `class="active"`} href="/a/${esc(association.slug)}/admin/owners#lots">All lots</a>
         <a ${delinquentOnly ? `class="active"` : ""} href="/a/${esc(association.slug)}/admin/owners?delinquent=1#lots">Past due only</a>
@@ -477,9 +486,9 @@ export function importPage(
   return `${adminNav(association.slug, "import", canEdit)}
     <section class="panel">
       <h1>Import owners from CSV</h1>
-      <p>Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>, <code>house_name</code>, <code>mailing_street</code>, <code>mailing_city</code>, <code>mailing_state</code>, <code>mailing_postal_code</code>, <code>owner2_name</code>, <code>owner2_email</code>, <code>owner2_phone</code>.</p>
+      <p>Upload a CSV (UTF-8). Required: <code>email</code>, <code>name</code>, <code>lot_number</code>, <code>street_address</code>. Optional: <code>role</code>, <code>admin</code>, <code>starting_balance</code>, <code>balance_as_of</code>, <code>phone</code>, <code>city</code>, <code>state</code>, <code>postal_code</code>, <code>zip</code>, <code>house_name</code>, <code>mailing_street</code>, <code>mailing_city</code>, <code>mailing_state</code>, <code>mailing_postal_code</code>, <code>owner2_name</code>, <code>owner2_email</code>, <code>owner2_phone</code>.</p>
       <p><code>owner2_email</code> adds a second person on that lot. They are not the primary owner. Blank owner2 cells are skipped. A row for a lot that already has a primary owner links that person as another owner and does not replace the primary.</p>
-      <p><code>house_name</code> is the name on the lot, such as MELOMAR. The mailing columns are for mail that should not go to the lot address. A blank house name or mailing cell keeps the value already stored. Phone is stored on the person and shown when you open the lot. Admin notes are not part of this import.</p>
+      <p><code>city</code>, <code>state</code>, and <code>postal_code</code> (or <code>zip</code>) are the physical address of the house. A blank city, state, ZIP, house name, or mailing cell keeps the value already stored. Phone is stored on the person and shown when you open the lot. Admin notes are not part of this import.</p>
       <p>A positive starting balance adds one opening invoice per lot (re-import will not double it).</p>
       <p>The admin column is edit access for a homeowner or a board member. Leave it blank to keep an existing flag. A new person with a blank admin cell does not get edit access.</p>
       <p><a href="/a/${esc(association.slug)}/admin/import/template.csv">Download template</a></p>
@@ -626,13 +635,6 @@ export function ledgerLotPage(options: {
     })
     .join("");
   const houseName = options.houseName?.trim() ?? "";
-  const physical = addressLine(options.streetAddress, options.city ?? "", options.state ?? "", options.postalCode ?? "");
-  const mailing = addressLine(
-    options.mailingStreet ?? "",
-    options.mailingCity ?? "",
-    options.mailingState ?? "",
-    options.mailingPostalCode ?? "",
-  );
   const notes = options.adminNotes ?? "";
   const phones = contactPhones(options.contacts ?? (options.ownerName ? [{ name: options.ownerName, phone: "", isPrimary: true }] : []));
   const ownerEditor = canEdit ? lotOwnerEditor(options.association.slug, options.propertyId, options.lotOwners ?? [], "ledger") : "";
@@ -643,6 +645,9 @@ export function ledgerLotPage(options: {
           {
             lot_number: options.lotNumber,
             street_address: options.streetAddress,
+            city: options.city ?? "",
+            state: options.state ?? "",
+            postal_code: options.postalCode ?? "",
             house_name: houseName,
             mailing_street: options.mailingStreet ?? "",
             mailing_city: options.mailingCity ?? "",
@@ -687,8 +692,8 @@ export function ledgerLotPage(options: {
       <p><a href="${base}/ledger">Assessments and balances</a></p>
       <h1>Lot ${esc(options.lotNumber)}</h1>
       ${houseName ? `<p><strong>${esc(houseName)}</strong></p>` : ""}
-      <p>Lot address: ${esc(physical)}</p>
-      ${mailing ? `<p>Mailing address: ${esc(mailing)}</p>` : `<p class="muted">Mailing address is the same as the lot.</p>`}
+      ${propertyAddressHtml(options.streetAddress, options.city ?? "", options.state ?? "", options.postalCode ?? "")}
+      ${mailingAddressHtml(options.mailingStreet ?? "", options.mailingCity ?? "", options.mailingState ?? "", options.mailingPostalCode ?? "")}
       <h2>Phone numbers</h2>
       ${phones}
       ${ownerEditor}

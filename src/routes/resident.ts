@@ -58,18 +58,35 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     const { association, user } = requireMember(c);
     const today = todayIso(association.timezone);
     const now = new Date().toISOString();
-    const [ledger, upcoming, invoices, payments, notices, emergencies] = await Promise.all([
+    const [ledger, upcoming, invoices, payments, notices, announcements, events] = await Promise.all([
       ledgerForUser(c.env.DB, association.id, user.id, today),
       upcomingAssessments(c.env.DB, association.id, user.id, today),
       invoicesForUser(c.env.DB, association.id, user.id),
       paymentsForUser(c.env.DB, association.id, user.id),
       notificationsForUser(c.env.DB, association.id, user.id),
-      visibleAnnouncements(c.env.DB, association.id, now, "emergency"),
+      visibleAnnouncements(c.env.DB, association.id, now),
+      listEvents(c.env.DB, association.id),
     ]);
+    const nowMs = Date.now();
+    const upcomingEvents = events.filter((event) => {
+      const end = new Date(event.ends_at || event.starts_at).getTime();
+      return Number.isFinite(end) && end >= nowMs;
+    });
     return render(c, {
       title: `Dashboard · ${association.name}`,
       active: "dashboard",
-      body: dashboardPage({ association, name: user.name || user.email, ledger, upcoming, invoices, payments, notices, emergencies }),
+      body: dashboardPage({
+        association,
+        name: user.name || user.email,
+        ledger,
+        upcoming,
+        invoices,
+        payments,
+        notices,
+        emergencies: announcements.filter((item) => item.kind === "emergency"),
+        news: announcements.filter((item) => item.kind !== "emergency"),
+        events: upcomingEvents,
+      }),
     });
   });
 

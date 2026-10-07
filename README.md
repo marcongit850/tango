@@ -8,10 +8,16 @@ One deployment can host many associations. Each association's lots, balances, do
 
 This is the Phase 0 foundation and Phase 1 scaffold: magic-link sign-in, a D1 data model, CSV import, homeowner balances, versioned documents, neighborhood news, private board messages, and board admin. It is not a property-management suite.
 
+## For Marc: signed-in dashboard
+
+On https://mytangomar.com the signed-in dashboard keeps the same navigation and the same account tools. The page uses clear square panels for account balance, lot dues, news, and upcoming events, in the coastal sand and teal already used on the site. The beach boardwalk photo from the home page sits behind that dashboard as a soft wash. Invoices, payments, and personal notices stay on the page.
+
+Ask the portal is a button at the bottom right of signed-in pages. Opening it shows a chat-style panel titled Ask the portal, with a short line about covenants, bylaws, and your lot. The panel says SUBSCRIPTION REQUIRED. The message box is disabled. Nothing is sent, and no assistant is connected. The paid assistant can be added later.
+
 ## Phase 1 includes
 
 - Magic-link email login. No passwords.
-- Homeowner dashboard: balance, upcoming assessments, invoices, recorded payments, late fees, and personal notices.
+- Homeowner dashboard: account balance, lot dues, news, upcoming events, invoices, recorded payments, late fees, and personal notices.
 - Documents in eight categories, with versions. Residents see the version the board marks current. Budgets can be board-only. Publishing a file can email a short portal link when Email owners is checked. Board-only files go only to board logins, and the email does not include the file.
 - News, emergency notices, meetings, calendar, FAQs, and board contacts. Posting or saving an announcement or event can email active logins the same way. FAQ and contacts do not.
 - Private resident-to-board messages, plus portal notifications. The resident who started a thread can delete that thread. Board admins can delete a thread or one reply. Deleting a thread removes its portal notifications. A portal notice can include an optional file the owner views or downloads in the portal. Posting a notice to one owner can also email that login when Email owner is checked. The note has the title, a short message, a link to Notices, and the file attached to the email. The box starts unchecked. If Resend is not configured, the notice is still saved and the flash says the email was not sent.
@@ -20,7 +26,7 @@ This is the Phase 0 foundation and Phase 1 scaffold: magic-link sign-in, a D1 da
 
 ## Not in this phase
 
-Moderated forum, online card or ACH payments, ARC requests, SMS, and an AI covenant assistant. A board officer can email one owner a balance reminder. Email owners on an announcement, event, or document starts unchecked, so a save does not email anyone unless the board checks it. Email owner on a portal notice also starts unchecked, and a checked notice attaches its file when there is one. The request to join form stores a note for the board. It does not create a login until a board member approves it.
+Moderated forum, online card or ACH payments, ARC requests, SMS, and a working AI covenant assistant. Signed-in pages include an Ask the portal placeholder that says subscription required and does not call a model. A board officer can email one owner a balance reminder. Email owners on an announcement, event, or document starts unchecked, so a save does not email anyone unless the board checks it. Email owner on a portal notice also starts unchecked, and a checked notice attaches its file when there is one. The request to join form stores a note for the board. It does not create a login until a board member approves it.
 
 ## Stack
 

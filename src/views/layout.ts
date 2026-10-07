@@ -240,6 +240,120 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
   .shore-video { justify-self: center; margin-top: 0.35rem; }
   .shore-video video { height: auto; width: min(15rem, 68vw); }
 }
+body:has(.dash) {
+  background-color: #f4efe6;
+  background-image:
+    linear-gradient(180deg, rgba(244, 239, 230, 0.94) 0%, rgba(226, 241, 238, 0.88) 42%, rgba(244, 239, 230, 0.92) 100%),
+    url("/tango-mar-boardwalk.png");
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center top;
+  background-attachment: fixed;
+}
+.kicker {
+  margin: 0 0 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gulf);
+}
+.dash { display: grid; gap: 1rem; }
+.dash-hello h1 { font-size: clamp(2rem, 4vw, 2.6rem); margin: 0; }
+.dash-hello p { margin: 0.15rem 0; }
+.dash .dash-rule { margin: 0.4rem 0 0.65rem; }
+.dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: stretch; }
+.dash .panel { background: rgba(255, 253, 248, 0.94); border: 1px solid #d5e4df; border-top: 3px solid var(--gulf); }
+.dash .dash-balance {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: linear-gradient(180deg, rgba(226, 242, 239, 0.98), rgba(255, 253, 248, 0.96));
+}
+.balance-figure {
+  font-family: var(--serif);
+  font-size: clamp(2.5rem, 5vw, 3.3rem);
+  line-height: 1;
+  margin: 0.35rem 0 0.55rem;
+}
+.dash-balance .money.settled { color: var(--gulf-dark); }
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+.panel-head h2 { margin: 0; }
+.panel-head a { font-size: 0.88rem; white-space: nowrap; text-decoration: none; }
+.lots { display: grid; }
+.lot {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #e4d9c8;
+}
+.lot:last-child { border-bottom: 0; padding-bottom: 0.15rem; }
+.lot-name { margin: 0; font-weight: 650; }
+.lot p { margin: 0.1rem 0; }
+.lot-figures { text-align: right; }
+.lot-amount { margin: 0; font-size: 1.25rem; }
+.dues-list, .dash-feed { list-style: none; margin: 0.35rem 0 0; padding: 0; display: grid; gap: 0.8rem; }
+.dues-list li { display: flex; justify-content: space-between; gap: 0.75rem; align-items: flex-start; }
+.dues-list p, .dash-feed p { margin: 0; }
+.dues-amount { text-align: right; }
+.dash-feed a { text-decoration: none; color: inherit; display: grid; gap: 0.1rem; }
+.dash-feed a strong { font-weight: 650; }
+.dash-feed a:hover strong, .dash-feed a:focus strong { color: var(--gulf); }
+body:has(.ask-portal) main { padding-bottom: 5rem; }
+.ask-portal { position: fixed; right: 1.1rem; bottom: 1.1rem; z-index: 40; margin: 0; }
+.ask-portal > summary {
+  list-style: none;
+  cursor: pointer;
+  background: var(--gulf);
+  color: white;
+  border-radius: 0;
+  padding: 0.72rem 1rem;
+  font-weight: 650;
+  box-shadow: 0 10px 24px rgba(12, 51, 50, 0.18);
+}
+.ask-portal > summary::-webkit-details-marker { display: none; }
+.ask-portal > summary::marker { content: ""; }
+.ask-portal > summary:focus-visible { outline: 2px solid var(--gulf-dark); outline-offset: 3px; }
+.ask-portal[open] > summary { background: var(--gulf-dark); }
+.ask-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.55rem);
+  width: min(22.5rem, calc(100vw - 2.2rem));
+  max-height: min(32rem, calc(100vh - 6rem));
+  overflow: auto;
+  background: var(--paper);
+  border: 1px solid #d5e4df;
+  border-radius: 0;
+  box-shadow: 0 16px 40px rgba(28, 40, 48, 0.16);
+  padding: 1rem 1rem 1.05rem;
+}
+.ask-panel h2 { font-size: 1.55rem; margin-bottom: 0.15rem; }
+.ask-thread {
+  background: #e7f4f1;
+  border: 1px solid #c5ddd8;
+  border-radius: 0;
+  padding: 0.85rem 0.9rem;
+  margin: 0.8rem 0 0.75rem;
+}
+.ask-required {
+  margin: 0;
+  font-size: 1.45rem;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--gulf-dark);
+}
+.ask-thread p { margin: 0.4rem 0 0; }
+.ask-panel input:disabled { cursor: not-allowed; background: #f6f3ec; color: var(--muted); }
+.ask-note { margin: 0.45rem 0 0; font-size: 0.88rem; }
+@media (max-width: 800px) {
+  .dash-grid { grid-template-columns: 1fr; }
+  body:has(.dash) { background-attachment: scroll; }
+  .lot { flex-direction: column; }
+  .lot-figures { text-align: left; }
+}
 `;
 
 const HOME_SLUG = "tango-mar";
@@ -288,6 +402,25 @@ function supportHrefFor(
   return home ? memberSupportHref(home.association.slug, home.membership) : "";
 }
 
+function askPortalWidget(): string {
+  return `<details class="ask-portal">
+    <summary>Ask the portal</summary>
+    <div class="ask-panel">
+      <p class="kicker">Tango Mar</p>
+      <h2>Ask the portal</h2>
+      <p>Questions about covenants, bylaws, and your lot.</p>
+      <div class="ask-thread">
+        <p class="ask-required">SUBSCRIPTION REQUIRED</p>
+        <p>The assistant is part of a paid subscription. It is not available yet.</p>
+      </div>
+      <label>Message
+        <input type="text" disabled placeholder="Subscription required">
+      </label>
+      <p class="muted ask-note">Coming later. This box does not send a message.</p>
+    </div>
+  </details>`;
+}
+
 function shell(options: {
   title: string;
   brandHref: string;
@@ -296,6 +429,7 @@ function shell(options: {
   body: string;
   landing?: boolean;
   supportHref?: string;
+  askPortal?: boolean;
 }): string {
   if (options.landing) {
     const topbar = options.account ? `<div class="topbar"><div class="account">${options.account}</div></div>` : "";
@@ -341,6 +475,7 @@ function shell(options: {
     <div class="account">${options.account}</div>
   </header>
   <main id="content" class="wrap stack">${options.body}</main>
+  ${options.askPortal ? askPortalWidget() : ""}
   ${siteFooter(options.supportHref ?? "")}
 </body>
 </html>`;
@@ -453,6 +588,7 @@ export async function render(
     account,
     landing: onPublicHome,
     supportHref,
+    askPortal: resident,
     body: `${flashHtml}${options.body}`,
   });
   const response = htmlResponse(body, options.status ?? 200);

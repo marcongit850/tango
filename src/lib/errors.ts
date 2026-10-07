@@ -32,6 +32,11 @@ export function isUniqueConstraint(error: unknown): boolean {
   return /unique constraint failed/i.test(message);
 }
 
+export function isForeignKey(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /foreign key constraint failed/i.test(message);
+}
+
 export class RedirectError extends Error {
   readonly location: string;
 

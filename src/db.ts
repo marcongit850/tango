@@ -13,7 +13,7 @@ import type {
 } from "./types";
 import type { LotType } from "./lib/dues";
 import { lotsToInvoice } from "./lib/dues";
-import { isMissingColumn, isMissingTable } from "./lib/errors";
+import { isForeignKey, isMissingColumn, isMissingTable } from "./lib/errors";
 import { balanceCents, invoiceStatus, isDelinquent } from "./lib/money";
 
 async function hasColumn(
@@ -954,6 +954,90 @@ export async function propertyInAssociation(
     )
     .bind(associationId, propertyId)
     .first<PropertyRow>();
+}
+
+/**
+ * Removes a person from this association.
+ * A login used only here is deleted, along with sessions and other rows that
+ * would otherwise leave a broken foreign key. A login still used by another
+ * association keeps the account and loses only this association's membership.
+ */
+export async function deletePersonAccount(
+  db: D1Database,
+  associationId: string,
+  userId: string,
+): Promise<"removed" | "unlinked" | "missing"> {
+  const user = await db
+    .prepare(
+      `SELECT u.id, u.email
+       FROM users u
+       JOIN memberships m ON m.user_id = u.id AND m.association_id = ?
+       WHERE u.id = ?`,
+    )
+    .bind(associationId, userId)
+    .first<{ id: string; email: string }>();
+  if (!user) return "missing";
+
+  const others = await db
+    .prepare("SELECT COUNT(*) AS n FROM memberships WHERE user_id = ? AND association_id != ?")
+    .bind(userId, associationId)
+    .first<{ n: number }>();
+  const shared = Number(others?.n ?? 0) > 0;
+
+  const statements = shared
+    ? [
+        db.prepare("DELETE FROM notifications WHERE association_id = ? AND user_id = ?").bind(associationId, userId),
+        db.prepare("DELETE FROM messages WHERE association_id = ? AND from_user_id = ?").bind(associationId, userId),
+        db.prepare("DELETE FROM property_owners WHERE association_id = ? AND user_id = ?").bind(associationId, userId),
+        db.prepare("DELETE FROM memberships WHERE association_id = ? AND user_id = ?").bind(associationId, userId),
+      ]
+    : [
+        db.prepare("UPDATE payments SET recorded_by_user_id = NULL WHERE recorded_by_user_id = ?").bind(userId),
+        db.prepare("UPDATE document_versions SET uploaded_by_user_id = NULL WHERE uploaded_by_user_id = ?").bind(userId),
+        db.prepare("UPDATE announcements SET created_by_user_id = NULL WHERE created_by_user_id = ?").bind(userId),
+        db.prepare("UPDATE events SET created_by_user_id = NULL WHERE created_by_user_id = ?").bind(userId),
+        db.prepare("UPDATE audit_log SET actor_user_id = NULL WHERE actor_user_id = ?").bind(userId),
+        db.prepare("DELETE FROM notifications WHERE user_id = ?").bind(userId),
+        db.prepare("DELETE FROM messages WHERE from_user_id = ?").bind(userId),
+        db.prepare("DELETE FROM property_owners WHERE user_id = ?").bind(userId),
+        db.prepare("DELETE FROM memberships WHERE user_id = ?").bind(userId),
+        db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
+        db.prepare("DELETE FROM magic_links WHERE email = ? COLLATE NOCASE").bind(user.email),
+        db.prepare("DELETE FROM users WHERE id = ?").bind(userId),
+      ];
+  await db.batch(statements);
+  return shared ? "unlinked" : "removed";
+}
+
+/** Deletes a lot that has no invoices and no payments. Owner links are removed. */
+export async function deletePropertyIfClear(
+  db: D1Database,
+  associationId: string,
+  propertyId: string,
+): Promise<"deleted" | "blocked" | "missing"> {
+  const property = await propertyInAssociation(db, associationId, propertyId);
+  if (!property) return "missing";
+  const counts = await db
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM invoices WHERE association_id = ? AND property_id = ?) AS invoices,
+         (SELECT COUNT(*) FROM payments WHERE association_id = ? AND property_id = ?) AS payments`,
+    )
+    .bind(associationId, propertyId, associationId, propertyId)
+    .first<{ invoices: number; payments: number }>();
+  if (Number(counts?.invoices ?? 0) > 0 || Number(counts?.payments ?? 0) > 0) return "blocked";
+  try {
+    const results = await db.batch([
+      db.prepare("UPDATE messages SET property_id = NULL WHERE association_id = ? AND property_id = ?").bind(associationId, propertyId),
+      db.prepare("DELETE FROM property_owners WHERE association_id = ? AND property_id = ?").bind(associationId, propertyId),
+      db.prepare("DELETE FROM properties WHERE association_id = ? AND id = ?").bind(associationId, propertyId),
+    ]);
+    const removed = results[results.length - 1]?.meta.changes ?? 0;
+    return removed > 0 ? "deleted" : "missing";
+  } catch (error) {
+    if (isForeignKey(error)) return "blocked";
+    throw error;
+  }
 }
 
 export type LotRow = PropertyRow & {

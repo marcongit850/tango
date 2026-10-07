@@ -427,14 +427,52 @@ export function faqPage(faqs: FaqRow[]): string {
   return `<section class="panel"><h1>FAQ</h1></section><section class="stack">${items || empty("No questions yet.")}</section>`;
 }
 
-export function boardPage(association: Association, contacts: ContactRow[]): string {
+export function boardPage(
+  association: Association,
+  contacts: ContactRow[],
+  options: { canEdit?: boolean; open?: boolean; error?: string; draft?: MailingDraft } = {},
+): string {
   const cards = contacts
     .map(
       (contact) => `<article class="card"><h2>${esc(contact.name)}</h2><p>${esc(contact.role_title)}</p><p>${contact.email ? esc(contact.email) : ""}</p><p>${contact.phone ? esc(contact.phone) : ""}</p></article>`,
     )
     .join("");
-  return `<section class="panel"><h1>Board contacts</h1><p class="muted">${esc(association.legal_name)} · ${esc(formatMailing(association))}</p></section>
+  const edit = options.canEdit ? mailingEdit(association, options) : "";
+  return `<section class="panel"><h1>Board contacts</h1><p class="muted">${esc(association.legal_name)} · ${esc(formatMailing(association))}</p>${edit}</section>
     <section class="grid">${cards || empty("No contacts published.")}</section>`;
+}
+
+type MailingDraft = {
+  legal_name: string;
+  address_line1: string;
+  city: string;
+  state: string;
+  postal_code: string;
+};
+
+function mailingEdit(
+  association: Association,
+  options: { open?: boolean; error?: string; draft?: MailingDraft },
+): string {
+  const draft = options.draft ?? {
+    legal_name: association.legal_name,
+    address_line1: association.address_line1,
+    city: association.city,
+    state: association.state,
+    postal_code: association.postal_code,
+  };
+  return `<details class="mailing-edit"${options.open ? " open" : ""}>
+    <summary class="button secondary">Edit</summary>
+    <form class="fields" method="post" action="/a/${esc(association.slug)}/board">
+      ${options.error ? `<p class="flash warn">${esc(options.error)}</p>` : ""}
+      ${textField("Legal name", "legal_name", { value: draft.legal_name, required: true })}
+      ${textField("Street address", "address_line1", { value: draft.address_line1 })}
+      ${textField("City", "city", { value: draft.city })}
+      ${textField("State", "state", { value: draft.state })}
+      ${textField("Postal code", "postal_code", { value: draft.postal_code })}
+      <button type="submit">Save mailing address</button>
+    </form>
+  </details>`;
 }
 
 function formatMailing(association: Association): string {

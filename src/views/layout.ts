@@ -131,6 +131,17 @@ input, select, textarea {
 input[type="checkbox"] { width: auto; justify-self: start; }
 textarea { min-height: 7rem; }
 form.fields { display: grid; gap: 0.75rem; }
+.mailing-edit { margin-top: 0.75rem; }
+.mailing-edit > summary {
+  display: inline-block;
+  width: auto;
+  list-style: none;
+  cursor: pointer;
+}
+.mailing-edit > summary::-webkit-details-marker { display: none; }
+.mailing-edit > summary::marker { content: ""; }
+.mailing-edit > summary:focus-visible { outline: 2px solid var(--gulf); outline-offset: 3px; }
+.mailing-edit > form { margin-top: 0.85rem; max-width: 32rem; }
 .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
 .actions form { display: flex; align-items: center; margin: 0; }
 .join-actions { flex-wrap: nowrap; }

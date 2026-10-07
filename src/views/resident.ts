@@ -71,7 +71,7 @@ export function dashboardPage(options: {
       <p class="muted">${esc(association.name)} · ${esc(options.name)}</p>
       <h1>Your account</h1>
       <p class="figure">${ledger.length ? moneySpan(total) : ""}</p>
-      <p class="muted">${ledger.length ? "Balance across your lots. Charges and late fees, minus recorded payments." : "No lot is linked to this login yet."}</p>
+      <p class="muted">${ledger.length ? "Balance across your properties. Charges and late fees, minus recorded payments." : "No lot is linked to this login yet."}</p>
       ${late > 0 ? `<p>Outstanding late fees ${moneySpan(late)}</p>` : ""}
     </section>
     ${lots ? `<section class="grid">${lots}</section>` : ""}

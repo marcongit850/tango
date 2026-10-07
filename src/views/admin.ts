@@ -1,9 +1,9 @@
 import { DOCUMENT_CATEGORIES } from "../lib/categories";
 import { zonedIsoDate } from "../lib/dates";
-import { lotTypeLabel } from "../lib/dues";
+import { latestDuesAmounts, lotTypeLabel } from "../lib/dues";
 import { MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE } from "../lib/access";
 import { esc, paragraphs } from "../lib/html";
-import { formatMoney } from "../lib/money";
+import { formatDollarsPlain, formatMoney } from "../lib/money";
 import type { Association, DocumentCategory } from "../types";
 import { messageWaitingOnBoard, type MessageRow } from "../db";
 import type {
@@ -1244,9 +1244,10 @@ function duesSection(options: {
       </tr>`;
     })
     .join("");
+  const amounts = latestDuesAmounts(options.assessments);
   return `<section class="panel" id="dues">
     <h2>Annual dues</h2>
-    <p class="muted">Set the open date, due date, and amounts for improved and unimproved lots. Add a year creates both: improved lots at $625 and unimproved lots at $100, open January 1 and due March 1.</p>
+    <p class="muted">Set the open date, due date, and amounts for improved and unimproved lots. Add a year creates both, using the amounts and dates you enter.</p>
     <ul class="muted dues-help">
       <li>On the open date, each active lot of that type that does not already have this assessment gets an invoice. If a day is missed, the next run catches up. The invoice date stays the open date.</li>
       <li>Leave the open date blank if you want to invoice only by hand. Use Assign to matching lots to create those invoices early.</li>
@@ -1258,6 +1259,10 @@ function duesSection(options: {
     ${canEdit ? `<h3>Add a year</h3>
     <form class="fields" method="post" action="${base}/assessments">
       ${textField("Year", "year", { value: String(options.duesYear), required: true })}
+      ${textField("Improved lot amount", "improved_amount", { value: formatDollarsPlain(amounts.improvedCents), required: true })}
+      ${textField("Unimproved lot amount", "unimproved_amount", { value: formatDollarsPlain(amounts.unimprovedCents), required: true })}
+      ${textField("Open date", "opens_on", { type: "date", value: `${options.duesYear}-01-01`, required: true })}
+      ${textField("Due date", "due_on", { type: "date", value: `${options.duesYear}-03-01`, required: true })}
       <button type="submit">Add improved and unimproved dues</button>
     </form>` : ""}
   </section>`;

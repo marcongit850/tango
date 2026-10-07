@@ -177,8 +177,8 @@ export function dashboardPage(options: {
       </article>
     </section>
     <section class="panel">
-      <h2>Personal notices</h2>
-      ${notices ? `<ul>${notices}</ul>` : empty("No account messages.")}
+      <h2>Notices from the Board</h2>
+      ${notices ? `<ul>${notices}</ul>` : empty("No notices from the Board.")}
     </section>
   </div>`;
 }
@@ -265,8 +265,8 @@ export function noticesPage(association: Association, notices: NoticeRow[]): str
       </article>`,
     )
     .join("");
-  return `<section class="panel"><h1>Notices</h1></section>
-    ${rows || `<section class="panel">${empty("No notices.")}</section>`}
+  return `<section class="panel"><h1>Notices from the Board</h1></section>
+    ${rows || `<section class="panel">${empty("No notices from the Board.")}</section>`}
     ${notices.some((row) => !row.read_at) ? `<form method="post" action="/a/${esc(association.slug)}/notices/read-all"><button type="submit">Mark all read</button></form>` : ""}`;
 }
 

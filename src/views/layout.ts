@@ -551,7 +551,7 @@ export async function render(
       { id: "faq", href: `${base}/faq`, label: "FAQ" },
       { id: "board", href: `${base}/board`, label: "Board" },
       { id: "messages", href: `${base}/messages`, label: "Messages" },
-      { id: "notices", href: `${base}/notices`, label: unread > 0 ? `Notices (${unread})` : "Notices" },
+      { id: "notices", href: `${base}/notices`, label: unread > 0 ? `Notices from the Board (${unread})` : "Notices from the Board" },
     );
   } else {
     items.push(...loggedOutNav(options.active));

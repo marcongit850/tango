@@ -566,7 +566,8 @@ describe("owner dashboard", () => {
     expect(html).toContain('href="/a/tango-mar/calendar"');
     expect(html).toContain("Invoice history");
     expect(html).toContain("Payment history");
-    expect(html).toContain("Personal notices");
+    expect(html).toContain("Notices from the Board");
+    expect(html).not.toContain("Personal notices");
     expect(html).not.toContain("\u2014");
   });
 });
@@ -773,7 +774,8 @@ describe("personal notices", () => {
       emergencies: [],
     });
     const opened = formatDateTime(readAt, association.timezone);
-    expect(html).toContain("<h2>Personal notices</h2>");
+    expect(html).toContain("<h2>Notices from the Board</h2>");
+    expect(html).not.toContain("Personal notices");
     expect(html).toContain(
       `<li><a href="/a/tango-mar/notices">Dues reminder</a> <span class="muted">${created}</span> <span class="muted">Please mail a check.</span> </li>`,
     );
@@ -791,6 +793,8 @@ describe("personal notices", () => {
       notice({ read_at: readAt }),
       notice({ id: "note-gate", title: "Gate code", body: "", read_at: null }),
     ]);
+    expect(html).toContain("<h1>Notices from the Board</h1>");
+    expect(noticesPage(association, [])).toContain("No notices from the Board.");
     expect(html).toContain(`<p class="muted">${created} · Opened ${opened}</p>`);
     expect(html).toContain(`<p class="muted">${created} · Unread</p>`);
     expect(html).not.toContain(">Read<");

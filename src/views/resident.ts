@@ -380,11 +380,14 @@ export function messagesPage(
   const lotOptions = properties
     .map((property) => `<option value="${esc(property.id)}">Lot ${esc(property.lot_number)}</option>`)
     .join("");
+  const adminPlace = adminInboxHref
+    ? `<a href="${esc(adminInboxHref)}">Admin → Messages</a>`
+    : "Admin → Messages";
   return `<section class="split">
     <article class="panel">
       <h1>Messages</h1>
-      <p class="muted">Private notes to the board. Other residents cannot read them.</p>
-      ${adminInboxHref ? `<p class="muted">Incoming from owners is listed under <a href="${esc(adminInboxHref)}">Admin, Messages</a>.</p>` : ""}
+      <p class="muted">Send a private message to the Board. Messages are not visible to other residents.</p>
+      <p class="muted">Board members and authorized administrators can review incoming owner messages under ${adminPlace}.</p>
       ${rows ? `<table><thead><tr><th>Subject</th><th>Latest from</th><th>When</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No messages yet.")}
     </article>
     <article class="panel">

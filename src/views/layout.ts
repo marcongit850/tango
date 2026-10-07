@@ -1,7 +1,7 @@
 import { isAdmin } from "../lib/access";
 import { findAssociationBySlug, findMembership, unreadCount } from "../db";
 import { esc, htmlResponse, isHttps } from "../lib/html";
-import type { AppBindings } from "../types";
+import type { AppBindings, Association, Membership } from "../types";
 import type { Context } from "hono";
 
 type AppContext = Context<AppBindings>;
@@ -220,6 +220,7 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
 `;
 
 const HOME_SLUG = "tango-mar";
+const MEMBER_HEADER_PATHS = new Set(["/privacy", "/terms"]);
 
 export function siteFooter(supportHref: string): string {
   const links = [
@@ -235,19 +236,33 @@ function memberSupportHref(slug: string, membership: { status?: string | null } 
   return `/a/${slug}/support`;
 }
 
-async function supportHrefFor(c: AppContext): Promise<string> {
+function requestPath(c: AppContext): string {
+  return new URL(c.req.url).pathname;
+}
+
+async function lookupHomeMembership(
+  c: AppContext,
+): Promise<{ association: Association; membership: Membership | null } | null> {
   const user = c.get("user");
-  if (!user) return "";
+  if (!user) return null;
+  try {
+    const association = await findAssociationBySlug(c.env.DB, HOME_SLUG);
+    if (!association) return null;
+    const membership = await findMembership(c.env.DB, association.id, user.id);
+    return { association, membership };
+  } catch {
+    return null;
+  }
+}
+
+function supportHrefFor(
+  c: AppContext,
+  home: { association: Association; membership: Membership | null } | null,
+): string {
+  if (!c.get("user")) return "";
   const association = c.get("association");
   if (association) return memberSupportHref(association.slug, c.get("membership"));
-  try {
-    const home = await findAssociationBySlug(c.env.DB, HOME_SLUG);
-    if (!home) return "";
-    const membership = await findMembership(c.env.DB, home.id, user.id);
-    return memberSupportHref(home.slug, membership);
-  } catch {
-    return "";
-  }
+  return home ? memberSupportHref(home.association.slug, home.membership) : "";
 }
 
 function shell(options: {
@@ -350,9 +365,21 @@ export async function render(
     portal?: { dashboardHref: string; adminHref: string | null } | null;
   },
 ): Promise<Response> {
-  const association = c.get("association");
   const user = c.get("user");
-  const membership = c.get("membership");
+  const pathAssociation = c.get("association");
+  const onPublicHome = !pathAssociation && options.active === "home";
+  const home = !pathAssociation && user && !onPublicHome ? await lookupHomeMembership(c) : null;
+  let association = pathAssociation;
+  let membership = c.get("membership");
+  if (
+    !association &&
+    home?.membership &&
+    home.membership.status !== "inactive" &&
+    MEMBER_HEADER_PATHS.has(requestPath(c))
+  ) {
+    association = home.association;
+    membership = home.membership;
+  }
   let unread = 0;
   if (association && user && membership && membership.status !== "inactive") {
     try {
@@ -386,7 +413,6 @@ export async function render(
   const flash = c.get("flash");
   const tone = c.get("flashTone");
   const flashHtml = flash ? `<div class="flash ${tone === "warn" ? "warn" : ""}">${esc(flash)}</div>` : "";
-  const onPublicHome = !association && options.active === "home";
   const adminLink =
     resident && isAdmin(membership)
       ? `<a class="account-admin${options.active === "admin" ? " active" : ""}" href="${esc(`${base}/admin`)}">Admin</a>`
@@ -396,7 +422,7 @@ export async function render(
       ? landingAccount(user.name || user.email, options.portal ?? null)
       : `${adminLink}${esc(user.name || user.email)} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`
     : "";
-  const supportHref = onPublicHome ? "" : await supportHrefFor(c);
+  const supportHref = onPublicHome ? "" : supportHrefFor(c, home);
   const body = shell({
     title: options.title,
     brandHref: "/",

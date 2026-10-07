@@ -263,3 +263,100 @@ describe("support access", () => {
     }
   });
 });
+
+function headerPart(html: string, start: string, end: string): string {
+  const header = html.slice(html.indexOf('<header class="site-header">'), html.indexOf("</header>"));
+  return header.slice(header.indexOf(start), header.indexOf(end, header.indexOf(start)));
+}
+
+function headerNav(html: string): string {
+  return headerPart(html, "<nav>", "</nav>");
+}
+
+function headerAccount(html: string): string {
+  return headerPart(html, '<div class="account">', "</div>");
+}
+
+describe("privacy and terms header", () => {
+  it("uses the signed-in portal header for members and the public header otherwise", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const sam = await signIn(sqlite, "user_sam");
+    const jordan = await signIn(sqlite, "user_jordan");
+    sqlite
+      .prepare("INSERT INTO users (id, email, name, phone, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run("user_guest", "guest@example.com", "Guest Visitor", "", "2026-10-06T00:00:00.000Z");
+    const guest = await signIn(sqlite, "user_guest");
+
+    try {
+      const portal = await app.request("http://localhost/a/tango-mar/support", { headers: { Cookie: `tango_session=${sam}` } }, env);
+      expect(portal.status).toBe(200);
+      const portalHtml = await portal.text();
+      const adminPortal = await app.request(
+        "http://localhost/a/tango-mar/support",
+        { headers: { Cookie: `tango_session=${jordan}` } },
+        env,
+      );
+      expect(adminPortal.status).toBe(200);
+      const adminPortalHtml = await adminPortal.text();
+
+      for (const path of ["/privacy", "/terms"]) {
+        const loggedOut = await app.request(`http://localhost${path}`, {}, env);
+        const loggedOutHtml = await loggedOut.text();
+        expect(headerNav(loggedOutHtml)).toContain('href="/">Home</a>');
+        expect(headerNav(loggedOutHtml)).toContain("Resident login");
+        expect(headerNav(loggedOutHtml)).not.toContain("Dashboard");
+        expect(loggedOutHtml).toContain('<div class="account"></div>');
+
+        const member = await app.request(`http://localhost${path}`, { headers: { Cookie: `tango_session=${sam}` } }, env);
+        expect(member.status).toBe(200);
+        const memberHtml = await member.text();
+        expect(headerNav(memberHtml)).toBe(headerNav(portalHtml));
+        expect(headerAccount(memberHtml)).toBe(headerAccount(portalHtml));
+        expect(headerNav(memberHtml)).toContain('href="/a/tango-mar/dashboard">Dashboard</a>');
+        expect(headerNav(memberHtml)).toContain('href="/a/tango-mar/documents">Documents</a>');
+        expect(headerNav(memberHtml)).toContain('href="/a/tango-mar/news">News</a>');
+        expect(headerNav(memberHtml)).toContain('href="/a/tango-mar/calendar">Calendar</a>');
+        expect(headerNav(memberHtml)).toContain('href="/a/tango-mar/faq">FAQ</a>');
+        expect(headerNav(memberHtml)).toContain('href="/a/tango-mar/board">Board</a>');
+        expect(headerNav(memberHtml)).toContain('href="/a/tango-mar/messages">Messages</a>');
+        expect(headerNav(memberHtml)).toContain('href="/a/tango-mar/notices">Notices</a>');
+        expect(headerNav(memberHtml)).not.toContain(">Home</a>");
+        expect(headerAccount(memberHtml)).toContain("Sam Rivera");
+        expect(headerAccount(memberHtml)).toContain("Log out");
+        expect(headerAccount(memberHtml)).not.toContain("Admin");
+        expect(memberHtml).toContain('<header class="site-header">');
+        expect(memberHtml).toContain(path === "/privacy" ? "<h1>Privacy Policy</h1>" : "<h1>Terms of Use</h1>");
+
+        const admin = await app.request(`http://localhost${path}`, { headers: { Cookie: `tango_session=${jordan}` } }, env);
+        const adminHtml = await admin.text();
+        expect(headerNav(adminHtml)).toBe(headerNav(adminPortalHtml));
+        expect(headerAccount(adminHtml)).toBe(headerAccount(adminPortalHtml));
+        expect(headerAccount(adminHtml)).toContain('class="account-admin" href="/a/tango-mar/admin">Admin</a>');
+        expect(headerAccount(adminHtml).indexOf(">Admin</a>")).toBeLessThan(headerAccount(adminHtml).indexOf("Jordan Lee"));
+
+        const stranger = await app.request(`http://localhost${path}`, { headers: { Cookie: `tango_session=${guest}` } }, env);
+        const strangerHtml = await stranger.text();
+        expect(headerNav(strangerHtml)).toContain('href="/">Home</a>');
+        expect(headerNav(strangerHtml)).toContain("Resident login");
+        expect(headerNav(strangerHtml)).not.toContain("Dashboard");
+        expect(headerAccount(strangerHtml)).toContain("Guest Visitor");
+        expect(headerAccount(strangerHtml)).toContain("Log out");
+      }
+
+      const login = await app.request("http://localhost/login", { headers: { Cookie: `tango_session=${sam}` } }, env);
+      const loginNav = headerNav(await login.text());
+      expect(loginNav).toContain("Resident login");
+      expect(loginNav).not.toContain("Dashboard");
+
+      sqlite.prepare("UPDATE memberships SET status = 'inactive' WHERE user_id = ?").run("user_sam");
+      const inactive = await app.request("http://localhost/privacy", { headers: { Cookie: `tango_session=${sam}` } }, env);
+      const inactiveNav = headerNav(await inactive.text());
+      expect(inactiveNav).toContain('href="/">Home</a>');
+      expect(inactiveNav).not.toContain("Dashboard");
+    } finally {
+      sqlite.close();
+    }
+  });
+});

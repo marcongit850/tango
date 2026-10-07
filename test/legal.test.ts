@@ -72,7 +72,11 @@ describe("legal pages", () => {
     expect(legalText(privacyHtml)).toBe(fixture("privacy-policy.txt"));
     expect(privacyHtml).toContain('href="/privacy">Privacy Policy</a>');
     expect(privacyHtml).toContain('href="/terms">Terms of Use</a>');
-    expect(privacyHtml).toContain(">Home</a>");
+    const privacyNav = privacyHtml.slice(privacyHtml.indexOf("<nav>"), privacyHtml.indexOf("</nav>"));
+    expect(privacyNav).toContain('href="/">Home</a>');
+    expect(privacyNav).toContain("Resident login");
+    expect(privacyNav).toContain("Request to join");
+    expect(privacyNav).not.toContain("Dashboard");
     expect(privacyHtml).not.toContain(">Support</a>");
     expect(privacyHtml).toContain('class="panel legal"');
 
@@ -81,7 +85,10 @@ describe("legal pages", () => {
     const termsHtml = await terms.text();
     expect(termsHtml).toContain("<title>Terms of Use · Tango Mar</title>");
     expect(legalText(termsHtml)).toBe(fixture("terms-of-use.txt"));
-    expect(termsHtml).toContain(">Home</a>");
+    const termsNav = termsHtml.slice(termsHtml.indexOf("<nav>"), termsHtml.indexOf("</nav>"));
+    expect(termsNav).toContain('href="/">Home</a>');
+    expect(termsNav).toContain("Resident login");
+    expect(termsNav).not.toContain("Dashboard");
     expect(termsHtml).not.toContain(">Support</a>");
   });
 });

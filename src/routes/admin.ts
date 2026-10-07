@@ -44,7 +44,7 @@ import {
 } from "../db";
 import { activeAdminContacts, keepsAnAdmin } from "../lib/access";
 import { changeLoginEmail } from "../lib/login-email";
-import { isDocumentCategory } from "../lib/categories";
+import { categoryLabel, isDocumentCategory, isLegacyDocumentCategory, normalizeFolder } from "../lib/categories";
 import { annualDues, defaultDuesYear, isLotType } from "../lib/dues";
 import { parseOwnersCsv } from "../lib/csv";
 import { OWNER_IMPORT_TEMPLATE } from "../lib/owner-import-template";
@@ -1128,11 +1128,25 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const category = textValue(fields, "category", 40);
     const visibility = textValue(fields, "visibility", 20);
     const notes = textValue(fields, "notes", 1000);
+    const folder = normalizeFolder(textValue(fields, "folder", 120));
     const file = fileValue(fields, "file");
+    if (!folder.ok) return redirectTo(c, `/a/${association.slug}/admin/documents`, folder.error, "warn");
     if (!title || !isDocumentCategory(category) || (visibility !== "residents" && visibility !== "board") || !file) {
       return redirectTo(c, `/a/${association.slug}/admin/documents`, "Title, category, visibility, and a file are required.", "warn");
     }
-    const stored = await storeVersion(c, { associationId: association.id, documentId: crypto.randomUUID(), versionNumber: 1, file, notes, userId: user.id, title, category, visibility, create: true });
+    const stored = await storeVersion(c, {
+      associationId: association.id,
+      documentId: crypto.randomUUID(),
+      versionNumber: 1,
+      file,
+      notes,
+      userId: user.id,
+      title,
+      category,
+      visibility,
+      folder: folder.folder,
+      create: true,
+    });
     if (stored.error) return redirectTo(c, `/a/${association.slug}/admin/documents`, stored.error, "warn");
     const mailed = await maybeEmailOwners(c, {
       requested: fields.email_owners === "1",
@@ -1232,23 +1246,43 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const { association, user } = requireEditor(c);
     const fields = await readForm(c);
     const document = await loadDocument(c, association.id, c.req.param("documentId"));
+    const back = documentPath(association.slug, document.id);
     const visibility = textValue(fields, "visibility", 20);
+    const category = textValue(fields, "category", 40);
+    const folder = normalizeFolder(textValue(fields, "folder", 120));
+    if (!folder.ok) return redirectTo(c, back, folder.error, "warn");
+    if (!isDocumentCategory(category)) return redirectTo(c, back, "Choose a category.", "warn");
     if (visibility !== "residents" && visibility !== "board") {
-      return redirectTo(c, documentPath(association.slug, document.id), "Choose owners and residents, or board only.", "warn");
+      return redirectTo(c, back, "Choose owners and residents, or board only.", "warn");
     }
-    await c.env.DB
-      .prepare("UPDATE documents SET visibility = ? WHERE association_id = ? AND id = ?")
-      .bind(visibility, association.id, document.id)
-      .run();
+    try {
+      await c.env.DB
+        .prepare("UPDATE documents SET category = ?, visibility = ?, folder = ? WHERE association_id = ? AND id = ?")
+        .bind(category, visibility, folder.folder, association.id, document.id)
+        .run();
+    } catch (error) {
+      if (isMissingColumn(error) && folder.folder === "" && isLegacyDocumentCategory(category)) {
+        await c.env.DB
+          .prepare("UPDATE documents SET category = ?, visibility = ? WHERE association_id = ? AND id = ?")
+          .bind(category, visibility, association.id, document.id)
+          .run();
+      } else if (isMissingColumn(error) || isCheckConstraint(error)) {
+        return redirectTo(c, back, DOCUMENT_FOLDER_MIGRATION, "warn");
+      } else {
+        throw error;
+      }
+    }
+    const place = folder.folder ? `${categoryLabel(category)} / ${folder.folder}` : categoryLabel(category);
+    const who = visibility === "board" ? "Board only" : "Owners and residents";
     await writeAudit(c.env.DB, {
       associationId: association.id,
       actorUserId: user.id,
       action: "document_visibility",
       entityType: "document",
       entityId: document.id,
-      detail: visibility === "board" ? "Board only" : "Owners and residents",
+      detail: `${place}. ${who}.`,
     });
-    return redirectTo(c, documentPath(association.slug, document.id), "Visibility saved.");
+    return redirectTo(c, back, "Saved.");
   });
 
   app.post("/a/:slug/admin/documents/:documentId/delete", async (c) => {
@@ -2141,13 +2175,35 @@ function documentPath(slug: string, documentId: string): string {
   return `/a/${slug}/admin/documents/${documentId}`;
 }
 
-async function loadDocument(c: AppContext, associationId: string, documentId: string) {
+const DOCUMENT_FOLDER_MIGRATION =
+  "Apply the document folder migration in D1, then try again. The steps are in the README under Document folders.";
+
+type LoadedDocument = {
+  id: string;
+  title: string;
+  category: DocumentCategory;
+  visibility: "residents" | "board";
+  current_version_id: string | null;
+  folder: string;
+};
+
+async function loadDocument(c: AppContext, associationId: string, documentId: string): Promise<LoadedDocument> {
+  try {
+    const document = await c.env.DB
+      .prepare("SELECT id, title, category, visibility, current_version_id, folder FROM documents WHERE association_id = ? AND id = ?")
+      .bind(associationId, documentId)
+      .first<LoadedDocument>();
+    if (!document) throw new NotFoundError();
+    return { ...document, folder: document.folder ?? "" };
+  } catch (error) {
+    if (!isMissingColumn(error)) throw error;
+  }
   const document = await c.env.DB
     .prepare("SELECT id, title, category, visibility, current_version_id FROM documents WHERE association_id = ? AND id = ?")
     .bind(associationId, documentId)
-    .first<{ id: string; title: string; category: DocumentCategory; visibility: "residents" | "board"; current_version_id: string | null }>();
+    .first<Omit<LoadedDocument, "folder">>();
   if (!document) throw new NotFoundError();
-  return document;
+  return { ...document, folder: "" };
 }
 
 async function storeVersion(
@@ -2162,6 +2218,7 @@ async function storeVersion(
     title: string;
     category: DocumentCategory;
     visibility: "residents" | "board";
+    folder?: string;
     create: boolean;
   },
 ): Promise<{ documentId: string; error?: string }> {
@@ -2172,40 +2229,92 @@ async function storeVersion(
   const key = `${input.associationId}/${input.documentId}/v${input.versionNumber}-${safeFilename(input.file.name)}`;
   await c.env.DOCUMENTS.put(key, await input.file.arrayBuffer(), { httpMetadata: { contentType } });
   const now = new Date().toISOString();
-  if (input.create) {
+  const folder = input.folder ?? "";
+  let created = false;
+  try {
+    if (input.create) {
+      await insertDocument(c, { ...input, folder, versionId, now });
+      created = true;
+    }
     await c.env.DB
       .prepare(
-        `INSERT INTO documents (id, association_id, category, title, visibility, current_version_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(input.documentId, input.associationId, input.category, input.title, input.visibility, versionId, now)
-      .run();
-  }
-  await c.env.DB
-    .prepare(
-      `INSERT INTO document_versions (
+        `INSERT INTO document_versions (
          id, association_id, document_id, version_number, r2_key, filename, content_type, byte_size, notes, uploaded_by_user_id, created_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      versionId,
-      input.associationId,
-      input.documentId,
-      input.versionNumber,
-      key,
-      safeFilename(input.file.name),
-      contentType,
-      input.file.size,
-      input.notes,
-      input.userId,
-      now,
-    )
-    .run();
-  if (!input.create) {
-    await c.env.DB
-      .prepare("UPDATE documents SET current_version_id = ? WHERE association_id = ? AND id = ?")
-      .bind(versionId, input.associationId, input.documentId)
+      )
+      .bind(
+        versionId,
+        input.associationId,
+        input.documentId,
+        input.versionNumber,
+        key,
+        safeFilename(input.file.name),
+        contentType,
+        input.file.size,
+        input.notes,
+        input.userId,
+        now,
+      )
       .run();
+    if (!input.create) {
+      await c.env.DB
+        .prepare("UPDATE documents SET current_version_id = ? WHERE association_id = ? AND id = ?")
+        .bind(versionId, input.associationId, input.documentId)
+        .run();
+    }
+  } catch (error) {
+    try {
+      await c.env.DOCUMENTS.delete(key);
+    } catch (deleteError) {
+      logError("document_r2_delete", { message: deleteError instanceof Error ? deleteError.message : "unknown" });
+    }
+    if (created) {
+      try {
+        await c.env.DB.prepare("DELETE FROM documents WHERE association_id = ? AND id = ?").bind(input.associationId, input.documentId).run();
+      } catch (deleteError) {
+        logError("document_insert_cleanup", { message: deleteError instanceof Error ? deleteError.message : "unknown" });
+      }
+    }
+    if (isMissingColumn(error) || isCheckConstraint(error)) {
+      return { documentId: input.documentId, error: DOCUMENT_FOLDER_MIGRATION };
+    }
+    throw error;
   }
   return { documentId: input.documentId };
+}
+
+async function insertDocument(
+  c: AppContext,
+  input: {
+    associationId: string;
+    documentId: string;
+    versionId: string;
+    now: string;
+    title: string;
+    category: DocumentCategory;
+    visibility: "residents" | "board";
+    folder: string;
+  },
+): Promise<void> {
+  try {
+    await c.env.DB
+      .prepare(
+        `INSERT INTO documents (id, association_id, category, title, visibility, current_version_id, folder, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(input.documentId, input.associationId, input.category, input.title, input.visibility, input.versionId, input.folder, input.now)
+      .run();
+  } catch (error) {
+    if (isMissingColumn(error) && input.folder === "" && isLegacyDocumentCategory(input.category)) {
+      await c.env.DB
+        .prepare(
+          `INSERT INTO documents (id, association_id, category, title, visibility, current_version_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(input.documentId, input.associationId, input.category, input.title, input.visibility, input.versionId, input.now)
+        .run();
+      return;
+    }
+    throw error;
+  }
 }

@@ -9,6 +9,7 @@ export type DocumentCategory =
   | "minutes"
   | "budgets"
   | "forms"
+  | "insurance_docs"
   | "insurance";
 export type DocumentVisibility = "residents" | "board";
 export type InvoiceStatus = "open" | "partial" | "paid" | "void";

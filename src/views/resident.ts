@@ -11,9 +11,10 @@ import type {
   PaymentRow,
   MessageRow,
 } from "../db";
+import { groupDocuments, type CategoryGroup, type FolderGroup } from "../lib/categories";
 import { clip, paragraphs, esc } from "../lib/html";
 import type { Association } from "../types";
-import { categoryCell, confirmDeleteButton, dateCell, dateTimeCell, documentFileLinks, empty, methodLabel, moneySpan, textField, areaField } from "./bits";
+import { confirmDeleteButton, dateCell, dateTimeCell, documentFileLinks, empty, methodLabel, moneySpan, textField, areaField } from "./bits";
 
 function excerpt(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -303,19 +304,68 @@ export function noticesPage(association: Association, notices: NoticeRow[]): str
     ${notices.some((row) => !row.read_at) ? `<form method="post" action="/a/${esc(association.slug)}/notices/read-all"><button type="submit">Mark all read</button></form>` : ""}`;
 }
 
+function documentFileRow(association: Association, row: DocumentRow): string {
+  const file = row.current_version_id
+    ? documentFileLinks(`/a/${association.slug}/documents/${row.id}/file`, row.content_type)
+    : "No file yet";
+  const version = row.version_number ? `v${row.version_number}` : "No version";
+  return `<tr><td>${esc(row.title)}</td><td>${version}</td><td>${file}</td></tr>`;
+}
+
+function documentFileTable(association: Association, files: DocumentRow[]): string {
+  if (!files.length) return "";
+  const rows = files.map((row) => documentFileRow(association, row)).join("");
+  return `<table><thead><tr><th>Title</th><th>Version</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function countLabel(count: number): string {
+  if (count <= 0) return "";
+  const noun = count === 1 ? "file" : "files";
+  return `<span class="doc-count">${count} ${noun}</span>`;
+}
+
+function folderDetails(
+  association: Association,
+  options: { className: string; attr: string; name: string; count: number; files: DocumentRow[]; childrenHtml: string },
+): string {
+  const files = documentFileTable(association, options.files);
+  const body = `${files}${options.childrenHtml}` || `<p class="muted">No documents in this folder.</p>`;
+  return `<details class="${options.className}" ${options.attr}>
+    <summary><span class="doc-chevron" aria-hidden="true"></span><span class="doc-folder-name">${esc(options.name)}</span>${countLabel(options.count)}</summary>
+    <div class="doc-folder-body">${body}</div>
+  </details>`;
+}
+
+function subfolderDetails(association: Association, node: FolderGroup<DocumentRow>): string {
+  const childrenHtml = node.children.map((child) => subfolderDetails(association, child)).join("");
+  return folderDetails(association, {
+    className: "doc-folder doc-subfolder",
+    attr: `data-path="${esc(node.path)}"`,
+    name: node.name,
+    count: node.count,
+    files: node.files,
+    childrenHtml,
+  });
+}
+
+function categoryDetails(association: Association, group: CategoryGroup<DocumentRow>): string {
+  const childrenHtml = group.children.map((child) => subfolderDetails(association, child)).join("");
+  return folderDetails(association, {
+    className: "doc-folder",
+    attr: `data-category="${esc(group.id)}"`,
+    name: group.label,
+    count: group.count,
+    files: group.files,
+    childrenHtml,
+  });
+}
+
 export function documentsPage(association: Association, documents: DocumentRow[]): string {
-  const rows = documents
-    .map((row) => {
-      const file = row.current_version_id
-        ? documentFileLinks(`/a/${association.slug}/documents/${row.id}/file`, row.content_type)
-        : "No file yet";
-      return `<tr><td>${categoryCell(row.category)}</td><td>${esc(row.title)}</td><td>${row.version_number ? `v${row.version_number}` : "—"}</td><td>${file}</td></tr>`;
-    })
-    .join("");
+  const folders = groupDocuments(documents).map((group) => categoryDetails(association, group)).join("");
   return `<section class="panel">
     <h1>Documents</h1>
     <p class="muted">Association documents</p>
-    ${rows ? `<table><thead><tr><th>Category</th><th>Title</th><th>Version</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No documents published yet.")}
+    <div class="doc-folders">${folders}</div>
   </section>`;
 }
 

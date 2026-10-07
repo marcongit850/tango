@@ -593,7 +593,7 @@ describe("document viewing", () => {
     const html = documentsPage(association, documents);
     expect(html).toContain("Covenants and restrictions");
     expect(html).toContain("Covenants");
-    expect(html).toContain("Meeting minutes");
+    expect(html).toContain("Meeting Minutes / Agendas");
     expect(html).toContain("Minutes");
     expect(html).not.toContain("covenants.pdf");
     expect(html).not.toContain("minutes.txt");

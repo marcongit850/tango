@@ -6,6 +6,7 @@ import {
   countActiveAdmins,
   countPendingJoinRequests,
   declineJoinRequest,
+  deleteAssessment,
   deleteJoinRequest,
   documentVersions,
   duesColumnsReady,
@@ -711,27 +712,27 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const back = `/a/${association.slug}/admin/ledger#dues`;
     const id = c.req.param("assessmentId");
     if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, back, "Confirm the delete first.", "warn");
-    const result = await c.env.DB
-      .prepare(
-        `DELETE FROM assessments
-         WHERE association_id = ? AND id = ?
-           AND NOT EXISTS (
-             SELECT 1 FROM invoices i WHERE i.association_id = assessments.association_id AND i.assessment_id = assessments.id
-           )`,
-      )
-      .bind(association.id, id)
-      .run();
-    if ((result.meta.changes ?? 0) === 0) {
-      return redirectTo(c, back, "That assessment was not deleted. It may already have invoices.", "warn");
+    const outcome = await deleteAssessment(c.env.DB, association.id, id);
+    if (!outcome.ok) {
+      const message =
+        outcome.reason === "payments"
+          ? "That assessment was not deleted. A payment is recorded on one of its invoices."
+          : "That assessment was not deleted.";
+      return redirectTo(c, back, message, "warn");
     }
+    const removed =
+      outcome.invoicesRemoved === 1
+        ? "1 unpaid invoice was removed."
+        : `${outcome.invoicesRemoved} unpaid invoices were removed.`;
     await writeAudit(c.env.DB, {
       associationId: association.id,
       actorUserId: user.id,
       action: "assessment_delete",
       entityType: "assessment",
       entityId: id,
+      detail: outcome.invoicesRemoved > 0 ? `${outcome.name}. ${removed}` : outcome.name,
     });
-    return redirectTo(c, back, "Assessment deleted.");
+    return redirectTo(c, back, outcome.invoicesRemoved > 0 ? `Assessment deleted. ${removed}` : "Assessment deleted.");
   });
 
   app.post("/a/:slug/admin/payments", async (c) => {

@@ -676,10 +676,8 @@ function duesSection(options: {
   const rows = options.assessments
     .map((row) => {
       const edit = `${base}/assessments/${esc(row.id)}`;
-      const remove =
-        row.invoice_count === 0
-          ? `<form method="post" action="${edit}/delete"><label><input type="checkbox" name="confirm" value="yes" required> Confirm</label><button class="secondary" type="submit">Delete</button></form>`
-          : "";
+      const confirm = row.invoice_count === 0 ? "Confirm" : "Delete this assessment and its unpaid invoices";
+      const remove = `<form method="post" action="${edit}/delete"><label><input type="checkbox" name="confirm" value="yes" required> ${confirm}</label><button class="secondary" type="submit">Delete</button></form>`;
       return `<tr>
         <td>${esc(row.name)}</td>
         <td>${esc(lotTypeLabel(row.lot_type))}</td>
@@ -711,7 +709,7 @@ function duesSection(options: {
     .join("");
   return `<section class="panel" id="dues">
     <h2>Annual dues</h2>
-    <p class="muted">The schedule opens January 1 and is due March 1. Improved lots are $625. Unimproved lots are $100. Assigning writes one invoice on each active lot of that type that does not already have this assessment, so Upcoming assessments can show it on those owners' dashboards. Changing the amount later does not rewrite invoices already assigned.</p>
+    <p class="muted">The schedule opens January 1 and is due March 1. Improved lots are $625. Unimproved lots are $100. Assigning writes one invoice on each active lot of that type that does not already have this assessment, so Upcoming assessments can show it on those owners' dashboards. Changing the amount later does not rewrite invoices already assigned. Delete removes the assessment and its unpaid invoices. Delete is refused when a payment is recorded on one of those invoices.</p>
     ${rows ? `<table><thead><tr><th>Assessment</th><th>Lots</th><th>Opens</th><th>Due</th><th>Amount</th><th>Invoices</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No assessments yet.")}
     <h3>Add a year</h3>
     <form class="fields" method="post" action="${base}/assessments">

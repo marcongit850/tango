@@ -43,6 +43,8 @@ nav { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; }
 nav a { text-decoration: none; color: var(--ink); padding-bottom: 0.15rem; }
 nav a.active { color: var(--gulf); box-shadow: inset 0 -2px 0 var(--gulf); }
 .account { margin-left: auto; color: var(--muted); display: flex; gap: 0.75rem; align-items: center; }
+.account a.account-admin { text-decoration: none; color: var(--ink); padding-bottom: 0.15rem; }
+.account a.account-admin.active { color: var(--gulf); box-shadow: inset 0 -2px 0 var(--gulf); }
 button, .button {
   background: var(--gulf); color: white; border: 0; border-radius: 999px;
   padding: 0.5rem 0.95rem; font: inherit; cursor: pointer; text-decoration: none; display: inline-block;
@@ -337,8 +339,9 @@ export async function render(
   }
 
   const base = association ? `/a/${association.slug}` : "";
+  const resident = Boolean(association && user && membership && membership.status !== "inactive");
   const items: { id: string; href: string; label: string }[] = [];
-  if (association && user && membership && membership.status !== "inactive") {
+  if (resident) {
     items.push(
       { id: "dashboard", href: `${base}/dashboard`, label: "Dashboard" },
       { id: "documents", href: `${base}/documents`, label: "Documents" },
@@ -349,7 +352,6 @@ export async function render(
       { id: "messages", href: `${base}/messages`, label: "Messages" },
       { id: "notices", href: `${base}/notices`, label: unread > 0 ? `Notices (${unread})` : "Notices" },
     );
-    if (isAdmin(membership)) items.push({ id: "admin", href: `${base}/admin`, label: "Admin" });
   } else {
     items.push(...loggedOutNav(options.active));
   }
@@ -361,10 +363,14 @@ export async function render(
   const tone = c.get("flashTone");
   const flashHtml = flash ? `<div class="flash ${tone === "warn" ? "warn" : ""}">${esc(flash)}</div>` : "";
   const onPublicHome = !association && options.active === "home";
+  const adminLink =
+    resident && isAdmin(membership)
+      ? `<a class="account-admin${options.active === "admin" ? " active" : ""}" href="${esc(`${base}/admin`)}">Admin</a>`
+      : "";
   const account = user
     ? onPublicHome
       ? landingAccount(user.name || user.email, options.portal ?? null)
-      : `${esc(user.name || user.email)} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`
+      : `${adminLink}${esc(user.name || user.email)} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`
     : "";
   const supportHref = onPublicHome ? "" : await supportHrefFor(c);
   const body = shell({

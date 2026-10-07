@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { canViewPropertyFinancials, isAdmin, keepsAnAdmin, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
 import { annualDues, defaultDuesYear, lotsToInvoice } from "../src/lib/dues";
-import { landingAccount, loggedOutNav } from "../src/views/layout";
+import { landingAccount, loggedOutNav, render } from "../src/views/layout";
 import { documentDetailPage, documentsAdminPage, newsAdminPage, ownerDetailPage } from "../src/views/admin";
 import { newsEdit } from "../src/routes/admin";
 import type { AnnouncementRow, DocumentRow, EventRow, VersionRow } from "../src/db";
@@ -11,7 +11,8 @@ import { documentContentDisposition, isBrowserViewable } from "../src/lib/files"
 import { documentsPage, faqPage } from "../src/views/resident";
 import { checkEmailPage, homePage, invalidLinkPage, joinReceivedPage, joinRequestPage, loginPage } from "../src/views/public";
 import type { OwnerListRow } from "../src/db";
-import type { Association } from "../src/types";
+import type { AppBindings, Association, Membership, User } from "../src/types";
+import type { Context } from "hono";
 import { parseCsv, parseOwnersCsv } from "../src/lib/csv";
 import { isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../src/lib/dates";
 import { balanceCents, csvText, formatMoney, invoiceStatus, isDelinquent, parseMoneyToCents } from "../src/lib/money";
@@ -323,6 +324,93 @@ describe("public home", () => {
     expect(html).toContain('name="address"');
     expect(html).toContain('name="note"');
     expect(html).toContain("Send request");
+  });
+});
+
+describe("signed-in header", () => {
+  const association: Association = {
+    id: "assoc_tango_mar",
+    slug: "tango-mar",
+    name: "Tango Mar",
+    legal_name: "Tango Mar Property Owners Association",
+    address_line1: "31 Tang O Mar Drive",
+    city: "Miramar Beach",
+    state: "FL",
+    postal_code: "32550",
+    county: "Walton County",
+    timezone: "America/Chicago",
+  };
+  const user: User = { id: "user_marc", email: "marc@example.com", name: "Marc", phone: "" };
+
+  function membership(role: Membership["role_id"], adminFlag: number, status: Membership["status"] = "active"): Membership {
+    return {
+      id: "mem_marc",
+      association_id: association.id,
+      user_id: user.id,
+      role_id: role,
+      status,
+      is_admin: adminFlag,
+    };
+  }
+
+  function context(current: Membership | null): Context<AppBindings> {
+    const vars = { user, association, membership: current, flash: null, flashTone: "ok" as const };
+    return {
+      get(key: keyof typeof vars) {
+        return vars[key];
+      },
+      env: { DB: { prepare() { throw new Error("skip unread"); } } },
+      req: { url: "https://mytangomar.com/a/tango-mar/dashboard" },
+      res: { headers: { getSetCookie: () => [] } },
+    } as unknown as Context<AppBindings>;
+  }
+
+  async function headerParts(current: Membership | null, active = "dashboard") {
+    const response = await render(context(current), { title: "Dashboard", active, body: "<p>Hello</p>" });
+    const html = await response.text();
+    const header = html.slice(html.indexOf("<header"), html.indexOf("</header>"));
+    const nav = header.slice(header.indexOf("<nav>"), header.indexOf("</nav>"));
+    const accountStart = header.indexOf('<div class="account">');
+    const account = header.slice(accountStart, header.indexOf("</div>", accountStart));
+    return { header, nav, account };
+  }
+
+  it("places Admin with the name and log out for a board admin", async () => {
+    const { nav, account, header } = await headerParts(membership("board", 1));
+    expect(nav).toContain("Dashboard");
+    expect(nav).toContain("Documents");
+    expect(nav).toContain("News");
+    expect(nav).not.toContain("Admin");
+    expect(account).toContain('class="account-admin" href="/a/tango-mar/admin">Admin</a>');
+    expect(account).toContain("Marc");
+    expect(account).toContain("Log out");
+    expect(account.indexOf(">Admin<")).toBeLessThan(account.indexOf("Marc"));
+    expect(account.indexOf("Marc")).toBeLessThan(account.indexOf("Log out"));
+    expect(header).not.toContain("\u2014");
+  });
+
+  it("marks Admin active on admin pages and keeps it out of the resident nav", async () => {
+    const { nav, account } = await headerParts(membership("board", 1), "admin");
+    expect(nav).not.toContain("Admin");
+    expect(account).toContain('class="account-admin active" href="/a/tango-mar/admin">Admin</a>');
+    expect(account.indexOf(">Admin<")).toBeLessThan(account.indexOf("Marc"));
+  });
+
+  it("leaves Admin out for residents without admin access", async () => {
+    const homeowner = await headerParts(membership("homeowner", 0));
+    expect(homeowner.nav).not.toContain("Admin");
+    expect(homeowner.account).not.toContain("Admin");
+    expect(homeowner.account).toContain("Marc");
+    expect(homeowner.account).toContain("Log out");
+
+    const board = await headerParts(membership("board", 0));
+    expect(board.nav).not.toContain("Admin");
+    expect(board.account).not.toContain("Admin");
+
+    const inactive = await headerParts(membership("board", 1, "inactive"));
+    expect(inactive.nav).not.toContain("Admin");
+    expect(inactive.account).not.toContain("Admin");
+    expect(inactive.nav).toContain("Resident login");
   });
 });
 

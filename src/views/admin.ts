@@ -368,6 +368,7 @@ export function documentsAdminPage(association: Association, documents: Document
           ])}
           ${areaField("Notes", "notes")}
           <label>File<input type="file" name="file" required></label>
+          ${emailOwnersField()}
           <button type="submit">Publish</button>
         </form>
       </article>
@@ -410,6 +411,7 @@ export function documentDetailPage(
       <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/documents/${esc(document.id)}/versions" enctype="multipart/form-data">
         ${areaField("Notes", "notes")}
         <label>File<input type="file" name="file" required></label>
+        ${emailOwnersField()}
         <button type="submit">Upload and make current</button>
       </form>
     </section>
@@ -538,6 +540,7 @@ function announcementForm(base: string, association: Association, row: Announcem
       ${areaField("Body", "body", row?.body ?? "", true)}
       <label><input type="checkbox" name="pinned" value="1" ${row?.pinned ? "checked" : ""}> Pin</label>
       ${textField("Expires", "expires_on", { type: "date", value: row?.expires_at ? zonedIsoDate(new Date(row.expires_at), association.timezone) : "" })}
+      ${emailOwnersField()}
       <button type="submit">${row ? "Save announcement" : "Post"}</button>
     </form>`;
 }
@@ -555,6 +558,7 @@ function eventForm(base: string, editing: Extract<NewsEdit, { kind: "event" }> |
       ${textField("Location", "location", { value: row?.location ?? "" })}
       ${textField("Starts", "starts_at", { type: "datetime-local", value: editing?.startsLocal ?? "", required: true })}
       ${textField("Ends", "ends_at", { type: "datetime-local", value: editing?.endsLocal ?? "" })}
+      ${emailOwnersField()}
       <button type="submit">${row ? "Save event" : "Add event"}</button>
     </form>`;
 }
@@ -711,6 +715,10 @@ function duesSection(options: {
       <button type="submit">Add improved and unimproved dues</button>
     </form>
   </section>`;
+}
+
+function emailOwnersField(): string {
+  return `<label><input type="checkbox" name="email_owners" value="1"> Email owners</label>`;
 }
 
 function newsItemActions(

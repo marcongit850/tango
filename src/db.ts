@@ -1006,6 +1006,30 @@ export async function deleteJoinRequest(db: D1Database, associationId: string, r
   return true;
 }
 
+export async function activeLoginEmails(
+  db: D1Database,
+  associationId: string,
+  audience: "owners" | "board",
+): Promise<{ id: string; email: string }[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT u.id, u.email
+       FROM memberships m
+       JOIN users u ON u.id = m.user_id
+       WHERE m.association_id = ?
+         AND m.status = 'active'
+         AND TRIM(u.email) != ''
+         AND (
+           (? = 'owners' AND m.role_id IN ('homeowner', 'board', 'officer'))
+           OR (? = 'board' AND m.role_id IN ('board', 'officer'))
+         )
+       ORDER BY u.email COLLATE NOCASE`,
+    )
+    .bind(associationId, audience, audience)
+    .all<{ id: string; email: string }>();
+  return results;
+}
+
 export async function staffUserIds(db: D1Database, associationId: string): Promise<string[]> {
   const flagged = await hasColumn(db, "memberships", "is_admin");
   const { results } = await db

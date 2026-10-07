@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import {
+  activeLoginEmails,
   allAnnouncements,
   assignAssessmentInvoices,
   countActiveAdmins,
@@ -35,8 +36,18 @@ import { changeLoginEmail } from "../lib/login-email";
 import { isDocumentCategory } from "../lib/categories";
 import { annualDues, defaultDuesYear, isLotType } from "../lib/dues";
 import { parseOwnersCsv } from "../lib/csv";
-import { formatAddress, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../lib/dates";
-import { resendApiKey, sendResendEmail } from "../lib/email";
+import { formatAddress, formatDateTime, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../lib/dates";
+import {
+  deliverOwnerEmails,
+  loginAudienceForVisibility,
+  ownerEmailFlash,
+  ownerNoticeEmail,
+  resendApiKey,
+  sendResendEmail,
+  uniqueLoginEmails,
+  type LoginAudience,
+  type OwnerNoticeKind,
+} from "../lib/email";
 import { approvalSummary, approveJoinRequest, welcomeEmail } from "../lib/join-approve";
 import { applyDocumentResponseHeaders, contentTypeForUpload, MAX_CSV_BYTES, MAX_DOCUMENT_BYTES, safeFilename } from "../lib/files";
 import { importOwners } from "../lib/import-owners";
@@ -44,7 +55,7 @@ import { csvText, formatDollarsPlain, formatMoney, parseMoneyToCents } from "../
 import { ensureSeedFiles } from "../lib/seed-files";
 import { isCheckConstraint, isMissingColumn, isMissingTable, NotFoundError } from "../lib/errors";
 import { logError, logInfo } from "../lib/log";
-import type { AppBindings, DocumentCategory, MembershipRole, MembershipStatus } from "../types";
+import type { AppBindings, Association, DocumentCategory, MembershipRole, MembershipStatus } from "../types";
 import {
   adminHome,
   adminMessagesPage,
@@ -780,15 +791,24 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     }
     const stored = await storeVersion(c, { associationId: association.id, documentId: crypto.randomUUID(), versionNumber: 1, file, notes, userId: user.id, title, category, visibility, create: true });
     if (stored.error) return redirectTo(c, `/a/${association.slug}/admin/documents`, stored.error, "warn");
+    const mailed = await maybeEmailOwners(c, {
+      requested: fields.email_owners === "1",
+      association,
+      audience: loginAudienceForVisibility(visibility),
+      kind: "document",
+      title,
+      summary: notes,
+      saved: "Document published.",
+    });
     await writeAudit(c.env.DB, {
       associationId: association.id,
       actorUserId: user.id,
       action: "document_publish",
       entityType: "document",
       entityId: stored.documentId,
-      detail: title,
+      detail: withEmailNote(title, mailed.detailNote),
     });
-    return redirectTo(c, `/a/${association.slug}/admin/documents/${stored.documentId}`, "Document published.");
+    return redirectTo(c, `/a/${association.slug}/admin/documents/${stored.documentId}`, mailed.message, mailed.tone);
   });
 
   app.get("/a/:slug/admin/documents/:documentId", async (c) => {
@@ -823,15 +843,25 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       create: false,
     });
     if (stored.error) return redirectTo(c, documentPath(association.slug, document.id), stored.error, "warn");
+    const versionLabel = `Version ${Number(max?.n ?? 0) + 1}`;
+    const mailed = await maybeEmailOwners(c, {
+      requested: fields.email_owners === "1",
+      association,
+      audience: loginAudienceForVisibility(document.visibility),
+      kind: "document",
+      title: document.title,
+      summary: notes,
+      saved: "New version is now current.",
+    });
     await writeAudit(c.env.DB, {
       associationId: association.id,
       actorUserId: user.id,
       action: "document_publish",
       entityType: "document",
       entityId: document.id,
-      detail: `Version ${Number(max?.n ?? 0) + 1}`,
+      detail: withEmailNote(versionLabel, mailed.detailNote),
     });
-    return redirectTo(c, documentPath(association.slug, document.id), "New version is now current.");
+    return redirectTo(c, documentPath(association.slug, document.id), mailed.message, mailed.tone);
   });
 
   app.post("/a/:slug/admin/documents/:documentId/current", async (c) => {
@@ -967,15 +997,25 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       )
       .bind(id, association.id, kind, title, body, pinned, now, expiresAt, user.id, now)
       .run();
+    const mailed = await maybeEmailOwners(c, {
+      requested: fields.email_owners === "1",
+      association,
+      audience: "owners",
+      kind: "announcement",
+      title,
+      summary: body,
+      itemId: id,
+      saved: "Announcement posted.",
+    });
     await writeAudit(c.env.DB, {
       associationId: association.id,
       actorUserId: user.id,
       action: "announcement_create",
       entityType: "announcement",
       entityId: id,
-      detail: title,
+      detail: withEmailNote(title, mailed.detailNote),
     });
-    return redirectTo(c, `/a/${association.slug}/admin/news`, "Announcement posted.");
+    return redirectTo(c, `/a/${association.slug}/admin/news`, mailed.message, mailed.tone);
   });
 
   app.post("/a/:slug/admin/announcements/:announcementId/hide", async (c) => {
@@ -1012,15 +1052,25 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       .bind(parsed.kind, parsed.title, parsed.body, parsed.pinned, parsed.expiresAt, association.id, id)
       .run();
     if ((result.meta.changes ?? 0) === 0) throw new NotFoundError();
+    const mailed = await maybeEmailOwners(c, {
+      requested: fields.email_owners === "1",
+      association,
+      audience: "owners",
+      kind: "announcement",
+      title: parsed.title,
+      summary: parsed.body,
+      itemId: id,
+      saved: "Announcement saved.",
+    });
     await writeAudit(c.env.DB, {
       associationId: association.id,
       actorUserId: user.id,
       action: "announcement_update",
       entityType: "announcement",
       entityId: id,
-      detail: parsed.title,
+      detail: withEmailNote(parsed.title, mailed.detailNote),
     });
-    return redirectTo(c, `/a/${association.slug}/admin/news`, "Announcement saved.");
+    return redirectTo(c, `/a/${association.slug}/admin/news`, mailed.message, mailed.tone);
   });
 
   app.post("/a/:slug/admin/announcements/:announcementId/delete", async (c) => {
@@ -1061,15 +1111,24 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       )
       .bind(id, association.id, title, description, location, startsAt, endsAt, kind, user.id, new Date().toISOString())
       .run();
+    const mailed = await maybeEmailOwners(c, {
+      requested: fields.email_owners === "1",
+      association,
+      audience: "owners",
+      kind: "event",
+      title,
+      summary: eventSummary(startsAt, location, description, association.timezone),
+      saved: "Event added.",
+    });
     await writeAudit(c.env.DB, {
       associationId: association.id,
       actorUserId: user.id,
       action: "event_create",
       entityType: "event",
       entityId: id,
-      detail: title,
+      detail: withEmailNote(title, mailed.detailNote),
     });
-    return redirectTo(c, `/a/${association.slug}/admin/news`, "Event added.");
+    return redirectTo(c, `/a/${association.slug}/admin/news`, mailed.message, mailed.tone);
   });
 
   app.post("/a/:slug/admin/events/:eventId", async (c) => {
@@ -1086,15 +1145,24 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       .bind(parsed.kind, parsed.title, parsed.description, parsed.location, parsed.startsAt, parsed.endsAt, association.id, id)
       .run();
     if ((result.meta.changes ?? 0) === 0) throw new NotFoundError();
+    const mailed = await maybeEmailOwners(c, {
+      requested: fields.email_owners === "1",
+      association,
+      audience: "owners",
+      kind: "event",
+      title: parsed.title,
+      summary: eventSummary(parsed.startsAt, parsed.location, parsed.description, association.timezone),
+      saved: "Event saved.",
+    });
     await writeAudit(c.env.DB, {
       associationId: association.id,
       actorUserId: user.id,
       action: "event_update",
       entityType: "event",
       entityId: id,
-      detail: parsed.title,
+      detail: withEmailNote(parsed.title, mailed.detailNote),
     });
-    return redirectTo(c, `/a/${association.slug}/admin/news`, "Event saved.");
+    return redirectTo(c, `/a/${association.slug}/admin/news`, mailed.message, mailed.tone);
   });
 
   app.post("/a/:slug/admin/events/:eventId/delete", async (c) => {
@@ -1490,6 +1558,67 @@ function readEvent(
     return { ok: false, message: "Check the event title and times." };
   }
   return { ok: true, kind, title, description, location, startsAt, endsAt };
+}
+
+function withEmailNote(detail: string, note: string): string {
+  return note ? `${detail}. ${note}` : detail;
+}
+
+function eventSummary(startsAt: string, location: string, description: string, timeZone: string): string {
+  return [formatDateTime(startsAt, timeZone), location, description].filter((part) => part.trim()).join(". ");
+}
+
+async function maybeEmailOwners(
+  c: AppContext,
+  input: {
+    requested: boolean;
+    association: Association;
+    audience: LoginAudience;
+    kind: OwnerNoticeKind;
+    title: string;
+    summary: string;
+    itemId?: string;
+    saved: string;
+  },
+): Promise<{ message: string; tone: "ok" | "warn"; detailNote: string }> {
+  if (!input.requested) return { message: input.saved, tone: "ok", detailNote: "" };
+  try {
+    const recipients = uniqueLoginEmails(await activeLoginEmails(c.env.DB, input.association.id, input.audience));
+    const letter = ownerNoticeEmail({
+      associationName: input.association.name,
+      slug: input.association.slug,
+      kind: input.kind,
+      title: input.title,
+      summary: input.summary,
+      itemId: input.itemId,
+    });
+    const delivery = await deliverOwnerEmails({
+      apiKey: resendApiKey(c.env),
+      from: c.env.EMAIL_FROM,
+      recipients,
+      subject: letter.subject,
+      text: letter.text,
+    });
+    const flash = ownerEmailFlash({
+      saved: input.saved,
+      audience: input.audience,
+      recipients: recipients.length,
+      delivery,
+    });
+    logInfo("owner_notice_email", {
+      associationId: input.association.id,
+      kind: input.kind,
+      audience: input.audience,
+      recipients: recipients.length,
+      sent: delivery.sent,
+      failed: delivery.failed,
+      skipped: delivery.skipped,
+    });
+    return { message: flash.message, tone: flash.tone, detailNote: flash.note };
+  } catch (error) {
+    logError("owner_notice_email", { message: error instanceof Error ? error.message : "unknown" });
+    return { message: `${input.saved} Email was not sent.`, tone: "warn", detailNote: "Email was not sent." };
+  }
 }
 
 function ownerPath(slug: string, userId: string): string {

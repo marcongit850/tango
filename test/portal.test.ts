@@ -7,6 +7,7 @@ import { landingAccount, loggedOutNav, render } from "../src/views/layout";
 import { adminHome, documentDetailPage, documentsAdminPage, importPage, ledgerPage, newsAdminPage, ownerDetailPage, paymentInvoiceVisible } from "../src/views/admin";
 import { newsEdit } from "../src/routes/admin";
 import { listOwners, type AnnouncementRow, type DocumentRow, type EventRow, type NoticeRow, type PropertyRow, type VersionRow } from "../src/db";
+import { DOCUMENT_CATEGORIES, groupDocuments, normalizeFolder } from "../src/lib/categories";
 import { documentContentDisposition, isBrowserViewable } from "../src/lib/files";
 import { dashboardPage, documentsPage, faqPage, noticesPage } from "../src/views/resident";
 import { checkEmailPage, homePage, invalidLinkPage, joinReceivedPage, joinRequestPage, loginPage } from "../src/views/public";
@@ -1070,7 +1071,7 @@ describe("document viewing", () => {
       created_at: "2026-10-01T15:00:00.000Z",
     };
     const resident = documentsPage(association, [document]);
-    expect(resident).toContain("<td>Other</td>");
+    expect(resident).toContain('<span class="doc-folder-name">Other</span>');
     expect(resident).not.toContain("Insurance and other community documents");
 
     const adminList = documentsAdminPage(association, [document]);
@@ -1101,7 +1102,7 @@ describe("document viewing", () => {
       created_at: "2026-10-01T15:00:00.000Z",
     };
     const resident = documentsPage(association, [document]);
-    expect(resident).toContain("<td>Meeting Minutes / Agendas</td>");
+    expect(resident).toContain('<span class="doc-folder-name">Meeting Minutes / Agendas</span>');
     expect(resident).not.toContain(">Meeting minutes<");
 
     const adminList = documentsAdminPage(association, [document]);
@@ -1142,6 +1143,206 @@ describe("document viewing", () => {
       '<a href="/a/tango-mar/admin/documents/doc-pdf/versions/ver-pdf/file?download=1">Download</a>',
     );
     expect(html).toContain("covenants.pdf");
+  });
+
+  it("lists Budgets and Insurance beside the existing categories", () => {
+    expect(DOCUMENT_CATEGORIES.map((item) => item.label)).toEqual(
+      expect.arrayContaining(["Budgets", "Insurance", "Other", "Bylaws", "Meeting Minutes / Agendas"]),
+    );
+    const adminList = documentsAdminPage(association, []);
+    expect(adminList).toContain('<option value="budgets" >Budgets</option>');
+    expect(adminList).toContain('<option value="insurance_docs" >Insurance</option>');
+    expect(adminList).toContain('<option value="insurance" >Other</option>');
+    expect(adminList).toContain('name="folder"');
+    expect(adminList).toContain("Leave blank to put the file directly in the category.");
+    expect(adminList).not.toContain("\u2014");
+  });
+
+  it("keeps category folders collapsed and opens a flat category straight to its files", () => {
+    const html = documentsPage(association, [
+      sampleDocument({ id: "doc-bylaws", category: "bylaws", title: "Recorded bylaws", folder: "" }),
+    ]);
+    expect(html).toContain('<details class="doc-folder" data-category="bylaws">');
+    expect(html).toContain('class="doc-chevron" aria-hidden="true"');
+    expect(html).not.toMatch(/<details class="doc-folder[^"]*" open/);
+    const bylaws = sliceDetails(html, 'data-category="bylaws"');
+    expect(bylaws).toContain("Recorded bylaws");
+    expect(bylaws).toContain("1 file");
+    expect(bylaws).not.toContain("doc-subfolder");
+    expect(bylaws).toContain('<a href="/a/tango-mar/documents/doc-bylaws/file?download=1">Download</a>');
+    const insurance = sliceDetails(html, 'data-category="insurance_docs"');
+    expect(insurance).toContain('<span class="doc-folder-name">Insurance</span>');
+    expect(insurance).toContain("No documents in this folder.");
+    expect(insurance).not.toContain("doc-count");
+    expect(sliceDetails(html, 'data-category="budgets"')).toContain('<span class="doc-folder-name">Budgets</span>');
+  });
+
+  it("groups Meeting Minutes by year and still lists a file with no subfolder", () => {
+    const documents: DocumentRow[] = [
+      sampleDocument({ id: "doc-loose", category: "minutes", title: "Loose agenda", folder: "" }),
+      sampleDocument({ id: "doc-2024", category: "minutes", title: "March minutes", folder: "2024" }),
+      sampleDocument({ id: "doc-2025", category: "minutes", title: "April minutes", folder: "2025" }),
+      sampleDocument({ id: "doc-nested", category: "minutes", title: "Special session", folder: "2024/January" }),
+    ];
+    const minutes = groupDocuments(documents).find((group) => group.id === "minutes");
+    expect(minutes?.files.map((file) => file.title)).toEqual(["Loose agenda"]);
+    expect(minutes?.children.map((folder) => folder.name)).toEqual(["2025", "2024"]);
+    expect(minutes?.children[1]?.files.map((file) => file.title)).toEqual(["March minutes"]);
+    expect(minutes?.children[1]?.children.map((folder) => folder.name)).toEqual(["January"]);
+    expect(minutes?.children[1]?.children[0]?.files.map((file) => file.title)).toEqual(["Special session"]);
+    expect(minutes?.count).toBe(4);
+    const bylaws = groupDocuments([
+      sampleDocument({ id: "doc-bylaws", category: "bylaws", title: "Recorded bylaws", folder: "" }),
+    ]).find((group) => group.id === "bylaws");
+    expect(bylaws?.children).toEqual([]);
+    expect(bylaws?.files.map((file) => file.title)).toEqual(["Recorded bylaws"]);
+
+    const html = documentsPage(association, documents);
+    expect(html).not.toMatch(/<details class="doc-folder[^"]*" open/);
+    expect(html).not.toContain("\u2014");
+    const block = sliceDetails(html, 'data-category="minutes"');
+    expect(block).toContain("4 files");
+    expect(block.indexOf("Loose agenda")).toBeLessThan(block.indexOf('data-path="2025"'));
+    const year2025 = sliceDetails(block, 'data-path="2025"');
+    const year2024 = sliceDetails(block, 'data-path="2024"');
+    expect(year2025).toContain("April minutes");
+    expect(year2025).toContain("1 file");
+    expect(year2025).not.toContain("Loose agenda");
+    expect(year2025).not.toContain("March minutes");
+    expect(year2024).toContain("March minutes");
+    expect(year2024).toContain("2 files");
+    const january = sliceDetails(year2024, 'data-path="2024/January"');
+    expect(january).toContain("Special session");
+    expect(january).not.toContain("March minutes");
+    expect(january).not.toContain("Loose agenda");
+  });
+
+  it("lets an admin assign Budgets or Insurance and a year", () => {
+    const detail = documentDetailPage(
+      association,
+      {
+        id: "doc-minutes",
+        title: "March minutes",
+        category: "minutes",
+        visibility: "residents",
+        current_version_id: "ver-minutes",
+        folder: "2024",
+      },
+      [],
+    );
+    const form = formByAction(detail, "/a/tango-mar/admin/documents/doc-minutes/visibility");
+    expect(form).toContain('<option value="budgets" >Budgets</option>');
+    expect(form).toContain('<option value="insurance_docs" >Insurance</option>');
+    expect(form).toContain('<option value="minutes" selected>Meeting Minutes / Agendas</option>');
+    expect(form).toContain('name="folder"');
+    expect(form).toContain('value="2024"');
+    expect(form).toContain("Optional. Leave blank");
+    expect(form).not.toContain("email_owners");
+    expect(form).not.toContain("\u2014");
+
+    const list = documentsAdminPage(association, [
+      sampleDocument({ id: "doc-policy", category: "insurance_docs", title: "HOA policy", folder: "2025" }),
+      sampleDocument({ id: "doc-loose", category: "minutes", title: "Loose agenda", folder: "" }),
+    ]);
+    expect(list).toContain("<td>Insurance</td>");
+    expect(list).toContain("<td>2025</td>");
+    expect(list).toContain("<td>Meeting Minutes / Agendas</td>");
+    expect(list).toContain("Loose agenda");
+  });
+
+  it("accepts a blank subfolder and a year path", () => {
+    expect(normalizeFolder("")).toEqual({ ok: true, folder: "" });
+    expect(normalizeFolder("   ")).toEqual({ ok: true, folder: "" });
+    expect(normalizeFolder("  2024 / January  ")).toEqual({ ok: true, folder: "2024/January" });
+    expect(normalizeFolder("2025//Q1")).toEqual({ ok: true, folder: "2025/Q1" });
+    expect(normalizeFolder("../secret").ok).toBe(false);
+    expect(normalizeFolder("a/b/c/d/e").ok).toBe(false);
+  });
+});
+
+function sampleDocument(partial: Partial<DocumentRow> & Pick<DocumentRow, "id" | "category" | "title">): DocumentRow {
+  return {
+    visibility: "residents",
+    current_version_id: partial.id,
+    version_number: 1,
+    filename: "file.pdf",
+    content_type: "application/pdf",
+    byte_size: 10,
+    created_at: "2026-10-01T15:00:00.000Z",
+    folder: "",
+    ...partial,
+  };
+}
+
+function sliceDetails(html: string, marker: string): string {
+  const start = html.indexOf(marker);
+  expect(start).toBeGreaterThanOrEqual(0);
+  const open = html.lastIndexOf("<details", start);
+  let depth = 0;
+  for (let i = open; i < html.length; i += 1) {
+    if (html.startsWith("<details", i)) {
+      depth += 1;
+      i += "<details".length - 1;
+    } else if (html.startsWith("</details>", i)) {
+      depth -= 1;
+      if (depth === 0) return html.slice(open, i + "</details>".length);
+      i += "</details>".length - 1;
+    }
+  }
+  throw new Error(`unbalanced details for ${marker}`);
+}
+
+describe("document folder migration", () => {
+  const files = [
+    "migrations/0001_schema.sql",
+    "migrations/0002_seed_tango_mar.sql",
+    "migrations/0003_join_requests.sql",
+    "migrations/0004_join_request_approved.sql",
+    "migrations/0005_admin_improvements.sql",
+    "migrations/0006_notice_attachments.sql",
+    "migrations/0007_message_reviewed.sql",
+    "migrations/0008_document_folders.sql",
+  ];
+
+  it("keeps existing documents and stores Insurance with an optional year", () => {
+    const sqlite = new DatabaseSync(":memory:");
+    sqlite.exec("PRAGMA foreign_keys = ON");
+    for (const file of files) sqlite.exec(readFileSync(file, "utf8"));
+
+    const budget = sqlite.prepare("SELECT category, folder, title FROM documents WHERE id = 'doc_budget'").get() as {
+      category: string;
+      folder: string;
+      title: string;
+    };
+    expect(budget).toEqual({ category: "budgets", folder: "", title: "2026 budget (sample)" });
+    const versions = sqlite.prepare("SELECT COUNT(*) AS n FROM document_versions").get() as { n: number };
+    expect(Number(versions.n)).toBe(2);
+
+    sqlite
+      .prepare(
+        "INSERT INTO documents (id, association_id, category, title, visibility, folder) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run("doc_policy", "assoc_tango_mar", "insurance_docs", "HOA policy", "residents", "2025");
+    sqlite
+      .prepare(
+        "INSERT INTO documents (id, association_id, category, title, visibility, folder) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run("doc_loose", "assoc_tango_mar", "minutes", "Loose agenda", "residents", "");
+
+    const policy = sqlite.prepare("SELECT category, folder FROM documents WHERE id = 'doc_policy'").get() as {
+      category: string;
+      folder: string;
+    };
+    expect(policy).toEqual({ category: "insurance_docs", folder: "2025" });
+    const loose = sqlite.prepare("SELECT folder FROM documents WHERE id = 'doc_loose'").get() as { folder: string };
+    expect(loose.folder).toBe("");
+    expect(() =>
+      sqlite
+        .prepare("INSERT INTO documents (id, association_id, category, title) VALUES ('doc_bad', 'assoc_tango_mar', 'nope', 'Bad')")
+        .run(),
+    ).toThrow(/check constraint/i);
+    expect(() => sqlite.exec(readFileSync("migrations/0008_document_folders.sql", "utf8"))).toThrow(/documents_folder_migration/);
+    sqlite.close();
   });
 });
 

@@ -88,6 +88,42 @@ a.money-link { color: inherit; text-decoration: underline; text-underline-offset
 a.money-link:hover { text-decoration-thickness: 2px; }
 th, td { text-align: left; padding: 0.55rem 0.4rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { font-size: 0.82rem; color: var(--muted); font-weight: 600; }
+.doc-folders { display: grid; gap: 0.5rem; }
+.doc-folder { border: 1px solid var(--line); background: #fff; }
+.doc-folder > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  font-weight: 650;
+}
+.doc-folder > summary::-webkit-details-marker { display: none; }
+.doc-folder > summary::marker { content: ""; }
+.doc-folder > summary:focus-visible { outline: 2px solid var(--gulf); outline-offset: -2px; }
+.doc-chevron {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-right: 2px solid var(--gulf-dark);
+  border-bottom: 2px solid var(--gulf-dark);
+  transform: rotate(-45deg);
+  margin-left: 0.1rem;
+  flex: 0 0 auto;
+}
+.doc-folder[open] > summary > .doc-chevron { transform: rotate(45deg); }
+.doc-folder-name { min-width: 0; }
+.doc-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82rem;
+}
+.doc-folder-body { padding: 0 0.75rem 0.35rem 1.85rem; }
+.doc-folder-body > table { margin: 0 0 0.35rem; }
+.doc-subfolder { margin: 0 0 0.5rem; background: var(--paper); }
+.doc-folder-body > .muted { margin-top: 0; }
 label { display: grid; gap: 0.3rem; font-size: 0.92rem; }
 input, select, textarea {
   font: inherit; color: inherit; background: white; border: 1px solid var(--line); border-radius: 0; padding: 0.5rem 0.65rem; width: 100%;

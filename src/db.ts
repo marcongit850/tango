@@ -23,7 +23,7 @@ const EDIT_ACCESS_MEMBER_SQL =
 
 async function hasColumn(
   db: D1Database,
-  table: "memberships" | "properties" | "assessments" | "messages",
+  table: "memberships" | "properties" | "assessments" | "messages" | "documents",
   column: string,
 ): Promise<boolean> {
   const { results } = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
@@ -871,6 +871,8 @@ export type DocumentRow = {
   content_type: string | null;
   byte_size: number | null;
   created_at: string | null;
+  /** Optional subfolder path. Blank means the file sits directly in its category. */
+  folder?: string | null;
 };
 
 export async function listDocuments(
@@ -879,18 +881,22 @@ export async function listDocuments(
   includeBoardOnly: boolean,
 ): Promise<DocumentRow[]> {
   const visibilitySql = includeBoardOnly ? "" : "AND d.visibility = 'residents'";
+  const foldered = await hasColumn(db, "documents", "folder");
+  const folderSql = foldered ? "d.folder" : "'' AS folder";
+  const orderSql = foldered ? "d.category, d.folder, d.title" : "d.category, d.title";
   const { results } = await db
     .prepare(
       `SELECT d.id, d.category, d.title, d.visibility, d.current_version_id,
+              ${folderSql},
               v.version_number, v.filename, v.content_type, v.byte_size, v.created_at
        FROM documents d
        LEFT JOIN document_versions v ON v.id = d.current_version_id AND v.association_id = d.association_id
        WHERE d.association_id = ? ${visibilitySql}
-       ORDER BY d.category, d.title`,
+       ORDER BY ${orderSql}`,
     )
     .bind(associationId)
     .all<DocumentRow>();
-  return results;
+  return results.map((row) => ({ ...row, folder: row.folder ?? "" }));
 }
 
 export type VersionRow = {

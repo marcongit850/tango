@@ -18,7 +18,7 @@ Ask the portal is a button at the bottom right of signed-in pages. Opening it sh
 
 - Magic-link email login. No passwords.
 - Homeowner dashboard: account balance, lot dues, news, upcoming events, invoices, recorded payments, late fees, and personal notices.
-- Documents in eight categories, with versions. Residents see the version the board marks current. Budgets can be board-only. Publishing a file can email a short portal link when Email owners is checked. Board-only files go only to board logins, and the email does not include the file.
+- Documents in nine categories, with versions. On the Documents page each category is a collapsed folder. A file can sit in the category, or in an optional subfolder such as a year under Meeting Minutes. Categories with no subfolders open straight to their files. Residents see the version the board marks current. Budgets can be board-only. Publishing a file can email a short portal link when Email owners is checked. Board-only files go only to board logins, and the email does not include the file.
 - News, emergency notices, meetings, calendar, FAQs, and board contacts. Posting or saving an announcement or event can email active logins the same way. FAQ and contacts do not.
 - Private resident-to-board messages, plus portal notifications. The resident who started a thread can delete that thread. Board admins can delete a thread or one reply. Deleting a thread removes its portal notifications. A portal notice can include an optional file the owner views or downloads in the portal. Posting a notice to one owner can also email that login when Email owner is checked. The note has the title, a short message, a link to Notices, and the file attached to the email. The box starts unchecked. If Resend is not configured, the notice is still saved and the flash says the email was not sent.
 - Board tools: owners and lots, delinquent accounts, homeowner and board roles with an admin flag, login email edits, deleting a person, CSV import, invoices, annual dues, recorded payments (delete a payment on an invoice), deleting a lot that has no invoices or payments, news editing, documents (visibility and delete), an accountant CSV, join requests, incoming messages (delete a thread or a reply), and an activity log.
@@ -231,6 +231,31 @@ Run that file once, after `0006`. If the console says a column already exists, t
 On Admin, Messages, **Mark reviewed** is on the thread and on the inbox row. Until this file runs, the waiting count still works and Mark reviewed asks you to apply it first.
 
 Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0006` is already on the remote database.
+
+## Document folders (paste this before merge)
+
+`migrations/0008_document_folders.sql` adds an optional subfolder on each document and allows the Insurance category. Paste it in the Cloudflare dashboard before you merge the pull request. Marc does not need a terminal.
+
+What it does:
+
+- Adds `folder` on `documents`. Existing rows start blank, so those files stay directly in their category.
+- Allows the Insurance category (`insurance_docs`). Other stays the category it already was.
+- The Budgets label uses the existing budgets category, so a file already filed there stays in Budgets.
+- Rebuilds `documents` and `document_versions` so the category check can include Insurance. File bytes in R2 are not moved.
+
+Dashboard steps:
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database**.
+2. Select the database named **tango**.
+3. Open **Console**.
+4. Paste the full contents of `migrations/0008_document_folders.sql`.
+5. Select **Execute**.
+
+Run that file once, after `0007`. If the console says `documents_folder_migration` already exists, this file was already applied. Do not paste it again.
+
+Publishing Insurance, or saving a year or subfolder, before this runs asks you to apply the file first. A file in an existing category with the subfolder left blank still publishes.
+
+Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0007` is already on the remote database.
 
 ## Delete a person or a lot
 

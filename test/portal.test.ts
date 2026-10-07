@@ -1481,6 +1481,63 @@ describe("document viewing", () => {
     expect(january).not.toContain("Loose agenda");
   });
 
+  it("puts board-only documents in a section below the resident folders", () => {
+    const html = documentsPage(association, [
+      sampleDocument({ id: "doc-bylaws", category: "bylaws", title: "Recorded bylaws", folder: "" }),
+      sampleDocument({ id: "doc-agenda", category: "minutes", title: "October agenda", folder: "2025", visibility: "residents" }),
+      sampleDocument({ id: "doc-budget", category: "budgets", title: "2026 budget", folder: "2026", visibility: "board" }),
+      sampleDocument({ id: "doc-closed", category: "minutes", title: "Closed session", folder: "2024/January", visibility: "board" }),
+      sampleDocument({ id: "doc-note", category: "bylaws", title: "Board bylaws note", folder: "", visibility: "board" }),
+    ]);
+    const split = html.indexOf("<h2>Board only</h2>");
+    expect(split).toBeGreaterThan(html.indexOf("<h1>Documents</h1>"));
+    const resident = html.slice(0, split);
+    const board = html.slice(split);
+    for (const item of DOCUMENT_CATEGORIES) expect(resident).toContain(item.label);
+    expect(resident).toContain("Recorded bylaws");
+    expect(resident).toContain("October agenda");
+    expect(resident).not.toContain("2026 budget");
+    expect(resident).not.toContain("Closed session");
+    expect(resident).not.toContain("Board bylaws note");
+    expect(resident).not.toContain("Private to board members.");
+    expect(sliceDetails(resident, 'data-category="budgets"')).toContain("No documents in this folder.");
+    expect(sliceDetails(resident, 'data-category="minutes"')).not.toContain("Closed session");
+
+    expect(board).toContain("<p class=\"muted\">Private to board members.</p>");
+    expect(board).not.toContain("Recorded bylaws");
+    expect(board).not.toContain("October agenda");
+    expect(board).not.toContain("No documents in this folder.");
+    expect(board).not.toContain('type="file"');
+    expect(board).not.toContain("Publish");
+    expect(board).not.toContain("\u2014");
+    expect(board).not.toContain("\u2013");
+    const boardBudgets = sliceDetails(board, 'data-category="budgets"');
+    expect(boardBudgets).toContain("2026 budget");
+    expect(boardBudgets).toContain('data-path="2026"');
+    expect(boardBudgets).toContain("1 file");
+    const boardMinutes = sliceDetails(board, 'data-category="minutes"');
+    expect(boardMinutes).toContain('<span class="doc-folder-name">Meeting Minutes / Agendas</span>');
+    const january = sliceDetails(boardMinutes, 'data-path="2024/January"');
+    expect(january).toContain("Closed session");
+    expect(january).not.toContain("October agenda");
+    const boardBylaws = sliceDetails(board, 'data-category="bylaws"');
+    expect(boardBylaws).toContain("Board bylaws note");
+    expect(boardBylaws).not.toContain("doc-subfolder");
+    expect(board).not.toContain('data-category="covenants"');
+    expect(board).not.toContain('data-category="insurance"');
+  });
+
+  it("omits the board section when there are no board-only documents", () => {
+    const html = documentsPage(association, [
+      sampleDocument({ id: "doc-bylaws", category: "bylaws", title: "Recorded bylaws", folder: "" }),
+    ]);
+    expect(html).toContain("Recorded bylaws");
+    expect(html).not.toContain("Board only");
+    expect(html).not.toContain("Private to board members.");
+    expect(html).not.toContain("\u2014");
+    expect(html).not.toContain("\u2013");
+  });
+
   it("lets an admin assign Budgets or Insurance and a year", () => {
     const detail = documentDetailPage(
       association,

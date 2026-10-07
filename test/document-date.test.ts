@@ -359,3 +359,70 @@ describe("saving a document date", () => {
     }
   });
 });
+
+describe("signed-in documents page", () => {
+  it("shows board-only files below resident folders and hides them from homeowners", async () => {
+    const { sqlite, db } = openPortal(THROUGH_DATE);
+    const app = createApp();
+    const env = portalEnv(db);
+    const jordan = await signIn(sqlite, "user_jordan");
+    const sam = await signIn(sqlite, "user_sam");
+    sqlite.prepare("UPDATE documents SET folder = ?, document_date = ? WHERE id = ?").run("2026", "2026-02-01", "doc_budget");
+    sqlite
+      .prepare(
+        "INSERT INTO documents (id, association_id, category, title, visibility, folder, document_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        "doc_closed",
+        "assoc_tango_mar",
+        "minutes",
+        "Closed session",
+        "board",
+        "2024/January",
+        "2024-01-12",
+        "2026-10-01T15:00:00Z",
+      );
+    try {
+      const boardPage = await app.request("http://localhost/a/tango-mar/documents", { headers: { Cookie: `tango_session=${jordan}` } }, env);
+      expect(boardPage.status).toBe(200);
+      const boardHtml = await boardPage.text();
+      const split = boardHtml.indexOf("<h2>Board only</h2>");
+      expect(split).toBeGreaterThan(boardHtml.indexOf("<h1>Documents</h1>"));
+      const resident = boardHtml.slice(0, split);
+      const board = boardHtml.slice(split);
+      expect(resident).toContain("Tango Mar covenants (sample)");
+      expect(resident).toContain("Budgets");
+      expect(resident).not.toContain("2026 budget (sample)");
+      expect(resident).not.toContain("Closed session");
+      expect(resident).not.toContain("Private to board members.");
+      expect(board).toContain("<p class=\"muted\">Private to board members.</p>");
+      expect(board).toContain("2026 budget (sample)");
+      expect(board).toContain('data-path="2026"');
+      expect(board).toContain("Closed session");
+      expect(board).toContain('data-path="2024/January"');
+      expect(board).not.toContain('type="file"');
+      expect(board).not.toContain("Publish");
+      expect(board).not.toContain("\u2014");
+      expect(board).not.toContain("\u2013");
+
+      const ownerPage = await app.request("http://localhost/a/tango-mar/documents", { headers: { Cookie: `tango_session=${sam}` } }, env);
+      expect(ownerPage.status).toBe(200);
+      const ownerHtml = await ownerPage.text();
+      expect(ownerHtml).toContain("Tango Mar covenants (sample)");
+      expect(ownerHtml).not.toContain("Board only");
+      expect(ownerHtml).not.toContain("Private to board members.");
+      expect(ownerHtml).not.toContain("2026 budget (sample)");
+      expect(ownerHtml).not.toContain("Closed session");
+
+      const denied = await app.request(
+        "http://localhost/a/tango-mar/documents/doc_budget/file",
+        { headers: { Cookie: `tango_session=${sam}` } },
+        env,
+      );
+      expect(denied.status).toBe(403);
+      expect(await denied.text()).not.toContain("2026 budget");
+    } finally {
+      sqlite.close();
+    }
+  });
+});

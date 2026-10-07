@@ -419,13 +419,32 @@ function categoryDetails(association: Association, group: CategoryGroup<Document
   });
 }
 
+function documentFolders(association: Association, documents: readonly DocumentRow[], omitEmpty = false): string {
+  const groups = groupDocuments(documents);
+  const shown = omitEmpty ? groups.filter((group) => group.count > 0) : groups;
+  return shown.map((group) => categoryDetails(association, group)).join("");
+}
+
 export function documentsPage(association: Association, documents: DocumentRow[]): string {
-  const folders = groupDocuments(documents).map((group) => categoryDetails(association, group)).join("");
+  const residents = documents.filter((row) => row.visibility === "residents");
+  const boardFolders = documentFolders(
+    association,
+    documents.filter((row) => row.visibility === "board"),
+    true,
+  );
+  const boardSection = boardFolders
+    ? `<section class="panel">
+      <h2>Board only</h2>
+      <p class="muted">Private to board members.</p>
+      <div class="doc-folders">${boardFolders}</div>
+    </section>`
+    : "";
   return `<section class="panel">
     <h1>Documents</h1>
     <p class="muted">Association documents</p>
-    <div class="doc-folders">${folders}</div>
-  </section>`;
+    <div class="doc-folders">${documentFolders(association, residents)}</div>
+  </section>
+  ${boardSection}`;
 }
 
 export function newsPage(association: Association, items: AnnouncementRow[]): string {

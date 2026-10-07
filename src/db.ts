@@ -12,7 +12,7 @@ import type {
   User,
 } from "./types";
 import type { LotType } from "./lib/dues";
-import { assessmentOpenForInvoicing, lotsToInvoice } from "./lib/dues";
+import { assessmentDisplayName, assessmentOpenForInvoicing, lotsToInvoice } from "./lib/dues";
 import { isForeignKey, isMissingColumn, isMissingTable } from "./lib/errors";
 import { logError } from "./lib/log";
 import { balanceCents, invoiceStatus, isDelinquent } from "./lib/money";
@@ -1604,6 +1604,7 @@ export async function assignAssessmentInvoices(
   // that open date, and balances ignore the row until then.
   const issuedOn = assessment.opens_on && /^\d{4}-\d{2}-\d{2}$/.test(assessment.opens_on) ? assessment.opens_on : input.today;
   const now = new Date().toISOString();
+  const displayName = assessmentDisplayName(assessment.name);
   let created = 0;
   for (const lot of plan.create) {
     const id = crypto.randomUUID();
@@ -1621,7 +1622,7 @@ export async function assignAssessmentInvoices(
         lot.id,
         assessment.id,
         invoiceNumber,
-        assessment.name,
+        displayName,
         assessment.amount_cents,
         issuedOn,
         assessment.due_on,
@@ -1630,7 +1631,7 @@ export async function assignAssessmentInvoices(
       .run();
     created += 1;
   }
-  return { created, already: plan.already, name: assessment.name, issuedOn };
+  return { created, already: plan.already, name: displayName, issuedOn };
 }
 
 export type IssuedAssessmentInvoices = {

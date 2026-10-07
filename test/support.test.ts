@@ -89,18 +89,22 @@ async function signIn(sqlite: DatabaseSync, userId: string): Promise<string> {
   return token;
 }
 
-const legalFooterLinks = '<a href="/privacy">Privacy Policy</a><a href="/terms">Terms of Use</a>';
-
-describe("support footer", () => {
-  it("uses a Support link and leaves out the association name", () => {
-    const html = siteFooter("/a/tango-mar/support");
-    expect(html).toBe(
-      `<footer class="site-footer wrap"><p class="footer-links"><a href="/a/tango-mar/support">Support</a>${legalFooterLinks}</p></footer>`,
-    );
-    expect(html).not.toContain("Tango Mar");
-    expect(html).not.toContain("Property Owners Association");
-    expect(siteFooter("")).toBe(`<footer class="site-footer wrap"><p class="footer-links">${legalFooterLinks}</p></footer>`);
-    expect(siteFooter("")).not.toContain("Support");
+describe("site footer", () => {
+  it("uses the shared home footer on every page", () => {
+    const html = siteFooter();
+    expect(html).toContain('<footer class="home-footer">');
+    expect(html).toContain('href="/">Home</a>');
+    expect(html).toContain('href="/a/tango-mar/dashboard">Dashboard</a>');
+    expect(html).toContain('href="/a/tango-mar/documents">Documents</a>');
+    expect(html).toContain('href="/a/tango-mar/faq">FAQs</a>');
+    expect(html).toContain('href="/a/tango-mar/messages">Contact</a>');
+    expect(html).toContain('href="/privacy">Privacy Policy</a>');
+    expect(html).toContain('href="/terms">Terms of Use</a>');
+    expect(html).toContain("© 2026 Tango Mar Property Owners Association");
+    expect(html).toContain("Miramar Beach, Florida");
+    expect(html).not.toContain(">Support</a>");
+    expect(html).not.toContain("site-footer");
+    expect(html).not.toContain("A beach neighborhood in Miramar Beach, Walton County, Florida.");
   });
 });
 
@@ -179,24 +183,21 @@ describe("support access", () => {
 
       const login = await app.request("http://localhost/login", {}, env);
       const loggedOutLogin = await login.text();
-      expect(loggedOutLogin).toContain(`<footer class="site-footer wrap"><p class="footer-links">${legalFooterLinks}</p></footer>`);
+      expect(loggedOutLogin).toContain(siteFooter());
       expect(loggedOutLogin).not.toContain(">Support</a>");
 
       const residentLogin = await app.request("http://localhost/login", { headers: { Cookie: `tango_session=${token}` } }, env);
       const loginHtml = await residentLogin.text();
-      expect(loginHtml).toContain(
-        `<footer class="site-footer wrap"><p class="footer-links"><a href="/a/tango-mar/support">Support</a>${legalFooterLinks}</p></footer>`,
-      );
+      expect(loginHtml).toContain(siteFooter());
+      expect(loginHtml).not.toContain(">Support</a>");
 
       const page = await app.request("http://localhost/a/tango-mar/support", { headers: { Cookie: `tango_session=${token}` } }, env);
       expect(page.status).toBe(200);
       const html = await page.text();
       const footer = html.slice(html.indexOf("<footer"));
       const nav = html.slice(html.indexOf("<nav>"), html.indexOf("</nav>"));
-      expect(footer).toContain('href="/a/tango-mar/support">Support</a>');
-      expect(footer).toContain('href="/privacy">Privacy Policy</a>');
-      expect(footer).toContain('href="/terms">Terms of Use</a>');
-      expect(footer).not.toContain("Tango Mar");
+      expect(footer).toContain(siteFooter());
+      expect(footer).not.toContain(">Support</a>");
       expect(nav).not.toContain("Support");
 
       for (const path of ["/privacy", "/terms"]) {
@@ -204,8 +205,7 @@ describe("support access", () => {
         expect(legal.status).toBe(200);
         const legalHtml = await legal.text();
         const legalFooter = legalHtml.slice(legalHtml.indexOf("<footer"));
-        expect(legalFooter).toContain('href="/a/tango-mar/support">Support</a>');
-        expect(legalFooter).toContain(legalFooterLinks);
+        expect(legalFooter).toContain(siteFooter());
         expect(legalHtml).toContain(path === "/privacy" ? "<h1>Privacy Policy</h1>" : "<h1>Terms of Use</h1>");
       }
       expect(html).toContain("Sam Rivera");

@@ -447,7 +447,7 @@ describe("join requests admin page", () => {
     expect(html).not.toContain("/admin/join-requests/declined-1/decline");
     expect(html).toContain("Approved");
     expect(html).toContain("Declined");
-    expect(html).toContain("Approve creates a login and sends a welcome email. Decline does not. Delete removes the request. A lot links only if the address matches one empty lot.");
+    expect(html).toContain("Approve creates a login and sends a welcome email. Decline does not. Delete removes the request.");
     expect(html).toContain('class="actions join-actions"');
     expect(html).not.toContain("\u2014");
   });

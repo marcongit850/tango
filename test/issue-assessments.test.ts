@@ -321,6 +321,15 @@ describe("automatic assessment invoices", () => {
     expect(rows.some((row) => row.property_id === "prop_27" && row.assessment_id === "assessment_2027_improved")).toBe(false);
     expect(rows.some((row) => row.property_id === "prop_14" && row.assessment_id === "assessment_2027_unimproved")).toBe(false);
     expect(rows.some((row) => row.property_id === "prop_3" || row.property_id === "prop_other")).toBe(false);
+    const titles = sqlite
+      .prepare(
+        `SELECT DISTINCT description AS description
+         FROM invoices
+         WHERE assessment_id IN ('assessment_2027_improved', 'assessment_2027_unimproved')
+         ORDER BY description`,
+      )
+      .all() as { description: string }[];
+    expect(titles).toEqual([{ description: "2027 annual assessment" }]);
     sqlite.close();
   });
 
@@ -351,7 +360,7 @@ describe("automatic assessment invoices", () => {
     expect(first).toEqual([
       {
         assessmentId: "assessment_2027_improved",
-        name: "2027 annual assessment (improved lots)",
+        name: "2027 annual assessment",
         created: 1,
         already: 1,
         issuedOn: "2027-01-01",
@@ -363,7 +372,7 @@ describe("automatic assessment invoices", () => {
     expect(second).toEqual([
       {
         assessmentId: "assessment_2027_improved",
-        name: "2027 annual assessment (improved lots)",
+        name: "2027 annual assessment",
         created: 0,
         already: 2,
         issuedOn: "2027-01-01",
@@ -397,7 +406,7 @@ describe("automatic assessment invoices", () => {
     expect(issued).toEqual([
       {
         assessmentId: "assessment_2027_improved",
-        name: "2027 annual assessment (improved lots)",
+        name: "2027 annual assessment",
         created: 0,
         already: 1,
         issuedOn: "2027-01-01",
@@ -491,7 +500,7 @@ describe("daily assessment invoice job", () => {
         actor_user_id: null,
         action: "assessment_assign",
         entity_id: "assessment_2027_improved",
-        detail: "Automatic on 2027-01-01: 2027 annual assessment (improved lots): 1 invoices, 0 already assigned.",
+        detail: "Automatic on 2027-01-01: 2027 annual assessment: 1 invoices, 0 already assigned.",
       },
     ]);
 

@@ -3,6 +3,8 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
 import { deleteAssessment } from "../src/db";
+import { todayIso } from "../src/lib/dates";
+import { defaultDuesYear } from "../src/lib/dues";
 import { sha256Hex } from "../src/lib/tokens";
 import type { AssessmentAdminRow } from "../src/db";
 import type { Association } from "../src/types";
@@ -335,6 +337,11 @@ describe("annual dues assign", () => {
     expect(assign).toContain('type="checkbox" name="confirm" value="yes" required');
     expect(assign).toContain("Assign this assessment to matching lots");
     expect(assign).toContain('class="secondary" type="submit">Assign to matching lots</button>');
+    expect(html).toContain(
+      "Set the open date, due date, and amounts for improved and unimproved lots. Add a year creates both, using the amounts and dates you enter.",
+    );
+    expect(html).not.toContain("improved lots at $625");
+    expect(html).not.toContain("unimproved lots at $100");
     expect(html).toContain("On the open date, each active lot of that type that does not already have this assessment gets an invoice.");
     expect(html).toContain("A voided invoice stays void.");
     expect(html).toContain("Leave the open date blank if you want to invoice only by hand.");
@@ -404,6 +411,324 @@ describe("annual dues assign", () => {
     expect(flash).not.toContain("Confirm the assign first.");
     expect(count(sqlite, "SELECT COUNT(*) AS n FROM invoices WHERE assessment_id = 'assessment_2027_annual'")).toBeGreaterThan(before);
     expect(count(sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'assessment_assign' AND entity_id = 'assessment_2027_annual'")).toBe(1);
+    sqlite.close();
+  });
+});
+
+describe("annual dues add year", () => {
+  function addForm(html: string): string {
+    return formByAction(html, "/a/tango-mar/admin/assessments");
+  }
+
+  it("prefills amounts from the previous year and still edits amount and dates on a row", () => {
+    const html = ledgerPage({
+      association,
+      ledger: [],
+      ownersByProperty: new Map(),
+      properties: [],
+      invoices: [],
+      assessments: [
+        {
+          id: "assessment_2026_improved",
+          name: "2026 annual assessment (improved lots)",
+          description: "",
+          amount_cents: 70000,
+          due_on: "2026-03-01",
+          opens_on: "2026-01-01",
+          lot_type: "improved",
+          invoice_count: 2,
+        },
+        {
+          id: "assessment_2026_unimproved",
+          name: "2026 annual assessment (unimproved lots)",
+          description: "",
+          amount_cents: 15000,
+          due_on: "2026-03-01",
+          opens_on: "2026-01-01",
+          lot_type: "unimproved",
+          invoice_count: 0,
+        },
+      ],
+      duesReady: true,
+      duesYear: 2027,
+    });
+    const add = addForm(html);
+    expect(add.indexOf(">Year<input")).toBeLessThan(add.indexOf(">Improved lot amount<input"));
+    expect(add.indexOf(">Improved lot amount<input")).toBeLessThan(add.indexOf(">Unimproved lot amount<input"));
+    expect(add.indexOf(">Unimproved lot amount<input")).toBeLessThan(add.indexOf(">Open date<input"));
+    expect(add.indexOf(">Open date<input")).toBeLessThan(add.indexOf(">Due date<input"));
+    expect(add).toContain('name="year" type="text" value="2027" required');
+    expect(add).toContain('name="improved_amount" type="text" value="700.00" required');
+    expect(add).toContain('name="unimproved_amount" type="text" value="150.00" required');
+    expect(add).toContain('name="opens_on" type="date" value="2027-01-01" required');
+    expect(add).toContain('name="due_on" type="date" value="2027-03-01" required');
+    expect(add).toContain(">Add improved and unimproved dues</button>");
+
+    const edit = formByAction(html, "/a/tango-mar/admin/assessments/assessment_2026_improved");
+    expect(html).toContain("2026 annual assessment (improved lots)");
+    expect(html).toContain("2026 annual assessment (unimproved lots)");
+    expect(html).toContain("<td>Improved</td>");
+    expect(html).toContain("<td>Unimproved</td>");
+    expect(edit).toContain('name="amount" type="text" value="700.00" required');
+    expect(edit).toContain('name="opens_on" type="date" value="2026-01-01"');
+    expect(edit).toContain('name="due_on" type="date" value="2026-03-01" required');
+    expect(edit).toContain(">Save assessment</button>");
+  });
+
+  it("falls back to 625 and 100, then prefills the previous year on the ledger", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const admin = await signIn(sqlite, "user_jordan");
+    const headers = { Cookie: `tango_session=${admin}` };
+    const year = defaultDuesYear(todayIso("America/Chicago"));
+
+    const first = await app.request("http://localhost/a/tango-mar/admin/ledger", { headers }, env);
+    expect(first.status).toBe(200);
+    const fallback = addForm(await first.text());
+    expect(fallback).toContain('name="improved_amount" type="text" value="625.00" required');
+    expect(fallback).toContain('name="unimproved_amount" type="text" value="100.00" required');
+    expect(fallback).toContain(`name="opens_on" type="date" value="${year}-01-01" required`);
+    expect(fallback).toContain(`name="due_on" type="date" value="${year}-03-01" required`);
+
+    sqlite
+      .prepare(
+        `INSERT INTO assessments (id, association_id, name, description, amount_cents, due_on, opens_on, lot_type, created_at)
+         VALUES
+           ('dues_2026_improved', 'assoc_tango_mar', '2026 annual assessment (improved lots)', '', 70000, '2026-03-01', '2026-01-01', 'improved', '2026-01-01T00:00:00Z'),
+           ('dues_2026_unimproved', 'assoc_tango_mar', '2026 annual assessment (unimproved lots)', '', 15000, '2026-03-01', '2026-01-01', 'unimproved', '2026-01-01T00:00:00Z')`,
+      )
+      .run();
+    const second = await app.request("http://localhost/a/tango-mar/admin/ledger", { headers }, env);
+    const prefilled = addForm(await second.text());
+    expect(prefilled).toContain('name="improved_amount" type="text" value="700.00" required');
+    expect(prefilled).toContain('name="unimproved_amount" type="text" value="150.00" required');
+    expect(prefilled).toContain(`name="year" type="text" value="${year}" required`);
+    sqlite.close();
+  });
+
+  it("saves the amounts and dates entered for a new year", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const admin = await signIn(sqlite, "user_jordan");
+    const headers = { Cookie: `tango_session=${admin}`, Origin: "http://localhost" };
+
+    const created = await app.request(
+      "http://localhost/a/tango-mar/admin/assessments",
+      {
+        method: "POST",
+        headers,
+        body: new URLSearchParams({
+          year: "2028",
+          improved_amount: "750.00",
+          unimproved_amount: "125.50",
+          opens_on: "2028-01-15",
+          due_on: "2028-04-01",
+        }),
+      },
+      env,
+    );
+    expect(created.status).toBe(303);
+    expect(created.headers.get("Location")).toBe("/a/tango-mar/admin/ledger#dues");
+    expect(decodeURIComponent(created.headers.get("Set-Cookie") ?? "")).toContain(
+      "ok:Added 2028 annual assessment (improved lots) and 2028 annual assessment (unimproved lots).",
+    );
+    const rows = sqlite
+      .prepare(
+        `SELECT name, description, amount_cents, opens_on, due_on, lot_type
+         FROM assessments
+         WHERE name LIKE '2028 annual assessment%'
+         ORDER BY lot_type`,
+      )
+      .all() as { name: string; description: string; amount_cents: number; opens_on: string; due_on: string; lot_type: string }[];
+    expect(rows).toEqual([
+      {
+        name: "2028 annual assessment",
+        description: "HOA dues for improved lots.",
+        amount_cents: 75000,
+        opens_on: "2028-01-15",
+        due_on: "2028-04-01",
+        lot_type: "improved",
+      },
+      {
+        name: "2028 annual assessment",
+        description: "HOA dues for unimproved lots.",
+        amount_cents: 12550,
+        opens_on: "2028-01-15",
+        due_on: "2028-04-01",
+        lot_type: "unimproved",
+      },
+    ]);
+
+    for (const improvedAmount of ["0", "-10", "abc", ""]) {
+      const rejected = await app.request(
+        "http://localhost/a/tango-mar/admin/assessments",
+        {
+          method: "POST",
+          headers,
+          body: new URLSearchParams({
+            year: "2029",
+            improved_amount: improvedAmount,
+            unimproved_amount: "100",
+            opens_on: "2029-01-01",
+            due_on: "2029-03-01",
+          }),
+        },
+        env,
+      );
+      expect(rejected.status).toBe(303);
+      expect(decodeURIComponent(rejected.headers.get("Set-Cookie") ?? "")).toContain(
+        "warn:Enter positive amounts and valid open and due dates.",
+      );
+    }
+    const badDate = await app.request(
+      "http://localhost/a/tango-mar/admin/assessments",
+      {
+        method: "POST",
+        headers,
+        body: new URLSearchParams({
+          year: "2029",
+          improved_amount: "625",
+          unimproved_amount: "100.00",
+          opens_on: "2029-02-31",
+          due_on: "2029-03-01",
+        }),
+      },
+      env,
+    );
+    expect(badDate.status).toBe(303);
+    expect(decodeURIComponent(badDate.headers.get("Set-Cookie") ?? "")).toContain(
+      "warn:Enter positive amounts and valid open and due dates.",
+    );
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM assessments WHERE name LIKE '2029 annual assessment%'")).toBe(0);
+    sqlite.close();
+  });
+
+  it("lets a later amount edit stand without rewriting invoices already assigned", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const admin = await signIn(sqlite, "user_jordan");
+    const headers = { Cookie: `tango_session=${admin}`, Origin: "http://localhost" };
+
+    const page = await app.request("http://localhost/a/tango-mar/admin/ledger", { headers }, env);
+    const edit = formByAction(await page.text(), "/a/tango-mar/admin/assessments/assessment_2026_annual");
+    expect(edit).toContain('name="amount"');
+    expect(edit).toContain('name="opens_on"');
+    expect(edit).toContain('name="due_on"');
+
+    const saved = await app.request(
+      "http://localhost/a/tango-mar/admin/assessments/assessment_2026_annual",
+      {
+        method: "POST",
+        headers,
+        body: new URLSearchParams({
+          name: "2026 annual assessment",
+          amount: "999.00",
+          opens_on: "2026-01-01",
+          due_on: "2026-03-20",
+          lot_type: "",
+        }),
+      },
+      env,
+    );
+    expect(saved.status).toBe(303);
+    expect(decodeURIComponent(saved.headers.get("Set-Cookie") ?? "")).toContain(
+      "ok:Assessment saved. Invoices already assigned were not changed.",
+    );
+    expect(sqlite.prepare("SELECT amount_cents, opens_on, due_on FROM assessments WHERE id = 'assessment_2026_annual'").get()).toEqual({
+      amount_cents: 99900,
+      opens_on: "2026-01-01",
+      due_on: "2026-03-20",
+    });
+    expect(sqlite.prepare("SELECT amount_cents, due_on FROM invoices WHERE id = 'invoice_sam_2026'").get()).toEqual({
+      amount_cents: 120000,
+      due_on: "2026-03-01",
+    });
+    expect(sqlite.prepare("SELECT amount_cents, due_on FROM invoices WHERE id = 'invoice_casey_2026'").get()).toEqual({
+      amount_cents: 120000,
+      due_on: "2026-03-01",
+    });
+    sqlite.close();
+  });
+});
+
+describe("assessment titles", () => {
+  it("keeps the lot type on annual dues rows and hides it on owner and admin lists", async () => {
+    const { sqlite, db } = openPortal();
+    sqlite
+      .prepare(
+        `INSERT INTO assessments (
+           id, association_id, name, description, amount_cents, due_on, opens_on, lot_type, created_at
+         ) VALUES (
+           'assessment_display', 'assoc_tango_mar', '2027 annual assessment (improved lots)', '',
+           62500, '2027-03-01', '2027-01-01', 'improved', '2026-10-06T00:00:00Z'
+         )`,
+      )
+      .run();
+    sqlite
+      .prepare(
+        `INSERT INTO invoices (
+           id, association_id, property_id, assessment_id, invoice_number, description,
+           amount_cents, late_fee_cents, issued_on, due_on, status, created_at
+         ) VALUES (
+           'inv_display', 'assoc_tango_mar', 'prop_14', 'assessment_display', 'DUES-DISPLAY',
+           '2027 annual assessment (improved lots)', 62500, 0, '2026-01-15', '2027-03-01', 'open', '2026-01-15T00:00:00Z'
+         )`,
+      )
+      .run();
+    const app = createApp();
+    const env = portalEnv(db);
+    const admin = await signIn(sqlite, "user_jordan");
+    const owner = await signIn(sqlite, "user_sam");
+
+    const ledger = await app.request("http://localhost/a/tango-mar/admin/ledger", { headers: { Cookie: `tango_session=${admin}` } }, env);
+    expect(ledger.status).toBe(200);
+    const ledgerHtml = await ledger.text();
+    expect(ledgerHtml).toContain("2027 annual assessment (improved lots)");
+    expect(ledgerHtml).toContain("<td>Improved</td>");
+    const payment = formByAction(ledgerHtml, "/a/tango-mar/admin/payments");
+    expect(payment).toContain("DUES-DISPLAY");
+    expect(payment).toContain("2027 annual assessment");
+    expect(payment).not.toContain("(improved lots)");
+    expect(payment).not.toContain("(unimproved lots)");
+
+    const lot = await app.request(
+      "http://localhost/a/tango-mar/admin/ledger/prop_14",
+      { headers: { Cookie: `tango_session=${admin}` } },
+      env,
+    );
+    const lotHtml = await lot.text();
+    expect(lotHtml).toContain("DUES-DISPLAY");
+    expect(lotHtml).toContain("2027 annual assessment");
+    expect(lotHtml).not.toContain("(improved lots)");
+
+    const invoice = await app.request(
+      "http://localhost/a/tango-mar/admin/invoices/inv_display",
+      { headers: { Cookie: `tango_session=${admin}` } },
+      env,
+    );
+    const invoiceHtml = await invoice.text();
+    expect(invoiceHtml).toContain('value="2027 annual assessment"');
+    expect(invoiceHtml).not.toContain("(improved lots)");
+
+    const ownerHeaders = { Cookie: `tango_session=${owner}` };
+    for (const path of ["/a/tango-mar/dashboard", "/a/tango-mar/invoices", "/a/tango-mar/invoices/inv_display"]) {
+      const page = await app.request(`http://localhost${path}`, { headers: ownerHeaders }, env);
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain("2027 annual assessment");
+      expect(html).not.toContain("(improved lots)");
+      expect(html).not.toContain("(unimproved lots)");
+    }
+
+    expect(sqlite.prepare("SELECT name FROM assessments WHERE id = 'assessment_display'").get()).toEqual({
+      name: "2027 annual assessment (improved lots)",
+    });
+    expect(sqlite.prepare("SELECT description FROM invoices WHERE id = 'inv_display'").get()).toEqual({
+      description: "2027 annual assessment (improved lots)",
+    });
     sqlite.close();
   });
 });

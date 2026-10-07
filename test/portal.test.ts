@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { activeAdminContacts, canEditAdmin, canViewAdmin, canViewPropertyFinancials, isAdmin, keepsAnAdmin, masterKeepsAdminWrites, safeNextPath, shouldRevealMagicLink } from "../src/lib/access";
-import { annualDues, defaultDuesYear, lotsToInvoice } from "../src/lib/dues";
+import { annualDues, assessmentDisplayName, defaultDuesYear, latestDuesAmounts, lotsToInvoice } from "../src/lib/dues";
 import { landingAccount, loggedOutNav, render } from "../src/views/layout";
 import { adminHome, documentDetailPage, documentsAdminPage, importPage, ledgerPage, newsAdminPage, ownerDetailPage, paymentInvoiceVisible } from "../src/views/admin";
 import { newsEdit } from "../src/routes/admin";
@@ -331,6 +331,12 @@ describe("annual dues", () => {
       lotType: "improved",
     });
     expect(annualDues(2027, "unimproved").amountCents).toBe(10000);
+    expect(annualDues(2028, "improved", { amountCents: 75000, opensOn: "2028-01-15", dueOn: "2028-04-01" })).toMatchObject({
+      amountCents: 75000,
+      opensOn: "2028-01-15",
+      dueOn: "2028-04-01",
+      name: "2028 annual assessment",
+    });
     expect(defaultDuesYear("2026-10-06")).toBe(2027);
     expect(defaultDuesYear("2027-02-01")).toBe(2027);
     const plan = lotsToInvoice(
@@ -345,6 +351,51 @@ describe("annual dues", () => {
     );
     expect(plan.create.map((lot) => lot.lotNumber)).toEqual(["3"]);
     expect(plan.already).toBe(1);
+  });
+
+  it("prefills Add a year from the previous year's improved and unimproved amounts", () => {
+    expect(latestDuesAmounts([])).toEqual({ improvedCents: 62500, unimprovedCents: 10000 });
+    expect(
+      latestDuesAmounts([
+        { name: "2025 annual assessment (improved lots)", amount_cents: 60000, due_on: "2025-03-01", lot_type: "improved" },
+        { name: "2025 annual assessment (unimproved lots)", amount_cents: 9000, due_on: "2025-03-01", lot_type: "unimproved" },
+        { name: "2026 annual assessment (improved lots)", amount_cents: 70000, due_on: "2026-03-01", lot_type: "improved" },
+        { name: "2026 annual assessment (unimproved lots)", amount_cents: 15000, due_on: "2026-03-01", lot_type: "unimproved" },
+        { name: "2026 fall walkway maintenance", amount_cents: 15000, due_on: "2026-11-15", lot_type: null },
+      ]),
+    ).toEqual({ improvedCents: 70000, unimprovedCents: 15000 });
+    expect(
+      latestDuesAmounts([
+        { name: "2026 annual assessment (unimproved lots)", amount_cents: 15000, due_on: "2026-03-01", lot_type: "unimproved" },
+        { name: "2027 annual assessment (improved lots)", amount_cents: 80000, due_on: "2027-03-01", lot_type: "improved" },
+      ]),
+    ).toEqual({ improvedCents: 80000, unimprovedCents: 15000 });
+    expect(
+      latestDuesAmounts([
+        { name: "2027 annual assessment (improved lots)", amount_cents: 80000, due_on: "2027-03-01", lot_type: "improved" },
+      ]),
+    ).toEqual({ improvedCents: 80000, unimprovedCents: 10000 });
+    expect(
+      latestDuesAmounts([
+        { name: "2026 annual assessment (improved lots)", amount_cents: 70000, due_on: "2026-03-01", lot_type: "improved" },
+        { name: "Walkway repair", amount_cents: 5000, due_on: "2027-11-15", lot_type: "improved" },
+      ]),
+    ).toEqual({ improvedCents: 70000, unimprovedCents: 10000 });
+    expect(
+      latestDuesAmounts([
+        { name: "2026 annual assessment (improved lots)", amount_cents: 70000, due_on: "2026-03-01", lot_type: "improved" },
+        { name: "2027 annual assessment", amount_cents: 81000, due_on: "2027-03-01", lot_type: "improved" },
+        { name: "2027 annual assessment", amount_cents: 16000, due_on: "2027-03-01", lot_type: "unimproved" },
+      ]),
+    ).toEqual({ improvedCents: 81000, unimprovedCents: 16000 });
+  });
+
+  it("drops the lot type suffix from assessment titles", () => {
+    expect(assessmentDisplayName("2027 annual assessment (improved lots)")).toBe("2027 annual assessment");
+    expect(assessmentDisplayName("2027 annual assessment (unimproved lots)")).toBe("2027 annual assessment");
+    expect(assessmentDisplayName("2027 annual assessment")).toBe("2027 annual assessment");
+    expect(assessmentDisplayName("2027 annual assessment (all lots)")).toBe("2027 annual assessment (all lots)");
+    expect(assessmentDisplayName("Walkway repair")).toBe("Walkway repair");
   });
 });
 

@@ -175,6 +175,8 @@ describe("message delete controls", () => {
     expect(resident).toContain("Send a private message to the Board. Messages are not visible to other residents.");
     expect(resident).not.toContain("Admin → Messages");
     expect(resident).not.toContain("authorized administrators");
+    expect(resident).not.toContain("/admin/messages");
+    expect(resident).not.toContain("Board members");
     expect(resident).toContain("No messages yet.");
     expect(resident).not.toContain("Private notes to the board");
     expect(resident).not.toContain("\u2014");

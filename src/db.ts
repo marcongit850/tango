@@ -517,31 +517,20 @@ export type AssessmentRow = {
 
 // Upcoming means scheduled, not currently due: the due date is still ahead, or
 // the assessment has not opened yet. Due-today and past-due rows stay off this
-// list. A lot with no type (NULL or blank) has not been marked improved or
-// unimproved, so that owner still sees both annual rows; either can apply once
-// the lot is typed. A typed lot only matches that type, plus assessments that
-// apply to every lot. Future years stay when they pass this date filter.
+// list. Lot type does not filter the list. An owner with at least one linked
+// lot in the association sees every upcoming row (improved, unimproved, or
+// every lot). Invoice assignment still follows assessment lot type.
 const UPCOMING_WHEN_SQL = `
   AND (
     a.due_on > ?
     OR (a.opens_on IS NOT NULL AND a.opens_on > ?)
   )`;
 
-const UPCOMING_LOT_SQL = `
-  AND (
-    a.lot_type IS NULL
-    OR a.lot_type IN (
-      SELECT p.lot_type FROM properties p
-      JOIN property_owners po ON po.property_id = p.id AND po.association_id = p.association_id
-      WHERE po.user_id = ? AND p.association_id = ?
-        AND p.lot_type IS NOT NULL AND TRIM(p.lot_type) != ''
-    )
-    OR EXISTS (
-      SELECT 1 FROM properties p
-      JOIN property_owners po ON po.property_id = p.id AND po.association_id = p.association_id
-      WHERE po.user_id = ? AND p.association_id = ?
-        AND (p.lot_type IS NULL OR TRIM(p.lot_type) = '')
-    )
+const UPCOMING_OWNER_SQL = `
+  AND EXISTS (
+    SELECT 1 FROM properties p
+    JOIN property_owners po ON po.property_id = p.id AND po.association_id = p.association_id
+    WHERE po.user_id = ? AND p.association_id = ?
   )`;
 
 export async function upcomingAssessments(
@@ -576,10 +565,10 @@ export async function upcomingAssessments(
                WHERE i.assessment_id = a.id AND i.association_id = a.association_id
                  AND po.user_id = ? AND i.status != 'void') AS invoice_count
        FROM assessments a
-       WHERE a.association_id = ?${UPCOMING_WHEN_SQL}${UPCOMING_LOT_SQL}
+       WHERE a.association_id = ?${UPCOMING_WHEN_SQL}${UPCOMING_OWNER_SQL}
        ORDER BY a.due_on, a.lot_type`,
     )
-    .bind(userId, associationId, today, today, userId, associationId, userId, associationId)
+    .bind(userId, associationId, today, today, userId, associationId)
     .all<AssessmentRow>();
   return results;
 }

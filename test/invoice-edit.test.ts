@@ -549,7 +549,7 @@ describe("admin overview outstanding", () => {
     const env = portalEnv(db);
     const token = await signIn(sqlite, "user_jordan");
     try {
-      expect(await outstandingInvoiceCents(db, "assoc_tango_mar")).toBe(160050);
+      expect(await outstandingInvoiceCents(db, "assoc_tango_mar", "2026-10-07")).toBe(160050);
       const overview = await app.request("http://localhost/a/tango-mar/admin", { headers: { Cookie: `tango_session=${token}` } }, env);
       expect(overview.status).toBe(200);
       const html = await overview.text();
@@ -624,7 +624,7 @@ describe("admin overview outstanding", () => {
           "2026-02-01T15:00:00Z",
         );
 
-      expect(await outstandingInvoiceCents(db, "assoc_tango_mar")).toBe(167550);
+      expect(await outstandingInvoiceCents(db, "assoc_tango_mar", "2026-10-07")).toBe(167550);
       const again = await app.request("http://localhost/a/tango-mar/admin", { headers: { Cookie: `tango_session=${token}` } }, env);
       expect(await again.text()).toContain("$1,675.50");
     } finally {

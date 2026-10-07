@@ -249,6 +249,11 @@ function mapBalance(row: BalanceQueryRow): BalanceRow {
   };
 }
 
+// Charges count once the invoice issue date has arrived. Assigning a future
+// assessment writes the invoice with issued_on set to its open date, so that
+// amount stays off the balance until the assessment opens. Recorded payments
+// still count immediately. Past due requires both the issue date and the due
+// date to have passed, so a scheduled future year is never past due.
 const BALANCE_SQL = `
   SELECT
     p.id AS property_id,
@@ -257,10 +262,12 @@ const BALANCE_SQL = `
     COALESCE((
       SELECT SUM(amount_cents + late_fee_cents) FROM invoices i
       WHERE i.property_id = p.id AND i.association_id = p.association_id AND i.status != 'void'
+        AND i.issued_on <= ?
     ), 0) AS charges_cents,
     COALESCE((
       SELECT SUM(late_fee_cents) FROM invoices i
       WHERE i.property_id = p.id AND i.association_id = p.association_id AND i.status != 'void'
+        AND i.issued_on <= ?
     ), 0) AS late_fee_cents,
     COALESCE((
       SELECT SUM(amount_cents) FROM payments pay
@@ -269,7 +276,7 @@ const BALANCE_SQL = `
     CASE WHEN EXISTS (
       SELECT 1 FROM invoices i
       WHERE i.property_id = p.id AND i.association_id = p.association_id
-        AND i.status IN ('open', 'partial') AND i.due_on < ?
+        AND i.status IN ('open', 'partial') AND i.due_on < ? AND i.issued_on <= ?
     ) THEN 1 ELSE 0 END AS past_due
   FROM properties p
 `;
@@ -287,7 +294,7 @@ export async function ledgerForUser(
        WHERE p.association_id = ? AND po.user_id = ?
        ORDER BY p.lot_number`,
     )
-    .bind(today, associationId, userId)
+    .bind(today, today, today, today, associationId, userId)
     .all<BalanceQueryRow>();
   return results.map(mapBalance);
 }
@@ -299,7 +306,7 @@ export async function ledgerForAssociation(
 ): Promise<BalanceRow[]> {
   const { results } = await db
     .prepare(`${BALANCE_SQL} WHERE p.association_id = ? ORDER BY p.lot_number`)
-    .bind(today, associationId)
+    .bind(today, today, today, today, associationId)
     .all<BalanceQueryRow>();
   return results.map(mapBalance);
 }
@@ -334,6 +341,7 @@ export async function invoicesForUser(
   db: D1Database,
   associationId: string,
   userId: string,
+  today: string,
 ): Promise<InvoiceRow[]> {
   const { results } = await db
     .prepare(
@@ -344,9 +352,10 @@ export async function invoicesForUser(
        JOIN properties p ON p.id = i.property_id AND p.association_id = i.association_id
        JOIN property_owners po ON po.property_id = p.id AND po.association_id = p.association_id
        WHERE i.association_id = ? AND po.user_id = ? AND i.status != 'void'
+         AND i.issued_on <= ?
        ORDER BY i.due_on DESC, i.invoice_number`,
     )
-    .bind(associationId, userId)
+    .bind(associationId, userId, today)
     .all<InvoiceRow>();
   return results;
 }
@@ -369,7 +378,7 @@ export async function invoiceById(
     .first<InvoiceRow>();
 }
 
-export async function outstandingInvoiceCents(db: D1Database, associationId: string): Promise<number> {
+export async function outstandingInvoiceCents(db: D1Database, associationId: string, today: string): Promise<number> {
   const row = await db
     .prepare(
       `SELECT COALESCE(SUM(
@@ -379,9 +388,10 @@ export async function outstandingInvoiceCents(db: D1Database, associationId: str
          ), 0)
        ), 0) AS outstanding_cents
        FROM invoices i
-       WHERE i.association_id = ? AND i.status IN ('open', 'partial')`,
+       WHERE i.association_id = ? AND i.status IN ('open', 'partial')
+         AND i.issued_on <= ?`,
     )
-    .bind(associationId)
+    .bind(associationId, today)
     .first<{ outstanding_cents: number }>();
   return Number(row?.outstanding_cents ?? 0);
 }
@@ -505,6 +515,35 @@ export type AssessmentRow = {
   invoice_count: number;
 };
 
+// Upcoming means scheduled, not currently due: the due date is still ahead, or
+// the assessment has not opened yet. Due-today and past-due rows stay off this
+// list. A lot with no type (NULL or blank) has not been marked improved or
+// unimproved, so that owner still sees both annual rows; either can apply once
+// the lot is typed. A typed lot only matches that type, plus assessments that
+// apply to every lot. Future years stay when they pass this date filter.
+const UPCOMING_WHEN_SQL = `
+  AND (
+    a.due_on > ?
+    OR (a.opens_on IS NOT NULL AND a.opens_on > ?)
+  )`;
+
+const UPCOMING_LOT_SQL = `
+  AND (
+    a.lot_type IS NULL
+    OR a.lot_type IN (
+      SELECT p.lot_type FROM properties p
+      JOIN property_owners po ON po.property_id = p.id AND po.association_id = p.association_id
+      WHERE po.user_id = ? AND p.association_id = ?
+        AND p.lot_type IS NOT NULL AND TRIM(p.lot_type) != ''
+    )
+    OR EXISTS (
+      SELECT 1 FROM properties p
+      JOIN property_owners po ON po.property_id = p.id AND po.association_id = p.association_id
+      WHERE po.user_id = ? AND p.association_id = ?
+        AND (p.lot_type IS NULL OR TRIM(p.lot_type) = '')
+    )
+  )`;
+
 export async function upcomingAssessments(
   db: D1Database,
   associationId: string,
@@ -522,7 +561,7 @@ export async function upcomingAssessments(
                  WHERE i.assessment_id = a.id AND i.association_id = a.association_id
                    AND po.user_id = ? AND i.status != 'void') AS invoice_count
          FROM assessments a
-         WHERE a.association_id = ? AND a.due_on >= ?
+         WHERE a.association_id = ? AND a.due_on > ?
          ORDER BY a.due_on`,
       )
       .bind(userId, associationId, today)
@@ -537,18 +576,10 @@ export async function upcomingAssessments(
                WHERE i.assessment_id = a.id AND i.association_id = a.association_id
                  AND po.user_id = ? AND i.status != 'void') AS invoice_count
        FROM assessments a
-       WHERE a.association_id = ? AND a.due_on >= ?
-         AND (
-           a.lot_type IS NULL
-           OR a.lot_type IN (
-             SELECT p.lot_type FROM properties p
-             JOIN property_owners po ON po.property_id = p.id AND po.association_id = p.association_id
-             WHERE po.user_id = ? AND p.association_id = ?
-           )
-         )
+       WHERE a.association_id = ?${UPCOMING_WHEN_SQL}${UPCOMING_LOT_SQL}
        ORDER BY a.due_on, a.lot_type`,
     )
-    .bind(userId, associationId, today, userId, associationId)
+    .bind(userId, associationId, today, today, userId, associationId, userId, associationId)
     .all<AssessmentRow>();
   return results;
 }
@@ -1354,7 +1385,7 @@ export async function listAssessments(db: D1Database, associationId: string): Pr
 export async function assignAssessmentInvoices(
   db: D1Database,
   input: { associationId: string; assessmentId: string; today: string },
-): Promise<{ created: number; already: number; name: string } | null> {
+): Promise<{ created: number; already: number; name: string; issuedOn: string } | null> {
   const assessment = await db
     .prepare(
       `SELECT id, name, amount_cents, due_on, opens_on, lot_type
@@ -1381,6 +1412,8 @@ export async function assignAssessmentInvoices(
     assessment.lot_type === "improved" || assessment.lot_type === "unimproved" ? assessment.lot_type : null,
     new Set(existing.map((row) => row.property_id)),
   );
+  // Keep the invoice even when assign runs before the open date. issued_on is
+  // that open date, and balances ignore the row until then.
   const issuedOn = assessment.opens_on && /^\d{4}-\d{2}-\d{2}$/.test(assessment.opens_on) ? assessment.opens_on : input.today;
   const now = new Date().toISOString();
   let created = 0;
@@ -1409,7 +1442,7 @@ export async function assignAssessmentInvoices(
       .run();
     created += 1;
   }
-  return { created, already: plan.already, name: assessment.name };
+  return { created, already: plan.already, name: assessment.name, issuedOn };
 }
 
 export type AssessmentDeleteResult =

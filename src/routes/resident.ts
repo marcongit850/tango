@@ -61,7 +61,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     const [ledger, upcoming, invoices, payments, notices, announcements, events] = await Promise.all([
       ledgerForUser(c.env.DB, association.id, user.id, today),
       upcomingAssessments(c.env.DB, association.id, user.id, today),
-      invoicesForUser(c.env.DB, association.id, user.id),
+      invoicesForUser(c.env.DB, association.id, user.id, today),
       paymentsForUser(c.env.DB, association.id, user.id),
       notificationsForUser(c.env.DB, association.id, user.id),
       visibleAnnouncements(c.env.DB, association.id, now),
@@ -86,13 +86,14 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
         emergencies: announcements.filter((item) => item.kind === "emergency"),
         news: announcements.filter((item) => item.kind !== "emergency"),
         events: upcomingEvents,
+        today,
       }),
     });
   });
 
   app.get("/a/:slug/invoices", async (c) => {
     const { association, user } = requireMember(c);
-    const invoices = await invoicesForUser(c.env.DB, association.id, user.id);
+    const invoices = await invoicesForUser(c.env.DB, association.id, user.id, todayIso(association.timezone));
     return render(c, { title: "Invoices", active: "dashboard", body: invoiceListPage(association, invoices) });
   });
 
@@ -101,7 +102,11 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     const invoice = await invoiceById(c.env.DB, association.id, c.req.param("invoiceId"));
     if (!invoice) throw new NotFoundError();
     await assertPropertyAccess(c, association.id, invoice.property_id);
-    return render(c, { title: invoice.invoice_number, active: "dashboard", body: invoiceDetailPage(association, invoice) });
+    return render(c, {
+      title: invoice.invoice_number,
+      active: "dashboard",
+      body: invoiceDetailPage(association, invoice, todayIso(association.timezone)),
+    });
   });
 
   app.get("/a/:slug/payments", async (c) => {

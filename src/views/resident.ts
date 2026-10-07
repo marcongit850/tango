@@ -13,6 +13,7 @@ import type {
 } from "../db";
 import { groupDocuments, type CategoryGroup, type FolderGroup } from "../lib/categories";
 import { clip, paragraphs, esc } from "../lib/html";
+import { formatMoney } from "../lib/money";
 import type { Association } from "../types";
 import { confirmDeleteButton, dateCell, dateTimeCell, documentFileLinks, empty, methodLabel, moneySpan, textField, areaField } from "./bits";
 
@@ -39,6 +40,7 @@ export function dashboardPage(options: {
   emergencies: AnnouncementRow[];
   news?: AnnouncementRow[];
   events?: EventRow[];
+  today?: string;
 }): string {
   const { association, ledger } = options;
   const total = ledger.reduce((sum, row) => sum + row.balance_cents, 0);
@@ -64,17 +66,20 @@ export function dashboardPage(options: {
       </div>`;
     })
     .join("");
+  const today = options.today ?? "";
   const upcoming = options.upcoming
     .map((row) => {
       const due = dateCell(row.due_on, association.timezone);
-      const opens = row.opens_on ? ` Opens ${dateCell(row.opens_on, association.timezone)}.` : "";
+      const opens = row.opens_on ? `Opens ${dateCell(row.opens_on, association.timezone)}. ` : "";
+      const notYetDue = Boolean(today) && (row.due_on > today || Boolean(row.opens_on && row.opens_on > today));
+      const when = notYetDue ? " Not due yet." : "";
       return `<li>
         <div>
           <strong>${esc(row.name)}</strong>
-          <p class="muted">Due ${due}.${opens}</p>
+          <p class="muted">${opens}Due ${due}.${when}</p>
         </div>
         <div class="dues-amount">
-          <p>${moneySpan(row.amount_cents)}</p>
+          <p><span class="money">${esc(formatMoney(row.amount_cents))}</span></p>
           <p class="muted">${row.invoice_count > 0 ? "Invoiced" : "Scheduled"}</p>
         </div>
       </li>`;
@@ -205,16 +210,24 @@ export function invoiceListPage(association: Association, invoices: InvoiceRow[]
   </section>`;
 }
 
-export function invoiceDetailPage(association: Association, invoice: InvoiceRow): string {
+export function invoiceDetailPage(association: Association, invoice: InvoiceRow, today = ""): string {
   const remaining = invoice.amount_cents + invoice.late_fee_cents - Number(invoice.paid_cents);
+  const scheduled = Boolean(today) && invoice.issued_on > today;
+  const amount = scheduled
+    ? `<span class="money">${esc(formatMoney(invoice.amount_cents))}</span>`
+    : moneySpan(invoice.amount_cents);
+  const timing = scheduled
+    ? `<p class="muted">Scheduled. Not owed until ${dateCell(invoice.issued_on, association.timezone)}.</p>`
+    : `<p>Issued ${dateCell(invoice.issued_on, association.timezone)} · Due ${dateCell(invoice.due_on, association.timezone)}</p>`;
+  const remainingLine = scheduled ? "" : `<p>Remaining on this invoice ${moneySpan(remaining)}</p>`;
   return `<section class="panel">
     <h1>${esc(invoice.invoice_number)}</h1>
     <p>${esc(invoice.description)}</p>
     <p>Lot ${esc(invoice.lot_number)}</p>
-    <p>Issued ${dateCell(invoice.issued_on, association.timezone)} · Due ${dateCell(invoice.due_on, association.timezone)}</p>
-    <p>Amount ${moneySpan(invoice.amount_cents)} · Late fee ${moneySpan(invoice.late_fee_cents)} · Paid on this invoice ${moneySpan(Number(invoice.paid_cents))}</p>
-    <p>Remaining on this invoice ${moneySpan(remaining)}</p>
-    <p><span class="badge">${esc(invoice.status)}</span></p>
+    ${timing}
+    <p>Amount ${amount} · Late fee ${moneySpan(invoice.late_fee_cents)} · Paid on this invoice ${moneySpan(Number(invoice.paid_cents))}</p>
+    ${remainingLine}
+    <p><span class="badge">${esc(scheduled ? "scheduled" : invoice.status)}</span></p>
     <p class="muted">Online payment is not available. Mail a check and the board will record it.</p>
   </section>`;
 }

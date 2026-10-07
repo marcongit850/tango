@@ -14,6 +14,7 @@ import type {
 import type { LotType } from "./lib/dues";
 import { lotsToInvoice } from "./lib/dues";
 import { isForeignKey, isMissingColumn, isMissingTable } from "./lib/errors";
+import { logError } from "./lib/log";
 import { balanceCents, invoiceStatus, isDelinquent } from "./lib/money";
 
 /** People who can create, edit, and delete: officers, or homeowners and board members with the flag. */
@@ -26,8 +27,50 @@ async function hasColumn(
   table: "memberships" | "properties" | "assessments" | "messages" | "documents",
   column: string,
 ): Promise<boolean> {
+  const names = await columnNames(db, table);
+  return names.has(column);
+}
+
+async function columnNames(db: D1Database, table: string): Promise<Set<string>> {
   const { results } = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
-  return results.some((row) => row.name === column);
+  return new Set(results.map((row) => row.name));
+}
+
+async function addColumn(db: D1Database, sql: string): Promise<void> {
+  try {
+    await db.prepare(sql).run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/duplicate column/i.test(message)) return;
+    throw error;
+  }
+}
+
+/**
+ * Production can be missing folder (migration 0008) and document_date.
+ * Adding them here lets a date save on the next edit without a separate paste.
+ */
+export async function ensureDocumentColumns(db: D1Database): Promise<{ folder: boolean; documentDate: boolean }> {
+  try {
+    const names = await columnNames(db, "documents");
+    if (!names.has("folder")) {
+      await addColumn(db, "ALTER TABLE documents ADD COLUMN folder TEXT NOT NULL DEFAULT ''");
+      names.add("folder");
+    }
+    if (!names.has("document_date")) {
+      await addColumn(db, "ALTER TABLE documents ADD COLUMN document_date TEXT NOT NULL DEFAULT ''");
+      names.add("document_date");
+    }
+    return { folder: names.has("folder"), documentDate: names.has("document_date") };
+  } catch (error) {
+    logError("document_columns", { message: error instanceof Error ? error.message : "unknown" });
+    try {
+      const names = await columnNames(db, "documents");
+      return { folder: names.has("folder"), documentDate: names.has("document_date") };
+    } catch {
+      return { folder: false, documentDate: false };
+    }
+  }
 }
 
 function asMembership(
@@ -893,6 +936,8 @@ export type DocumentRow = {
   created_at: string | null;
   /** Optional subfolder path. Blank means the file sits directly in its category. */
   folder?: string | null;
+  /** Meeting or document date (YYYY-MM-DD). Blank when unset. */
+  document_date?: string | null;
 };
 
 export async function listDocuments(
@@ -901,13 +946,20 @@ export async function listDocuments(
   includeBoardOnly: boolean,
 ): Promise<DocumentRow[]> {
   const visibilitySql = includeBoardOnly ? "" : "AND d.visibility = 'residents'";
-  const foldered = await hasColumn(db, "documents", "folder");
-  const folderSql = foldered ? "d.folder" : "'' AS folder";
-  const orderSql = foldered ? "d.category, d.folder, d.title" : "d.category, d.title";
+  const columns = await ensureDocumentColumns(db);
+  const folderSql = columns.folder ? "d.folder" : "'' AS folder";
+  const dateSql = columns.documentDate ? "d.document_date" : "'' AS document_date";
+  const orderSql =
+    columns.folder && columns.documentDate
+      ? "d.category, d.folder, d.document_date, d.title"
+      : columns.folder
+        ? "d.category, d.folder, d.title"
+        : "d.category, d.title";
   const { results } = await db
     .prepare(
       `SELECT d.id, d.category, d.title, d.visibility, d.current_version_id,
               ${folderSql},
+              ${dateSql},
               v.version_number, v.filename, v.content_type, v.byte_size, v.created_at
        FROM documents d
        LEFT JOIN document_versions v ON v.id = d.current_version_id AND v.association_id = d.association_id
@@ -916,7 +968,7 @@ export async function listDocuments(
     )
     .bind(associationId)
     .all<DocumentRow>();
-  return results.map((row) => ({ ...row, folder: row.folder ?? "" }));
+  return results.map((row) => ({ ...row, folder: row.folder ?? "", document_date: row.document_date ?? "" }));
 }
 
 export type VersionRow = {

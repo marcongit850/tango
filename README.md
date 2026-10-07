@@ -255,7 +255,33 @@ Run that file once, after `0007`. If the console says `documents_folder_migratio
 
 Publishing Insurance, or saving a year or subfolder, before this runs asks you to apply the file first. A file in an existing category with the subfolder left blank still publishes.
 
+If a document date has already been saved, do not paste this file. It rebuilds `documents` and clears `folder` and `document_date`. The portal adds those columns when a date is saved, which is enough for Meeting Minutes and Budgets. Paste this file first only when you still need the Insurance category and no date has been saved yet.
+
 Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0007` is already on the remote database.
+
+## Document date (paste this before merge)
+
+`migrations/0010_document_date.sql` stores a date on each document. Paste it in the Cloudflare dashboard before you merge the pull request. Marc does not need a terminal.
+
+What it does:
+
+- Adds `document_date` on `documents`. Existing rows start blank.
+- On Meeting Minutes, Budgets, and Insurance, that date files the document in a year folder such as `2024`. A second file with the same year reuses that folder. An extra subfolder such as `January` stays under the year.
+- Bylaws, Other, and the other categories stay flat. A date is saved, and it does not create a year folder.
+
+Dashboard steps:
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database**.
+2. Select the database named **tango**.
+3. Open **Console**.
+4. Paste the full contents of `migrations/0010_document_date.sql`.
+5. Select **Execute**.
+
+Run that file once, after `0009`. If the console says a column already exists, this file was already applied. Do not paste it again.
+
+Saving a date also adds `document_date` and `folder` when those columns are missing, so an existing Meeting Minutes or Budgets file can take a date after deploy even before this paste. Insurance as its own category still needs `0008` first, and that paste has to happen before any date is saved.
+
+Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0009` is already on the remote database.
 
 ## Master admin (paste this before merge)
 
@@ -358,7 +384,7 @@ Migrations live in `migrations/`.
 - `associations`, `users`, `roles`, `memberships` (`is_admin` is edit access on a homeowner or a board member; a board member without it is view-only; `is_master` is the one locked master admin for that association)
 - `properties` (lots, with `lot_type` of `improved` or `unimproved`) and `property_owners`
 - `assessments` (`opens_on`, `lot_type`, amount, due date), `invoices`, `payments` (amounts in cents; payments are recorded, not charged online)
-- `documents` and `document_versions` (`current_version_id` is what residents see; `visibility` is `residents` or `board`)
+- `documents` and `document_versions` (`current_version_id` is what residents see; `visibility` is `residents` or `board`; `folder` is an optional subfolder; `document_date` is the date that files Meeting Minutes, Budgets, and Insurance into a year folder)
 - `announcements`, `events`, `faqs`, `board_contacts`
 - `messages` (private threads to the board)
 - `notifications` (portal notices, with an optional file in R2)

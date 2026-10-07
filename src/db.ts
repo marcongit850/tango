@@ -364,6 +364,23 @@ export async function invoiceById(
     .first<InvoiceRow>();
 }
 
+export async function outstandingInvoiceCents(db: D1Database, associationId: string): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COALESCE(SUM(
+         i.amount_cents + i.late_fee_cents - COALESCE((
+           SELECT SUM(pay.amount_cents) FROM payments pay
+           WHERE pay.invoice_id = i.id AND pay.association_id = i.association_id
+         ), 0)
+       ), 0) AS outstanding_cents
+       FROM invoices i
+       WHERE i.association_id = ? AND i.status IN ('open', 'partial')`,
+    )
+    .bind(associationId)
+    .first<{ outstanding_cents: number }>();
+  return Number(row?.outstanding_cents ?? 0);
+}
+
 export async function invoicesForProperty(
   db: D1Database,
   associationId: string,

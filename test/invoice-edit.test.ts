@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
+import { outstandingInvoiceCents } from "../src/db";
 import { sha256Hex } from "../src/lib/tokens";
 
 class SqliteStatement {
@@ -519,6 +520,91 @@ describe("ledger invoice edit", () => {
       );
       expect(board.status).toBe(403);
       expect(sqlite.prepare("SELECT id FROM payments WHERE id = 'payment_sam_2026'").get()).toEqual({ id: "payment_sam_2026" });
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe("admin overview outstanding", () => {
+  it("sums remaining balances on open and partial invoices", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const token = await signIn(sqlite, "user_jordan");
+    try {
+      expect(await outstandingInvoiceCents(db, "assoc_tango_mar")).toBe(160050);
+      const overview = await app.request("http://localhost/a/tango-mar/admin", { headers: { Cookie: `tango_session=${token}` } }, env);
+      expect(overview.status).toBe(200);
+      const html = await overview.text();
+      expect(html).toContain("<h2>Total outstanding</h2>");
+      expect(html).toContain("$1,600.50");
+      expect(html).not.toContain("$2,800.50");
+
+      sqlite
+        .prepare(
+          `INSERT INTO invoices (
+             id, association_id, property_id, invoice_number, description,
+             amount_cents, late_fee_cents, issued_on, due_on, status, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "invoice_partial",
+          "assoc_tango_mar",
+          "prop_3",
+          "PART-3",
+          "Partial dues",
+          10000,
+          0,
+          "2026-02-01",
+          "2026-03-01",
+          "partial",
+          "2026-02-01T15:00:00Z",
+        );
+      sqlite
+        .prepare(
+          `INSERT INTO payments (
+             id, association_id, property_id, invoice_id, amount_cents, method, reference,
+             paid_on, notes, recorded_by_user_id, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "payment_partial",
+          "assoc_tango_mar",
+          "prop_3",
+          "invoice_partial",
+          2500,
+          "check",
+          "200",
+          "2026-02-15",
+          "",
+          "user_jordan",
+          "2026-02-15T15:00:00Z",
+        );
+      sqlite
+        .prepare(
+          `INSERT INTO invoices (
+             id, association_id, property_id, invoice_number, description,
+             amount_cents, late_fee_cents, issued_on, due_on, status, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "invoice_void",
+          "assoc_tango_mar",
+          "prop_3",
+          "VOID-3",
+          "Voided charge",
+          50000,
+          0,
+          "2026-02-01",
+          "2026-03-01",
+          "void",
+          "2026-02-01T15:00:00Z",
+        );
+
+      expect(await outstandingInvoiceCents(db, "assoc_tango_mar")).toBe(167550);
+      const again = await app.request("http://localhost/a/tango-mar/admin", { headers: { Cookie: `tango_session=${token}` } }, env);
+      expect(await again.text()).toContain("$1,675.50");
     } finally {
       sqlite.close();
     }

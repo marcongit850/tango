@@ -88,6 +88,7 @@ export function adminHome(options: {
   delinquent: number;
   waiting: number;
   pendingJoins: number | null;
+  outstandingCents: number;
   audit: AuditRow[];
 }): string {
   const base = `/a/${esc(options.association.slug)}/admin`;
@@ -99,6 +100,10 @@ export function adminHome(options: {
     <section class="panel">
       <h1>Board admin</h1>
       <p class="muted">Only board admins can open these tools.</p>
+    </section>
+    <section class="panel">
+      <h2>Total outstanding</h2>
+      <p class="figure">${moneySpan(options.outstandingCents)}</p>
     </section>
     <section class="grid">
       ${statCard(options.lots, "Lots", `${base}/owners#lots`)}

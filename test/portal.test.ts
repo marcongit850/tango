@@ -590,6 +590,7 @@ describe("admin overview", () => {
       delinquent: 1,
       waiting: 0,
       pendingJoins: null,
+      outstandingCents: 160050,
       audit: [],
     });
     const blurb =
@@ -598,6 +599,10 @@ describe("admin overview", () => {
     expect(html).toContain("<h2>Access</h2>");
     expect(html).toContain(blurb);
     expect(html).not.toContain("<h2>Roles</h2>");
+    expect(html).toContain("<h2>Total outstanding</h2>");
+    expect(html).toContain("$1,600.50");
+    expect(html.indexOf("<h1>Board admin</h1>")).toBeLessThan(html.indexOf("<h2>Total outstanding</h2>"));
+    expect(html.indexOf("<h2>Total outstanding</h2>")).toBeLessThan(html.indexOf(">Lots<"));
     expect(html.indexOf("<h1>Board admin</h1>")).toBeLessThan(html.indexOf("<h2>Access</h2>"));
     expect(html.indexOf("<h2>Access</h2>")).toBeLessThan(html.indexOf(blurb));
     expect(html.indexOf(blurb)).toBeLessThan(html.indexOf("Export ledger for the accountant"));

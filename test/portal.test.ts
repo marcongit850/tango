@@ -498,6 +498,37 @@ describe("document viewing", () => {
     expect(html).not.toContain("\u2014");
   });
 
+  it("labels the insurance category as Other for residents and admins", () => {
+    const document: DocumentRow = {
+      id: "doc-other",
+      category: "insurance",
+      title: "Community policy",
+      visibility: "residents",
+      current_version_id: "ver-other",
+      version_number: 1,
+      filename: "policy.pdf",
+      content_type: "application/pdf",
+      byte_size: 10,
+      created_at: "2026-10-01T15:00:00.000Z",
+    };
+    const resident = documentsPage(association, [document]);
+    expect(resident).toContain("<td>Other</td>");
+    expect(resident).not.toContain("Insurance and other community documents");
+
+    const adminList = documentsAdminPage(association, [document]);
+    expect(adminList).toContain("<td>Other</td>");
+    expect(adminList).toContain('<option value="insurance" >Other</option>');
+    expect(adminList).not.toContain("Insurance and other community documents");
+
+    const detail = documentDetailPage(
+      association,
+      { id: "doc-other", title: "Community policy", category: "insurance", visibility: "residents", current_version_id: "ver-other" },
+      [],
+    );
+    expect(detail).toContain("Other · Owners and residents");
+    expect(detail).not.toContain("Insurance and other community documents");
+  });
+
   it("offers View beside Download on an admin version that can open in the browser", () => {
     const version: VersionRow = {
       id: "ver-pdf",

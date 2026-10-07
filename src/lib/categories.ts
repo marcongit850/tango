@@ -8,7 +8,7 @@ export const DOCUMENT_CATEGORIES: readonly { id: DocumentCategory; label: string
   { id: "minutes", label: "Meeting minutes" },
   { id: "budgets", label: "Budgets and financial reports" },
   { id: "forms", label: "Forms and applications" },
-  { id: "insurance", label: "Insurance and other community documents" },
+  { id: "insurance", label: "Other" },
 ];
 
 export function categoryLabel(category: string): string {

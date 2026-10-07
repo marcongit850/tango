@@ -190,13 +190,13 @@ export function documentsPage(association: Association, documents: DocumentRow[]
       const file = row.current_version_id
         ? documentFileLinks(`/a/${association.slug}/documents/${row.id}/file`, row.content_type)
         : "No file yet";
-      return `<tr><td>${categoryCell(row.category)}</td><td>${esc(row.title)}</td><td>${row.version_number ? `v${row.version_number}` : "—"}</td><td>${esc(row.filename ?? "")}</td><td>${file}</td></tr>`;
+      return `<tr><td>${categoryCell(row.category)}</td><td>${esc(row.title)}</td><td>${row.version_number ? `v${row.version_number}` : "—"}</td><td>${file}</td></tr>`;
     })
     .join("");
   return `<section class="panel">
     <h1>Documents</h1>
     <p class="muted">Association documents</p>
-    ${rows ? `<table><thead><tr><th>Category</th><th>Title</th><th>Version</th><th>File</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No documents published yet.")}
+    ${rows ? `<table><thead><tr><th>Category</th><th>Title</th><th>Version</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No documents published yet.")}
   </section>`;
 }
 

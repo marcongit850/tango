@@ -463,6 +463,7 @@ describe("signed-in header", () => {
     expect(html).not.toContain("background-attachment");
     expect(html).toContain('class="dash"');
     expect(html).toContain("SUBSCRIPTION REQUIRED");
+    expect(html).toContain(".site-header .account { padding-right: 1rem; }");
   });
 
   it("leaves Ask the portal off pages without an active membership", async () => {

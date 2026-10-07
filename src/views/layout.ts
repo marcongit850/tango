@@ -43,6 +43,7 @@ nav { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; }
 nav a { text-decoration: none; color: var(--ink); padding-bottom: 0.15rem; }
 nav a.active { color: var(--gulf); box-shadow: inset 0 -2px 0 var(--gulf); }
 .account { margin-left: auto; color: var(--muted); display: flex; gap: 0.75rem; align-items: center; }
+.site-header .account { padding-right: 1rem; }
 .account a.account-admin { text-decoration: none; color: var(--ink); padding-bottom: 0.15rem; }
 .account a.account-admin.active { color: var(--gulf); box-shadow: inset 0 -2px 0 var(--gulf); }
 button, .button {

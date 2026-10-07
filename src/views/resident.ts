@@ -59,7 +59,8 @@ export function dashboardPage(options: {
   const notices = options.notices
     .slice(0, 5)
     .map(
-      (row) => `<li><a href="/a/${esc(association.slug)}/notices">${esc(row.title)}</a> <span class="muted">${esc(row.body)}</span> ${noticeFileLinks(association.slug, row)}</li>`,
+      (row) =>
+        `<li><a href="/a/${esc(association.slug)}/notices">${esc(row.title)}</a> <span class="muted">${dateTimeCell(row.created_at, association.timezone)}</span> <span class="muted">${esc(row.body)}</span> ${noticeFileLinks(association.slug, row)}</li>`,
     )
     .join("");
   const emergencies = options.emergencies
@@ -171,7 +172,7 @@ export function noticesPage(association: Association, notices: NoticeRow[]): str
     .map(
       (row) => `<article class="card">
         <h2>${esc(row.title)}</h2>
-        <p class="muted">${dateTimeCell(row.created_at, association.timezone)} · ${row.read_at ? "Read" : "Unread"}</p>
+        <p class="muted">${dateTimeCell(row.created_at, association.timezone)} · ${row.read_at ? `Opened ${dateTimeCell(row.read_at, association.timezone)}` : "Unread"}</p>
         ${row.body ? paragraphs(row.body) : ""}
         ${row.attachment_filename ? `<p>${esc(row.attachment_filename)}</p><p>${noticeFileLinks(association.slug, row)}</p>` : ""}
         ${row.href ? `<p><a href="${esc(row.href)}">Open</a></p>` : ""}

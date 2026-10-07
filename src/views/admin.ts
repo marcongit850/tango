@@ -172,7 +172,7 @@ export function ownersPage(
       </form>
     </section>
     <section class="panel" id="logins">
-      <h2>${delinquentOnly ? "Delinquent accounts" : "Logins"}</h2>
+      <h2>${delinquentOnly ? "Delinquent accounts" : "Users"}</h2>
       <p class="filters">
         <a ${delinquentOnly ? "" : `class="active"`} href="/a/${esc(association.slug)}/admin/owners#logins">Everyone</a>
         <a ${delinquentOnly ? `class="active"` : ""} href="/a/${esc(association.slug)}/admin/owners?delinquent=1#logins">Past due only</a>

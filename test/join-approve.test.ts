@@ -375,6 +375,9 @@ describe("owner login filters", () => {
   it("uses small Everyone and Past due only filters", () => {
     const everyone = ownersPage(association, [], [], false);
     const pastDue = ownersPage(association, [], [], true);
+    expect(everyone).toContain("<h2>Users</h2>");
+    expect(everyone).toContain('id="logins"');
+    expect(everyone).not.toContain(">Logins<");
     expect(everyone).toContain(">Everyone<");
     expect(everyone).toContain(">Past due only<");
     expect(everyone).toContain('class="filters"');
@@ -382,6 +385,9 @@ describe("owner login filters", () => {
     expect(everyone).not.toContain("All owners");
     expect(everyone).not.toContain(">Delinquent<");
     expect(everyone).not.toContain('class="button" href="/a/tango-mar/admin/owners#logins"');
+    expect(pastDue).toContain("<h2>Delinquent accounts</h2>");
+    expect(pastDue).toContain('id="logins"');
+    expect(pastDue).not.toContain(">Logins<");
     expect(pastDue).toContain('class="active" href="/a/tango-mar/admin/owners?delinquent=1#logins">Past due only');
   });
 });

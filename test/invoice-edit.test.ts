@@ -537,8 +537,8 @@ describe("admin overview outstanding", () => {
       const overview = await app.request("http://localhost/a/tango-mar/admin", { headers: { Cookie: `tango_session=${token}` } }, env);
       expect(overview.status).toBe(200);
       const html = await overview.text();
-      expect(html).toContain("<h2>Total outstanding</h2>");
-      expect(html).toContain("$1,600.50");
+      expect(html).toContain('<a class="card" href="/a/tango-mar/admin/ledger"><h2>$1,600.50</h2><p>Total Outstanding</p></a>');
+      expect(html).not.toContain("<h2>Total outstanding</h2>");
       expect(html).not.toContain("$2,800.50");
 
       sqlite

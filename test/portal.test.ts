@@ -603,10 +603,11 @@ describe("admin overview", () => {
     expect(html).toContain("<h2>Access</h2>");
     expect(html).toContain(blurb);
     expect(html).not.toContain("<h2>Roles</h2>");
-    expect(html).toContain("<h2>Total outstanding</h2>");
-    expect(html).toContain("$1,600.50");
-    expect(html.indexOf("<h1>Board admin</h1>")).toBeLessThan(html.indexOf("<h2>Total outstanding</h2>"));
-    expect(html.indexOf("<h2>Total outstanding</h2>")).toBeLessThan(html.indexOf(">Lots<"));
+    expect(html).toContain('<a class="card" href="/a/tango-mar/admin/ledger"><h2>$1,600.50</h2><p>Total Outstanding</p></a>');
+    expect(html).not.toContain("<h2>Total outstanding</h2>");
+    expect(html).not.toContain('class="figure"');
+    expect(html.indexOf("<h1>Board admin</h1>")).toBeLessThan(html.indexOf(">Total Outstanding<"));
+    expect(html.indexOf(">Total Outstanding<")).toBeLessThan(html.indexOf(">Lots<"));
     expect(html.indexOf("<h1>Board admin</h1>")).toBeLessThan(html.indexOf("<h2>Access</h2>"));
     expect(html.indexOf("<h2>Access</h2>")).toBeLessThan(html.indexOf(blurb));
     expect(html.indexOf(blurb)).toBeLessThan(html.indexOf("Export ledger for the accountant"));

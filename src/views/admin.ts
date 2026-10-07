@@ -2,6 +2,7 @@ import { DOCUMENT_CATEGORIES } from "../lib/categories";
 import { zonedIsoDate } from "../lib/dates";
 import { lotTypeLabel } from "../lib/dues";
 import { esc } from "../lib/html";
+import { formatMoney } from "../lib/money";
 import type { Association, DocumentCategory } from "../types";
 import { messageWaitingOnBoard, type MessageRow } from "../db";
 import type {
@@ -101,11 +102,8 @@ export function adminHome(options: {
       <h1>Board admin</h1>
       <p class="muted">Only board admins can open these tools.</p>
     </section>
-    <section class="panel">
-      <h2>Total outstanding</h2>
-      <p class="figure">${moneySpan(options.outstandingCents)}</p>
-    </section>
     <section class="grid">
+      ${statCard(formatMoney(options.outstandingCents), "Total Outstanding", `${base}/ledger`)}
       ${statCard(options.lots, "Lots", `${base}/owners#lots`)}
       ${statCard(options.members, "Active logins", `${base}/owners#logins`)}
       ${statCard(options.delinquent, "Delinquent lots", `${base}/owners?delinquent=1#logins`)}
@@ -120,8 +118,9 @@ export function adminHome(options: {
     <section class="panel"><h2>Recent activity</h2>${auditTable(options.association, options.audit.slice(0, 8))}</section>`;
 }
 
-function statCard(count: number, label: string, href: string): string {
-  return `<a class="card" href="${href}"><h2>${count}</h2><p>${esc(label)}</p></a>`;
+function statCard(value: number | string, label: string, href: string): string {
+  const figure = typeof value === "number" ? String(value) : esc(value);
+  return `<a class="card" href="${href}"><h2>${figure}</h2><p>${esc(label)}</p></a>`;
 }
 
 export function ownersPage(

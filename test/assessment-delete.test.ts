@@ -335,6 +335,8 @@ describe("annual dues assign", () => {
     expect(assign).toContain('type="checkbox" name="confirm" value="yes" required');
     expect(assign).toContain("Assign this assessment to matching lots");
     expect(assign).toContain('class="secondary" type="submit">Assign to matching lots</button>');
+    expect(html).toContain("On the open date, each active lot of that type that does not already have this assessment gets an invoice.");
+    expect(html).toContain("A voided invoice stays void.");
     expect(assign).not.toContain('type="hidden" name="confirm"');
     expect(html.indexOf('action="/a/tango-mar/admin/assessments/assessment_2027_improved/assign"')).toBeLessThan(
       html.indexOf("<h3>Add a year</h3>"),

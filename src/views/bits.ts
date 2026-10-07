@@ -1,6 +1,6 @@
 import { categoryLabel } from "../lib/categories";
 import { formatDate, formatDateTime } from "../lib/dates";
-import { isBrowserViewable } from "../lib/files";
+import { isBrowserViewable, isImageContentType } from "../lib/files";
 import { esc } from "../lib/html";
 import { formatMoney } from "../lib/money";
 
@@ -43,10 +43,15 @@ export function methodLabel(method: string): string {
   return method;
 }
 
-export function documentFileLinks(href: string, contentType: string | null | undefined): string {
+export function documentFileLinks(
+  href: string,
+  contentType: string | null | undefined,
+  options: { imagesOnly?: boolean } = {},
+): string {
   const safe = esc(href);
   const download = `<a href="${safe}?download=1">Download</a>`;
-  if (!isBrowserViewable(contentType ?? "")) return download;
+  const viewable = options.imagesOnly ? isImageContentType(contentType ?? "") : isBrowserViewable(contentType ?? "");
+  if (!viewable) return download;
   return `<span class="actions"><a href="${safe}" target="_blank" rel="noopener">View</a>${download}</span>`;
 }
 

@@ -1,11 +1,20 @@
 import type { Hono } from "hono";
-import { canEditAdmin, canViewPropertyFinancials, isAdmin, isBoardMember } from "../lib/access";
+import { canEditAdmin, canViewAdmin, canViewPropertyFinancials, isAdmin, isBoardMember } from "../lib/access";
 import { timeZoneLabel, todayIso } from "../lib/dates";
 import { resendApiKey, sendResendEmail, SUPPORT_INBOX, supportEmailText } from "../lib/email";
-import { ForbiddenError, NotFoundError } from "../lib/errors";
+import { ForbiddenError, isMissingTable, NotFoundError } from "../lib/errors";
 import { logError, logInfo } from "../lib/log";
 import { ensureSeedFiles } from "../lib/seed-files";
-import { applyDocumentResponseHeaders } from "../lib/files";
+import {
+  applyDocumentResponseHeaders,
+  contentTypeForUpload,
+  deleteStoredObjects,
+  isImageContentType,
+  MAX_MESSAGE_ATTACHMENTS,
+  noticeFileProblem,
+  safeFilename,
+  safeStoredContentType,
+} from "../lib/files";
 import {
   contactsForProperty,
   invoiceById,
@@ -15,6 +24,9 @@ import {
   listDocuments,
   listEvents,
   listFaqs,
+  insertMessageAttachment,
+  messageAttachmentsReady,
+  messageFileForDownload,
   noticeFileForUser,
   deleteMessage,
   deleteMessageThread,
@@ -53,7 +65,7 @@ import {
   supportPage,
   threadPage,
 } from "../views/resident";
-import { readForm, redirectTo, requireEditor, requireMember, textValue, type AppContext } from "./common";
+import { fileValues, readForm, redirectTo, requireEditor, requireMember, textValue, type AppContext } from "./common";
 
 export function registerResidentRoutes(app: Hono<AppBindings>): void {
   app.get("/a/:slug/dashboard", async (c) => {
@@ -369,11 +381,26 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     const subject = textValue(fields, "subject", 200);
     const body = textValue(fields, "body", 5000);
     const propertyId = textValue(fields, "property_id", 80);
-    if (!subject || !body) return redirectTo(c, `/a/${association.slug}/messages`, "Add a subject and a message.", "warn");
+    const back = `/a/${association.slug}/messages`;
+    if (!subject || !body) return redirectTo(c, back, "Add a subject and a message.", "warn");
+    const uploads = fileValues(fields, "file");
+    if (uploads.length > MAX_MESSAGE_ATTACHMENTS) return redirectTo(c, back, "Attach up to 3 files.", "warn");
+    for (const upload of uploads) {
+      const problem = noticeFileProblem(upload);
+      if (problem) return redirectTo(c, back, problem, "warn");
+    }
     if (propertyId) {
       const property = await propertyInAssociation(c.env.DB, association.id, propertyId);
       if (!property) throw new NotFoundError();
       if (!isAdmin(membership)) await assertPropertyAccess(c, association.id, propertyId);
+    }
+    if (uploads.length > 0 && !(await messageAttachmentsReady(c.env.DB))) {
+      return redirectTo(
+        c,
+        back,
+        "Apply the message file migration in D1, then try again. The steps are in the README under Message files.",
+        "warn",
+      );
     }
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -384,6 +411,42 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
       )
       .bind(id, association.id, id, user.id, propertyId || null, subject, body, now)
       .run();
+    const storedKeys: string[] = [];
+    try {
+      for (let index = 0; index < uploads.length; index += 1) {
+        const upload = uploads[index];
+        if (!upload) continue;
+        const filename = safeFilename(upload.name);
+        const contentType = contentTypeForUpload(upload);
+        if (!contentType) throw new Error("file type");
+        const bytes = new Uint8Array(await upload.arrayBuffer());
+        const attachmentId = crypto.randomUUID();
+        const r2Key = `${association.id}/messages/${id}/${attachmentId}/${filename}`;
+        await c.env.DOCUMENTS.put(r2Key, bytes, { httpMetadata: { contentType } });
+        storedKeys.push(r2Key);
+        await insertMessageAttachment(c.env.DB, {
+          id: attachmentId,
+          associationId: association.id,
+          messageId: id,
+          position: index,
+          filename,
+          contentType,
+          r2Key,
+          byteSize: bytes.byteLength,
+        });
+      }
+    } catch (error) {
+      await discardMessageDraft(c.env.DB, c.env.DOCUMENTS, association.id, id, storedKeys);
+      if (isMissingTable(error)) {
+        return redirectTo(
+          c,
+          back,
+          "Apply the message file migration in D1, then try again. The steps are in the README under Message files.",
+          "warn",
+        );
+      }
+      throw error;
+    }
     const staff = await staffUserIds(c.env.DB, association.id);
     for (const staffId of staff) {
       if (staffId === user.id) continue;
@@ -416,8 +479,34 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
         allowThreadDelete: isAdmin(membership) || userStartedThread(messages, user.id),
         replyDelete: isAdmin(membership) ? "all" : "own",
         viewerUserId: user.id,
+        showAttachments: canViewAdmin(membership) ? "all" : "own",
       }),
     });
+  });
+
+  app.get("/a/:slug/messages/:threadId/messages/:messageId/files/:fileId", async (c) => {
+    const { association, user, membership } = requireMember(c);
+    const file = await messageFileForDownload(
+      c.env.DB,
+      association.id,
+      c.req.param("threadId"),
+      c.req.param("messageId"),
+      c.req.param("fileId"),
+    );
+    if (!file) throw new NotFoundError();
+    if (!canViewAdmin(membership) && file.from_user_id !== user.id) throw new ForbiddenError();
+    const object = await c.env.DOCUMENTS.get(file.r2_key);
+    if (!object) throw new NotFoundError();
+    const headers = new Headers();
+    object.writeHttpMetadata(headers);
+    const contentType = safeStoredContentType(file.content_type);
+    headers.set("Content-Type", contentType);
+    applyDocumentResponseHeaders(headers, {
+      filename: file.filename,
+      contentType,
+      download: c.req.query("download") === "1" || !isImageContentType(contentType),
+    });
+    return new Response(object.body, { headers });
   });
 
   app.post("/a/:slug/messages/:threadId/reply", async (c) => {
@@ -478,7 +567,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     if (!isAdmin(membership) && !userStartedThread(messages, user.id)) {
       return redirectTo(c, threadPath, "You can delete a thread you started.", "warn");
     }
-    const removed = await deleteMessageThread(c.env.DB, association.id, association.slug, threadId);
+    const removed = await deleteMessageThread(c.env.DB, association.id, association.slug, threadId, c.env.DOCUMENTS);
     if (!removed) return redirectTo(c, list, "That thread is already gone.", "warn");
     await writeAudit(c.env.DB, {
       associationId: association.id,
@@ -511,7 +600,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     if (!isAdmin(membership) && ownRemaining === 0 && messages.length > 1) {
       return redirectTo(c, threadPath, "Delete the thread to remove the conversation.", "warn");
     }
-    const removed = await deleteMessage(c.env.DB, association.id, association.slug, threadId, messageId);
+    const removed = await deleteMessage(c.env.DB, association.id, association.slug, threadId, messageId, c.env.DOCUMENTS);
     if (!removed) return redirectTo(c, threadPath, "That reply is already gone.", "warn");
     const remaining = await threadMessages(c.env.DB, association.id, threadId);
     await writeAudit(c.env.DB, {
@@ -525,6 +614,22 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     if (remaining.length === 0) return redirectTo(c, list, "Message thread deleted.");
     return redirectTo(c, threadPath, "Reply deleted.");
   });
+}
+
+async function discardMessageDraft(
+  db: D1Database,
+  bucket: R2Bucket,
+  associationId: string,
+  messageId: string,
+  keys: readonly string[],
+): Promise<void> {
+  try {
+    await db.prepare("DELETE FROM message_attachments WHERE association_id = ? AND message_id = ?").bind(associationId, messageId).run();
+  } catch (error) {
+    if (!isMissingTable(error)) logError("message_attachment_cleanup", { message: error instanceof Error ? error.message : "unknown" });
+  }
+  await db.prepare("DELETE FROM messages WHERE association_id = ? AND id = ?").bind(associationId, messageId).run();
+  await deleteStoredObjects(bucket, keys);
 }
 
 async function assertPropertyAccess(c: AppContext, associationId: string, propertyId: string): Promise<void> {

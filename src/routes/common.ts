@@ -49,23 +49,44 @@ export function redirectTo(c: AppContext, location: string, message?: string, to
   return c.redirect(location, 303);
 }
 
-export async function readForm(c: AppContext): Promise<Record<string, string | File>> {
+export type FormFields = Record<string, string | File | File[]>;
+
+export async function readForm(c: AppContext): Promise<FormFields> {
   assertSameOrigin(c.req.raw);
-  const body = await c.req.parseBody();
-  const fields: Record<string, string | File> = {};
+  const body = await c.req.parseBody({ all: true });
+  const fields: FormFields = {};
   for (const [key, value] of Object.entries(body)) {
-    const item = Array.isArray(value) ? value[0] : value;
-    if (typeof item === "string" || item instanceof File) fields[key] = item;
+    if (Array.isArray(value)) {
+      const files = value.filter((item): item is File => item instanceof File);
+      if (files.length > 1) {
+        fields[key] = files;
+        continue;
+      }
+      if (files.length === 1 && value.every((item) => item instanceof File)) {
+        fields[key] = files[0];
+        continue;
+      }
+      const texts = value.filter((item): item is string => typeof item === "string");
+      const last = texts.at(-1);
+      if (last !== undefined) fields[key] = last;
+      continue;
+    }
+    if (typeof value === "string" || value instanceof File) fields[key] = value;
   }
   return fields;
 }
 
-export function textValue(fields: Record<string, string | File>, name: string, max: number): string {
+export function textValue(fields: FormFields, name: string, max: number): string {
   const value = fields[name];
   return typeof value === "string" ? clip(value, max) : "";
 }
 
-export function fileValue(fields: Record<string, string | File>, name: string): File | null {
+export function fileValues(fields: FormFields, name: string): File[] {
   const value = fields[name];
-  return value instanceof File ? value : null;
+  const files = value instanceof File ? [value] : Array.isArray(value) ? value.filter((item): item is File => item instanceof File) : [];
+  return files.filter((file) => file.size > 0);
+}
+
+export function fileValue(fields: FormFields, name: string): File | null {
+  return fileValues(fields, name).at(-1) ?? null;
 }

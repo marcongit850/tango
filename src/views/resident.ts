@@ -12,6 +12,7 @@ import type {
   MessageRow,
 } from "../db";
 import { groupDocuments, type CategoryGroup, type FolderGroup } from "../lib/categories";
+import { DOCUMENT_FILE_ACCEPT } from "../lib/files";
 import { clip, paragraphs, esc } from "../lib/html";
 import { formatMoney } from "../lib/money";
 import type { Association } from "../types";
@@ -565,10 +566,11 @@ export function messagesPage(
     </article>
     <article class="panel">
       <h2>Contact the board</h2>
-      <form class="fields" method="post" action="/a/${esc(association.slug)}/messages">
+      <form class="fields" method="post" action="/a/${esc(association.slug)}/messages" enctype="multipart/form-data">
         ${properties.length ? `<label>Lot<select name="property_id"><option value="">No specific lot</option>${lotOptions}</select></label>` : ""}
         ${textField("Subject", "subject", { required: true })}
         ${areaField("Message", "body", "", true)}
+        <label>Attach a file (optional)<input type="file" name="file" multiple accept="${DOCUMENT_FILE_ACCEPT}"></label>
         <button type="submit">Send</button>
       </form>
     </article>
@@ -587,6 +589,7 @@ export function threadPage(
     replyDelete?: "all" | "own";
     viewerUserId?: string;
     inbox?: "admin" | "resident";
+    showAttachments?: "all" | "own";
   } = {},
 ): string {
   const threadId = messages[0]?.thread_id ?? "";
@@ -598,7 +601,8 @@ export function threadPage(
       const remove = action
         ? `<div class="actions">${confirmDeleteButton(action, "Delete reply", "Delete this reply")}</div>`
         : "";
-      return `<article class="card"><p><strong>${esc(message.from_name)}</strong> <span class="muted">${dateTimeCell(message.created_at, association.timezone)}</span></p>${paragraphs(message.body)}${remove}</article>`;
+      const files = messageAttachmentLinks(association.slug, message, options);
+      return `<article class="card"><p><strong>${esc(message.from_name)}</strong> <span class="muted">${dateTimeCell(message.created_at, association.timezone)}</span></p>${paragraphs(message.body)}${files}${remove}</article>`;
     })
     .join("");
   const intro = options.incoming
@@ -619,6 +623,24 @@ export function threadPage(
   return `<section class="panel"><h1>${esc(subject)}</h1>${intro}${threadDelete}</section>
     <section class="stack">${items}</section>
     ${reply}`;
+}
+
+function messageAttachmentLinks(
+  slug: string,
+  message: MessageRow,
+  options: { showAttachments?: "all" | "own"; viewerUserId?: string; inbox?: "admin" | "resident" },
+): string {
+  const files = message.attachments ?? [];
+  if (files.length === 0) return "";
+  const mode = options.showAttachments ?? (options.inbox === "admin" ? "all" : "own");
+  const visible = mode === "all" || message.from_user_id === options.viewerUserId;
+  if (!visible) return "";
+  return files
+    .map((file) => {
+      const href = `/a/${slug}/messages/${message.thread_id}/messages/${message.id}/files/${file.id}`;
+      return `<p>${esc(file.filename)} ${documentFileLinks(href, file.content_type, { imagesOnly: true })}</p>`;
+    })
+    .join("");
 }
 
 function threadDeleteAction(slug: string, threadId: string, inbox: "admin" | "resident"): string {

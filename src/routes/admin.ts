@@ -101,7 +101,7 @@ import {
 } from "../views/admin";
 import { render } from "../views/layout";
 import { canEditAdmin } from "../lib/access";
-import { fileValue, readForm, redirectTo, requireEditor, requireStaff, textValue, type AppContext } from "./common";
+import { fileValue, readForm, redirectTo, requireEditor, requireStaff, textValue, type AppContext, type FormFields } from "./common";
 
 const ROLES = new Set<MembershipRole>(["homeowner", "board"]);
 const STATUSES = new Set<MembershipStatus>(["invited", "active", "inactive"]);
@@ -2184,7 +2184,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, threadPath, "Confirm the delete first.", "warn");
     const messages = await threadMessages(c.env.DB, association.id, threadId);
     if (messages.length === 0) return redirectTo(c, list, "That thread is already gone.", "warn");
-    const removed = await deleteMessageThread(c.env.DB, association.id, association.slug, threadId);
+    const removed = await deleteMessageThread(c.env.DB, association.id, association.slug, threadId, c.env.DOCUMENTS);
     if (!removed) return redirectTo(c, list, "That thread is already gone.", "warn");
     await writeAudit(c.env.DB, {
       associationId: association.id,
@@ -2208,7 +2208,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const messages = await threadMessages(c.env.DB, association.id, threadId);
     const target = messages.find((message) => message.id === messageId);
     if (!target) return redirectTo(c, messages.length === 0 ? list : threadPath, "That reply is already gone.", "warn");
-    const removed = await deleteMessage(c.env.DB, association.id, association.slug, threadId, messageId);
+    const removed = await deleteMessage(c.env.DB, association.id, association.slug, threadId, messageId, c.env.DOCUMENTS);
     if (!removed) return redirectTo(c, threadPath, "That reply is already gone.", "warn");
     const remaining = await threadMessages(c.env.DB, association.id, threadId);
     await writeAudit(c.env.DB, {
@@ -2266,7 +2266,7 @@ export function newsEdit(
 }
 
 function readAnnouncement(
-  fields: Record<string, string | File>,
+  fields: FormFields,
   timeZone: string,
 ):
   | { ok: true; kind: "news" | "meeting" | "emergency"; title: string; body: string; pinned: number; expiresAt: string | null }
@@ -2288,7 +2288,7 @@ function readAnnouncement(
 }
 
 function readEvent(
-  fields: Record<string, string | File>,
+  fields: FormFields,
   timeZone: string,
 ):
   | { ok: true; kind: "event" | "meeting" | "emergency"; title: string; description: string; location: string; startsAt: string; endsAt: string | null }
@@ -2314,7 +2314,7 @@ function eventSummary(startsAt: string, location: string, description: string, t
   return [formatDateTime(startsAt, timeZone), location, description].filter((part) => part.trim()).join(". ");
 }
 
-function noticeUpload(fields: Record<string, string | File>): File | null {
+function noticeUpload(fields: FormFields): File | null {
   for (const name of ["file", "attachment"]) {
     const file = fileValue(fields, name);
     if (file && file.size > 0) return file;
@@ -2447,7 +2447,7 @@ type LotDetails = {
   adminNotes: string;
 };
 
-function lotDetailsFromForm(fields: Record<string, string | File>): LotDetails {
+function lotDetailsFromForm(fields: FormFields): LotDetails {
   return {
     houseName: textValue(fields, "house_name", 80),
     mailingStreet: textValue(fields, "mailing_street", 200),

@@ -738,7 +738,7 @@ function duesSection(options: {
         <td>${moneySpan(row.amount_cents)}</td>
         <td>${row.invoice_count}</td>
         <td>
-          <form method="post" action="${edit}/assign"><button type="submit">Assign to matching lots</button></form>
+          <form method="post" action="${edit}/assign"><label><input type="checkbox" name="confirm" value="yes" required> Assign this assessment to matching lots</label><button class="secondary" type="submit">Assign to matching lots</button></form>
           <details>
             <summary>Edit</summary>
             <form class="fields" method="post" action="${edit}">

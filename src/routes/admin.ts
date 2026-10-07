@@ -716,8 +716,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
 
   app.post("/a/:slug/admin/assessments/:assessmentId/assign", async (c) => {
     const { association, user } = requireStaff(c);
-    await readForm(c);
+    const fields = await readForm(c);
     const back = `/a/${association.slug}/admin/ledger#dues`;
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, back, "Confirm the assign first.", "warn");
     const result = await assignAssessmentInvoices(c.env.DB, {
       associationId: association.id,
       assessmentId: c.req.param("assessmentId"),

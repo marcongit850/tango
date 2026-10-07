@@ -318,3 +318,87 @@ describe("annual dues delete route", () => {
     sqlite.close();
   });
 });
+
+describe("annual dues assign", () => {
+  it("keeps Assign to matching lots and requires a confirm checkbox", () => {
+    const html = ledgerPage({
+      association,
+      ledger: [],
+      ownersByProperty: new Map(),
+      properties: [],
+      invoices: [],
+      assessments: [assessment("assessment_2027_improved", "2027 annual assessment (improved lots)", 0)],
+      duesReady: true,
+      duesYear: 2027,
+    });
+    const assign = formByAction(html, "/a/tango-mar/admin/assessments/assessment_2027_improved/assign");
+    expect(assign).toContain('type="checkbox" name="confirm" value="yes" required');
+    expect(assign).toContain("Assign this assessment to matching lots");
+    expect(assign).toContain('class="secondary" type="submit">Assign to matching lots</button>');
+    expect(assign).not.toContain('type="hidden" name="confirm"');
+    expect(html.indexOf('action="/a/tango-mar/admin/assessments/assessment_2027_improved/assign"')).toBeLessThan(
+      html.indexOf("<h3>Add a year</h3>"),
+    );
+  });
+
+  it("refuses assign until the checkbox is confirmed, then writes invoices", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const admin = await signIn(sqlite, "user_jordan");
+    const owner = await signIn(sqlite, "user_sam");
+    const headers = { Cookie: `tango_session=${admin}`, Origin: "http://localhost" };
+    const before = count(sqlite, "SELECT COUNT(*) AS n FROM invoices WHERE assessment_id = 'assessment_2027_annual'");
+
+    const page = await app.request("http://localhost/a/tango-mar/admin/ledger", { headers }, env);
+    expect(page.status).toBe(200);
+    const assign = formByAction(await page.text(), "/a/tango-mar/admin/assessments/assessment_2027_annual/assign");
+    expect(assign).toContain("Assign this assessment to matching lots");
+    expect(assign).toContain(">Assign to matching lots</button>");
+
+    const unconfirmed = await app.request(
+      "http://localhost/a/tango-mar/admin/assessments/assessment_2027_annual/assign",
+      { method: "POST", headers, body: "" },
+      env,
+    );
+    expect(unconfirmed.status).toBe(303);
+    expect(unconfirmed.headers.get("Location")).toBe("/a/tango-mar/admin/ledger#dues");
+    expect(decodeURIComponent(unconfirmed.headers.get("Set-Cookie") ?? "")).toContain("warn:Confirm the assign first.");
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM invoices WHERE assessment_id = 'assessment_2027_annual'")).toBe(before);
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'assessment_assign'")).toBe(0);
+
+    const unchecked = await app.request(
+      "http://localhost/a/tango-mar/admin/assessments/assessment_2027_annual/assign",
+      { method: "POST", headers, body: new URLSearchParams({ confirm: "no" }) },
+      env,
+    );
+    expect(decodeURIComponent(unchecked.headers.get("Set-Cookie") ?? "")).toContain("warn:Confirm the assign first.");
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM invoices WHERE assessment_id = 'assessment_2027_annual'")).toBe(before);
+
+    const forbidden = await app.request(
+      "http://localhost/a/tango-mar/admin/assessments/assessment_2027_annual/assign",
+      {
+        method: "POST",
+        headers: { Cookie: `tango_session=${owner}`, Origin: "http://localhost" },
+        body: new URLSearchParams({ confirm: "yes" }),
+      },
+      env,
+    );
+    expect(forbidden.status).toBe(403);
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM invoices WHERE assessment_id = 'assessment_2027_annual'")).toBe(before);
+
+    const assigned = await app.request(
+      "http://localhost/a/tango-mar/admin/assessments/assessment_2027_annual/assign",
+      { method: "POST", headers, body: new URLSearchParams({ confirm: "yes" }) },
+      env,
+    );
+    expect(assigned.status).toBe(303);
+    expect(assigned.headers.get("Location")).toBe("/a/tango-mar/admin/ledger#dues");
+    const flash = decodeURIComponent(assigned.headers.get("Set-Cookie") ?? "");
+    expect(flash).toContain("ok:Assigned 2027 annual assessment to ");
+    expect(flash).not.toContain("Confirm the assign first.");
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM invoices WHERE assessment_id = 'assessment_2027_annual'")).toBeGreaterThan(before);
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'assessment_assign' AND entity_id = 'assessment_2027_annual'")).toBe(1);
+    sqlite.close();
+  });
+});

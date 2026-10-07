@@ -21,6 +21,8 @@ import {
   listLots,
   listOwners,
   listProperties,
+  markThreadReviewed,
+  messageWaitingOnBoard,
   notify,
   propertyInAssociation,
   refreshInvoiceStatus,
@@ -107,7 +109,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         lots: properties.length,
         members: owners.filter((owner) => owner.status !== "inactive").length,
         delinquent: ledger.filter((row) => row.delinquent).length,
-        waiting: threads.filter((thread) => !staff.has(thread.from_user_id)).length,
+        waiting: threads.filter((thread) => messageWaitingOnBoard(thread, staff)).length,
         pendingJoins,
         audit,
       }),
@@ -1545,19 +1547,62 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
 
   app.get("/a/:slug/admin/messages", async (c) => {
     const { association } = requireStaff(c);
-    const threads = await threadsForViewer(c.env.DB, association.id, "", true);
-    return render(c, { title: "Messages", active: "admin", body: adminMessagesPage(association, threads) });
+    const [threads, staffIds] = await Promise.all([
+      threadsForViewer(c.env.DB, association.id, "", true),
+      staffUserIds(c.env.DB, association.id),
+    ]);
+    return render(c, { title: "Messages", active: "admin", body: adminMessagesPage(association, threads, staffIds) });
   });
 
   app.get("/a/:slug/admin/messages/:threadId", async (c) => {
     const { association } = requireStaff(c);
-    const messages = await threadMessages(c.env.DB, association.id, c.req.param("threadId"));
+    const threadId = c.req.param("threadId");
+    const [messages, staffIds] = await Promise.all([
+      threadMessages(c.env.DB, association.id, threadId),
+      staffUserIds(c.env.DB, association.id),
+    ]);
     if (messages.length === 0) throw new NotFoundError();
     return render(c, {
       title: messages[0].subject,
       active: "admin",
-      body: adminThreadPage(association, messages[0].subject, messages),
+      body: adminThreadPage(association, messages[0].subject, messages, staffIds),
     });
+  });
+
+  app.post("/a/:slug/admin/messages/:threadId/reviewed", async (c) => {
+    const { association, user } = requireStaff(c);
+    const fields = await readForm(c);
+    const threadId = c.req.param("threadId");
+    const listPath = `/a/${association.slug}/admin/messages`;
+    const threadPath = `${listPath}/${threadId}`;
+    const requested = textValue(fields, "next", 200);
+    const back = requested === listPath || requested === threadPath ? requested : threadPath;
+    let result: { found: boolean; changed: boolean };
+    try {
+      result = await markThreadReviewed(c.env.DB, association.id, threadId);
+    } catch (error) {
+      if (isMissingColumn(error)) {
+        return redirectTo(
+          c,
+          back,
+          "Apply the message review migration in D1, then try again. The steps are in the README under Mark a message reviewed.",
+          "warn",
+        );
+      }
+      throw error;
+    }
+    if (!result.found) return redirectTo(c, listPath, "That thread was not found.", "warn");
+    if (result.changed) {
+      await writeAudit(c.env.DB, {
+        associationId: association.id,
+        actorUserId: user.id,
+        action: "message_review",
+        entityType: "message",
+        entityId: threadId,
+        detail: "Marked reviewed.",
+      });
+    }
+    return redirectTo(c, back, "Thread marked reviewed.");
   });
 
   app.get("/a/:slug/admin/audit", async (c) => {

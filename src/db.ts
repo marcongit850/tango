@@ -16,7 +16,11 @@ import { lotsToInvoice } from "./lib/dues";
 import { isMissingColumn, isMissingTable } from "./lib/errors";
 import { balanceCents, invoiceStatus, isDelinquent } from "./lib/money";
 
-async function hasColumn(db: D1Database, table: "memberships" | "properties" | "assessments", column: string): Promise<boolean> {
+async function hasColumn(
+  db: D1Database,
+  table: "memberships" | "properties" | "assessments" | "messages",
+  column: string,
+): Promise<boolean> {
   const { results } = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
   return results.some((row) => row.name === column);
 }
@@ -1250,17 +1254,31 @@ export type MessageRow = {
   subject: string;
   body: string;
   created_at: string;
+  reviewed_at: string | null;
 };
+
+export function messageWaitingOnBoard(
+  message: Pick<MessageRow, "from_user_id" | "reviewed_at">,
+  staffIds: ReadonlySet<string>,
+): boolean {
+  return !staffIds.has(message.from_user_id) && !message.reviewed_at;
+}
+
+function messageSelect(includeReviewedAt: boolean): string {
+  const reviewedAt = includeReviewedAt ? "m.reviewed_at" : "NULL AS reviewed_at";
+  return `m.id, m.thread_id, m.parent_id, m.from_user_id, u.name AS from_name, m.property_id,
+          p.lot_number, m.subject, m.body, m.created_at, ${reviewedAt}`;
+}
 
 export async function threadMessages(
   db: D1Database,
   associationId: string,
   threadId: string,
 ): Promise<MessageRow[]> {
+  const reviewed = await hasColumn(db, "messages", "reviewed_at");
   const { results } = await db
     .prepare(
-      `SELECT m.id, m.thread_id, m.parent_id, m.from_user_id, u.name AS from_name, m.property_id,
-              p.lot_number, m.subject, m.body, m.created_at
+      `SELECT ${messageSelect(reviewed)}
        FROM messages m
        JOIN users u ON u.id = m.from_user_id
        LEFT JOIN properties p ON p.id = m.property_id AND p.association_id = m.association_id
@@ -1272,18 +1290,45 @@ export async function threadMessages(
   return results;
 }
 
+export async function markThreadReviewed(
+  db: D1Database,
+  associationId: string,
+  threadId: string,
+): Promise<{ found: boolean; changed: boolean }> {
+  if (!(await hasColumn(db, "messages", "reviewed_at"))) {
+    throw new Error("no such column: messages.reviewed_at");
+  }
+  const latest = await db
+    .prepare(
+      `SELECT id, reviewed_at
+       FROM messages
+       WHERE association_id = ? AND thread_id = ?
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+    )
+    .bind(associationId, threadId)
+    .first<{ id: string; reviewed_at: string | null }>();
+  if (!latest) return { found: false, changed: false };
+  if (latest.reviewed_at) return { found: true, changed: false };
+  const result = await db
+    .prepare("UPDATE messages SET reviewed_at = ? WHERE association_id = ? AND id = ? AND reviewed_at IS NULL")
+    .bind(new Date().toISOString(), associationId, latest.id)
+    .run();
+  return { found: true, changed: (result.meta.changes ?? 0) > 0 };
+}
+
 export async function threadsForViewer(
   db: D1Database,
   associationId: string,
   userId: string,
   staff: boolean,
 ): Promise<MessageRow[]> {
+  const reviewed = await hasColumn(db, "messages", "reviewed_at");
   const scope = staff
     ? ""
     : `AND m.thread_id IN (SELECT thread_id FROM messages WHERE association_id = ? AND from_user_id = ?)`;
   const statement = db.prepare(
-    `SELECT m.id, m.thread_id, m.parent_id, m.from_user_id, u.name AS from_name, m.property_id,
-            p.lot_number, m.subject, m.body, m.created_at
+    `SELECT ${messageSelect(reviewed)}
      FROM messages m
      JOIN users u ON u.id = m.from_user_id
      LEFT JOIN properties p ON p.id = m.property_id AND p.association_id = m.association_id

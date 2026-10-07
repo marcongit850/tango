@@ -282,12 +282,16 @@ export function importPage(association: Association, result?: { importResult: Im
     </section>`;
 }
 
+export function paymentInvoiceVisible(selectedLotId: string, propertyId: string): boolean {
+  return propertyId === selectedLotId;
+}
+
 export function ledgerPage(options: {
   association: Association;
   ledger: BalanceRow[];
   ownersByProperty: Map<string, string>;
   properties: PropertyRow[];
-  invoices: { id: string; label: string }[];
+  invoices: { id: string; label: string; propertyId: string }[];
   assessments: AssessmentAdminRow[];
   duesReady: boolean;
   duesYear: number;
@@ -309,6 +313,7 @@ export function ledgerPage(options: {
     value: property.id,
     label: `Lot ${property.lot_number}`,
   }));
+  const selectedLot = propertyOptions[0]?.value ?? "";
   return `${adminNav(options.association.slug, "ledger")}
     <section class="panel">
       <h1>Assessments and balances</h1>
@@ -331,9 +336,17 @@ export function ledgerPage(options: {
       </article>
       <article class="panel">
         <h2>Record a payment</h2>
-        <form class="fields" method="post" action="/a/${esc(options.association.slug)}/admin/payments">
-          ${selectField("Lot", "property_id", propertyOptions)}
-          ${selectField("Invoice", "invoice_id", [{ value: "", label: "Not tied to one invoice" }, ...options.invoices.map((invoice) => ({ value: invoice.id, label: invoice.label }))])}
+        <form class="fields" method="post" action="/a/${esc(options.association.slug)}/admin/payments" data-payment-form>
+          ${selectField("Lot", "property_id", propertyOptions, selectedLot)}
+          ${selectField("Invoice", "invoice_id", [
+            { value: "", label: "Not tied to one invoice" },
+            ...options.invoices.map((invoice) => ({
+              value: invoice.id,
+              label: invoice.label,
+              propertyId: invoice.propertyId,
+              hidden: !paymentInvoiceVisible(selectedLot, invoice.propertyId),
+            })),
+          ])}
           ${textField("Amount", "amount", { required: true })}
           ${selectField("Method", "method", [
             { value: "check", label: "Check" },
@@ -346,6 +359,7 @@ export function ledgerPage(options: {
           ${areaField("Notes", "notes")}
           <button type="submit">Save payment</button>
         </form>
+        <script src="/ledger-payment.js"></script>
       </article>
     </section>`;
 }

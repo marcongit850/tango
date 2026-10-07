@@ -65,11 +65,15 @@ export function areaField(label: string, name: string, value = "", required = fa
 export function selectField(
   label: string,
   name: string,
-  options: { value: string; label: string }[],
+  options: { value: string; label: string; propertyId?: string; hidden?: boolean }[],
   selected = "",
 ): string {
   const html = options
-    .map((option) => `<option value="${esc(option.value)}" ${option.value === selected ? "selected" : ""}>${esc(option.label)}</option>`)
+    .map((option) => {
+      const property = option.propertyId ? ` data-property-id="${esc(option.propertyId)}"` : "";
+      const hidden = option.hidden ? " hidden disabled" : "";
+      return `<option value="${esc(option.value)}"${property}${hidden} ${option.value === selected ? "selected" : ""}>${esc(option.label)}</option>`;
+    })
     .join("");
   return `<label>${esc(label)}<select name="${esc(name)}">${html}</select></label>`;
 }

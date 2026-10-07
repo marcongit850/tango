@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { canViewPropertyFinancials, isAdmin, isBoardMember } from "../lib/access";
+import { canEditAdmin, canViewPropertyFinancials, isAdmin, isBoardMember } from "../lib/access";
 import { timeZoneLabel, todayIso } from "../lib/dates";
 import { resendApiKey, sendResendEmail, SUPPORT_INBOX, supportEmailText } from "../lib/email";
 import { ForbiddenError, NotFoundError } from "../lib/errors";
@@ -51,7 +51,7 @@ import {
   supportPage,
   threadPage,
 } from "../views/resident";
-import { readForm, redirectTo, requireMember, textValue, type AppContext } from "./common";
+import { readForm, redirectTo, requireEditor, requireMember, textValue, type AppContext } from "./common";
 
 export function registerResidentRoutes(app: Hono<AppBindings>): void {
   app.get("/a/:slug/dashboard", async (c) => {
@@ -208,9 +208,56 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/a/:slug/board", async (c) => {
-    const { association } = requireMember(c);
+    const { association, membership } = requireMember(c);
     const contacts = await listContacts(c.env.DB, association.id);
-    return render(c, { title: "Board", active: "board", body: boardPage(association, contacts) });
+    return render(c, {
+      title: "Board",
+      active: "board",
+      body: boardPage(association, contacts, { canEdit: canEditAdmin(membership) }),
+    });
+  });
+
+  app.post("/a/:slug/board", async (c) => {
+    const { association, user } = requireEditor(c);
+    const fields = await readForm(c);
+    const draft = {
+      legal_name: textValue(fields, "legal_name", 200),
+      address_line1: textValue(fields, "address_line1", 200),
+      city: textValue(fields, "city", 80),
+      state: textValue(fields, "state", 40),
+      postal_code: textValue(fields, "postal_code", 20),
+    };
+    if (!draft.legal_name) {
+      const contacts = await listContacts(c.env.DB, association.id);
+      return render(c, {
+        title: "Board",
+        active: "board",
+        status: 400,
+        body: boardPage(association, contacts, {
+          canEdit: true,
+          open: true,
+          error: "Enter the legal name.",
+          draft,
+        }),
+      });
+    }
+    await c.env.DB
+      .prepare(
+        `UPDATE associations
+         SET legal_name = ?, address_line1 = ?, city = ?, state = ?, postal_code = ?
+         WHERE id = ?`,
+      )
+      .bind(draft.legal_name, draft.address_line1, draft.city, draft.state, draft.postal_code, association.id)
+      .run();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "mailing_update",
+      entityType: "association",
+      entityId: association.id,
+      detail: [draft.legal_name, draft.address_line1, draft.city, draft.state, draft.postal_code].filter(Boolean).join(", "),
+    });
+    return redirectTo(c, `/a/${association.slug}/board`, "Mailing address saved.");
   });
 
   app.get("/a/:slug/support", async (c) => {

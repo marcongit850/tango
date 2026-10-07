@@ -70,7 +70,7 @@ The seed association is Tango Mar, slug `tango-mar`.
 - Place: Miramar Beach, Walton County, Florida
 - Time zone: `America/Chicago` (Walton County is Central Time)
 
-Edit `migrations/0002_seed_tango_mar.sql` if the mailing address should change, then apply migrations to a fresh database.
+A person with edit access can change the legal name and mailing address from the Board page. Edit `migrations/0002_seed_tango_mar.sql` when a fresh database should start with a different address.
 
 ## CSV import
 

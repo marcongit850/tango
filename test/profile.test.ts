@@ -512,7 +512,11 @@ describe("my profile", () => {
       expect(html).toContain("Email me portal announcements and updates");
       expect(html).toContain("Electronic Notice Consent");
       expect(html).toContain("I consent to receiving official association notices electronically at this email address.");
-      expect(html).toContain("I agree");
+      expect(html).not.toContain("I agree");
+      expect(html).toContain('class="fields email-prefs"');
+      expect(html).toMatch(
+        /<label><input type="checkbox" name="electronic_consent" value="1"> I consent to receiving official association notices electronically at this email address\.<\/label>/,
+      );
       expect(html).toMatch(/name="email_announcements"[^>]*checked/);
       expect(html).not.toMatch(/name="electronic_consent"[^>]*checked/);
       expect(html.indexOf("Save name and phone")).toBeLessThan(html.indexOf("Electronic Notice Consent"));

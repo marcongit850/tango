@@ -20,14 +20,23 @@ import {
   parseDemoIntent,
   type DemoFormValues,
 } from "../lib/demo-request";
+import { formatDateTime } from "../lib/dates";
 import { resendApiKey, sendResendEmail } from "../lib/email";
+import {
+  allowEstoppelRequest,
+  estoppelEmailText,
+  estoppelFieldError,
+  estoppelRecipient,
+  estoppelSubject,
+  type EstoppelFormValues,
+} from "../lib/estoppel";
 import { NotFoundError, isMissingTable } from "../lib/errors";
 import { logError, logInfo } from "../lib/log";
-import type { AppBindings } from "../types";
+import type { AppBindings, Association } from "../types";
 import { render } from "../views/layout";
 import { privacyPage, termsPage } from "../views/legal";
 import { hoaPitchPage } from "../views/pitch";
-import { homePage, joinReceivedPage, joinRequestPage, legalPage, loginPage, type HomePortal } from "../views/public";
+import { estoppelPage, homePage, joinReceivedPage, joinRequestPage, legalPage, loginPage, type HomePortal } from "../views/public";
 import { readForm, redirectTo, requireAssociation, textValue, type AppContext, type FormFields } from "./common";
 
 const HOME_SLUG = "tango-mar";
@@ -211,6 +220,64 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
     return render(c, { title: "Request received", active: "join", body: joinReceivedPage() });
   });
 
+  app.get("/a/:slug/estoppel", async (c) => {
+    const association = requireAssociation(c);
+    return render(c, {
+      title: `Estoppel Requests · ${association.name}`,
+      body: estoppelPage(association, { sent: c.req.query("sent") === "1" }),
+    });
+  });
+
+  app.post("/a/:slug/estoppel", async (c) => {
+    const association = requireAssociation(c);
+    const fields = await readForm(c);
+    const back = `/a/${association.slug}/estoppel`;
+    if (textValue(fields, "website", 200)) {
+      allowEstoppelRequest(clientIp(c));
+      return redirectTo(c, `${back}?sent=1`);
+    }
+    const values = estoppelValues(fields);
+    const error = estoppelFieldError(values);
+    if (error) return estoppelResponse(c, association, values, error, 400);
+    if (!allowEstoppelRequest(clientIp(c))) {
+      return estoppelResponse(c, association, values, "Please wait a few minutes, then try again.", 429);
+    }
+    const apiKey = resendApiKey(c.env);
+    let sent = false;
+    if (apiKey) {
+      try {
+        sent = await sendResendEmail({
+          apiKey,
+          from: c.env.EMAIL_FROM,
+          to: estoppelRecipient(),
+          replyTo: values.email,
+          subject: estoppelSubject(values.property),
+          text: estoppelEmailText({
+            ...values,
+            submittedAt: formatDateTime(new Date().toISOString(), "America/Chicago"),
+          }),
+        });
+      } catch (error) {
+        logError("estoppel_request", { message: error instanceof Error ? error.message : "unknown" });
+      }
+    } else {
+      logError("estoppel_request", { message: "email not configured" });
+    }
+    if (!sent) {
+      return estoppelResponse(c, association, values, "Your request could not be sent. Please try again later.", 503);
+    }
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: null,
+      action: "estoppel_request",
+      entityType: "estoppel",
+      entityId: association.id,
+      detail: `${values.name}: ${values.property}`,
+    });
+    logInfo("estoppel_request", { associationId: association.id });
+    return redirectTo(c, `${back}?sent=1`);
+  });
+
   app.get("/a/:slug", (c) => {
     requireAssociation(c);
     return c.redirect("/", 302);
@@ -229,6 +296,33 @@ function clientIp(c: AppContext): string {
   if (cf) return cf;
   const forwarded = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
   return forwarded || "unknown";
+}
+
+function estoppelValues(fields: FormFields): EstoppelFormValues {
+  return {
+    name: textValue(fields, "name", 120),
+    company: textValue(fields, "company", 160),
+    email: textValue(fields, "email", 200).toLowerCase(),
+    phone: textValue(fields, "phone", 40),
+    property: textValue(fields, "property", 200),
+    owners: textValue(fields, "owners", 200),
+    closingDate: textValue(fields, "closing_date", 10),
+    notes: textValue(fields, "notes", 2000),
+  };
+}
+
+function estoppelResponse(
+  c: AppContext,
+  association: Association,
+  values: EstoppelFormValues,
+  error: string,
+  status: number,
+): Promise<Response> {
+  return render(c, {
+    title: `Estoppel Requests · ${association.name}`,
+    status,
+    body: estoppelPage(association, { error, values }),
+  });
 }
 
 function demoValues(fields: FormFields): DemoFormValues {

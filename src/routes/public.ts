@@ -11,6 +11,15 @@ import {
   writeAudit,
 } from "../db";
 import { canViewAdmin, safeNextPath } from "../lib/access";
+import {
+  DEMO_INBOX,
+  allowDemoRequest,
+  demoEmailText,
+  demoFieldError,
+  demoSubject,
+  parseDemoIntent,
+  type DemoFormValues,
+} from "../lib/demo-request";
 import { resendApiKey, sendResendEmail } from "../lib/email";
 import { NotFoundError, isMissingTable } from "../lib/errors";
 import { logError, logInfo } from "../lib/log";
@@ -19,7 +28,7 @@ import { render } from "../views/layout";
 import { privacyPage, termsPage } from "../views/legal";
 import { hoaPitchPage } from "../views/pitch";
 import { homePage, joinReceivedPage, joinRequestPage, legalPage, loginPage, type HomePortal } from "../views/public";
-import { readForm, redirectTo, requireAssociation, textValue, type AppContext } from "./common";
+import { readForm, redirectTo, requireAssociation, textValue, type AppContext, type FormFields } from "./common";
 
 const HOME_SLUG = "tango-mar";
 
@@ -52,12 +61,50 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/bring-this-to-your-hoa", async (c) => {
+    const intent = parseDemoIntent(c.req.query("intent") ?? "") ?? "demo";
     return render(c, {
       title: "Bring This to Your HOA · Tango Mar",
       active: "bring",
       marketing: true,
-      body: hoaPitchPage(),
+      body: hoaPitchPage({ intent, sent: c.req.query("sent") === "1" }),
     });
+  });
+
+  app.post("/bring-this-to-your-hoa", async (c) => {
+    const fields = await readForm(c);
+    if (textValue(fields, "company", 200)) {
+      allowDemoRequest(clientIp(c));
+      return redirectTo(c, "/bring-this-to-your-hoa?sent=1#demo-form");
+    }
+    const values = demoValues(fields);
+    const error = demoFieldError(values);
+    if (error) return pitchResponse(c, values, error, 400);
+    if (!allowDemoRequest(clientIp(c))) {
+      return pitchResponse(c, values, "Please wait a few minutes, then try again.", 429);
+    }
+    const intent = parseDemoIntent(values.intent);
+    if (!intent) return pitchResponse(c, values, "Choose a request.", 400);
+    const apiKey = resendApiKey(c.env);
+    let sent = false;
+    if (apiKey) {
+      try {
+        sent = await sendResendEmail({
+          apiKey,
+          from: c.env.EMAIL_FROM,
+          to: DEMO_INBOX,
+          replyTo: values.email,
+          subject: demoSubject(intent, values.hoa),
+          text: demoEmailText({ ...values, intent }),
+        });
+      } catch (error) {
+        logError("demo_request", { message: error instanceof Error ? error.message : "unknown" });
+      }
+    } else {
+      logError("demo_request", { message: "email not configured" });
+    }
+    if (!sent) return pitchResponse(c, values, "Your request could not be sent. Please try again later.", 503);
+    logInfo("demo_request", { intent });
+    return redirectTo(c, "/bring-this-to-your-hoa?sent=1#demo-form", "Your request was sent.");
   });
 
   app.get("/legal", async (c) => render(c, { title: "Not legal advice", active: "legal", body: legalPage() }));
@@ -174,5 +221,38 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
     if (!association) throw new NotFoundError();
     const nextPath = safeNextPath(association.slug, c.req.query("next") ?? "");
     return render(c, { title: `Sign in · ${association.name}`, active: "login", body: loginPage(association, nextPath) });
+  });
+}
+
+function clientIp(c: AppContext): string {
+  const cf = c.req.header("cf-connecting-ip")?.trim();
+  if (cf) return cf;
+  const forwarded = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
+  return forwarded || "unknown";
+}
+
+function demoValues(fields: FormFields): DemoFormValues {
+  return {
+    intent: textValue(fields, "intent", 20),
+    name: textValue(fields, "name", 120),
+    email: textValue(fields, "email", 200).toLowerCase(),
+    hoa: textValue(fields, "hoa", 160),
+    phone: textValue(fields, "phone", 40),
+    homes: textValue(fields, "homes", 10),
+    message: textValue(fields, "message", 2000),
+  };
+}
+
+function pitchResponse(c: AppContext, values: DemoFormValues, error: string, status: number): Promise<Response> {
+  return render(c, {
+    title: "Bring This to Your HOA · Tango Mar",
+    active: "bring",
+    marketing: true,
+    status,
+    body: hoaPitchPage({
+      intent: parseDemoIntent(values.intent) ?? "demo",
+      error,
+      values,
+    }),
   });
 }

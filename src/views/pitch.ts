@@ -1,21 +1,33 @@
-const DEMO_EMAIL = "marc@whpinc.com";
+import { esc } from "../lib/html";
+import type { DemoIntent } from "../lib/demo-request";
+
 const SHOT_DESKTOP = "/bring/dashboard-desktop.webp";
 const SHOT_PHONE = "/bring/dashboard-phone.webp";
 const SHOT_FULL = "/bring/dashboard-full.webp";
+
+export type PitchPageOptions = {
+  intent?: DemoIntent;
+  sent?: boolean;
+  error?: string;
+  values?: {
+    name?: string;
+    email?: string;
+    hoa?: string;
+    phone?: string;
+    homes?: string;
+    message?: string;
+  };
+};
+
+function requestLink(intent: DemoIntent, label: string): string {
+  return `<a class="button" href="/bring-this-to-your-hoa?intent=${intent}#demo-form" data-demo-intent="${intent}">${label} <span aria-hidden="true">→</span></a>`;
+}
 
 const SVG = `viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"`;
 
 function icon(paths: string): string {
   return `<svg ${SVG}>${paths}</svg>`;
 }
-
-function demoHref(subject: string): string {
-  return `mailto:${DEMO_EMAIL}?subject=${encodeURIComponent(subject)}`;
-}
-
-const DEMO_REQUEST = demoHref("Demo request for Bring This to Your HOA");
-const PRICING_REQUEST = demoHref("Pricing request for Bring This to Your HOA");
-const SETUP_REQUEST = demoHref("Custom setup demo for Bring This to Your HOA");
 
 const ICONS = {
   shield: icon(`<path d="M12 3.5 19 6.2v5.3c0 4.2-2.8 6.8-7 8.5-4.2-1.7-7-4.3-7-8.5V6.2L12 3.5z"/>`),
@@ -44,8 +56,6 @@ const ICONS = {
   clipboard: icon(`<rect x="6.2" y="4.2" width="11.6" height="15.6" rx="1.4"/><path d="M9 4.2h6V6.6H9zM9 11h6M9 14.4h4"/>`),
   lock: icon(`<rect x="6" y="10.6" width="12" height="8" rx="1.4"/><path d="M8.4 10.6V8.3a3.6 3.6 0 0 1 7.2 0v2.3"/>`),
   spark: icon(`<path d="M12 3.2v3.2M12 17.6V21M3.2 12h3.2M17.6 12H21M6 6l2.2 2.2M15.8 15.8 18 18M18 6l-2.2 2.2M8.2 15.8 6 18"/><circle cx="12" cy="12" r="2.2"/>`),
-  calendar: icon(`<rect x="4" y="5.2" width="16" height="14.2" rx="1.5"/><path d="M4 9.4h16M8 3.6v3.2M16 3.6v3.2"/>`),
-  ballot: icon(`<rect x="5" y="3.6" width="14" height="16.8" rx="1.4"/><path d="M8 8.8l1.3 1.3L12.2 7.2M8 14.2l1.3 1.3 2.9-2.9"/>`),
   bell: icon(`<path d="M6 16.4h12l-1.2-1.9V11a4.8 4.8 0 0 0-9.6 0v3.5L6 16.4z"/><path d="M10 16.6a2 2 0 0 0 4 0"/>`),
   house: icon(`<path d="M4 11.4 12 4.8l8 6.6"/><path d="M7 10.6V19h10v-8.4"/>`),
   check: icon(`<circle cx="12" cy="12" r="8"/><path d="M8.4 12.2 10.9 14.6 15.6 9.6"/>`),
@@ -72,7 +82,7 @@ function priceCard(options: {
   title: string;
   intro: string;
   items: string[];
-  href: string;
+  intent: DemoIntent;
   label: string;
   popular?: boolean;
   price?: string;
@@ -88,7 +98,7 @@ function priceCard(options: {
       ${price}
       <p>${options.intro}</p>
       <ul>${items}</ul>
-      <a class="button" href="${options.href}">${options.label} <span aria-hidden="true">→</span></a>
+      ${requestLink(options.intent, options.label)}
     </article>`;
 }
 
@@ -113,7 +123,62 @@ function faqItem(question: string, answer: string): string {
     </details>`;
 }
 
-export function hoaPitchPage(): string {
+function intentLabel(intent: DemoIntent): string {
+  if (intent === "pricing") return "Request Pricing";
+  if (intent === "setup") return "Schedule a Demo";
+  return "Request a Demo";
+}
+
+function demoForm(
+  intent: DemoIntent,
+  values: { name: string; email: string; hoa: string; phone: string; homes: string; message: string },
+  error: string,
+  sent: boolean,
+): string {
+  if (sent) {
+    return `<section id="demo-form" class="pitch-section" aria-labelledby="demo-title">
+      <div class="wrap">
+        <div class="panel pitch-form">
+          <h2 id="demo-title">Request received</h2>
+          <p>Thanks. Your request was sent. We will reply by email.</p>
+          <p><a class="button secondary" href="/bring-this-to-your-hoa#demo-form">Send another request</a></p>
+        </div>
+      </div>
+    </section>`;
+  }
+  return `<section id="demo-form" class="pitch-section" aria-labelledby="demo-title">
+      <div class="wrap">
+        <div class="panel pitch-form">
+          <p class="kicker" id="demo-intent-label">${intentLabel(intent)}</p>
+          <h2 id="demo-title">Tell us about your community</h2>
+          <p>Share a few details and we will reply by email.</p>
+          ${error ? `<p class="flash warn">${esc(error)}</p>` : ""}
+          <form class="fields" method="post" action="/bring-this-to-your-hoa">
+            <label class="hp">Company<input type="text" name="company" tabindex="-1" autocomplete="off"></label>
+            <input type="hidden" name="intent" value="${esc(intent)}">
+            <label>Name<input type="text" name="name" autocomplete="name" maxlength="120" required value="${esc(values.name)}"></label>
+            <label>Email<input type="email" name="email" autocomplete="email" maxlength="200" required value="${esc(values.email)}"></label>
+            <label>HOA / community name<input type="text" name="hoa" maxlength="160" required value="${esc(values.hoa)}"></label>
+            <label>Phone, optional<input type="tel" name="phone" autocomplete="tel" maxlength="40" value="${esc(values.phone)}"></label>
+            <label>Number of homes, optional<input type="text" name="homes" inputmode="numeric" maxlength="6" value="${esc(values.homes)}"></label>
+            <label>Message<textarea name="message" maxlength="2000" required>${esc(values.message)}</textarea></label>
+            <button type="submit">Send request</button>
+          </form>
+        </div>
+      </div>
+    </section>`;
+}
+
+export function hoaPitchPage(options: PitchPageOptions = {}): string {
+  const intent: DemoIntent = options.intent === "pricing" || options.intent === "setup" ? options.intent : "demo";
+  const formValues = {
+    name: options.values?.name ?? "",
+    email: options.values?.email ?? "",
+    hoa: options.values?.hoa ?? "",
+    phone: options.values?.phone ?? "",
+    homes: options.values?.homes ?? "",
+    message: options.values?.message ?? "",
+  };
   const features = [
     featureCard("document", ICONS.shield, "Secure Owner Portal", "A private, secure portal for homeowners."),
     featureCard(
@@ -163,7 +228,7 @@ export function hoaPitchPage(): string {
         "Owner accounts",
         "Requests &amp; communication",
       ],
-      href: PRICING_REQUEST,
+      intent: "pricing",
       label: "Request Pricing",
     }),
     priceCard({
@@ -175,10 +240,9 @@ export function hoaPitchPage(): string {
         "Online payments",
         "Text alerts / SMS notices",
         "Violation tracking",
-        "Electronic voting",
         "Amenity reservations",
       ],
-      href: PRICING_REQUEST,
+      intent: "pricing",
       label: "Request Pricing",
     }),
     priceCard({
@@ -191,7 +255,7 @@ export function hoaPitchPage(): string {
         "Special feature requests",
         "Dedicated setup support",
       ],
-      href: SETUP_REQUEST,
+      intent: "setup",
       label: "Schedule a Demo",
     }),
   ].join("");
@@ -200,15 +264,15 @@ export function hoaPitchPage(): string {
     featureRow("Secure Owner Portal", "Included", "Private sign-in for homeowners."),
     featureRow("Documents &amp; Records", "Included", "Governing documents, meeting minutes, and records."),
     featureRow("Announcements &amp; Notices", "Included", "News, meetings, and notices from the board."),
+    featureRow("Email Notifications", "Included", "The board can email homeowners about announcements, events, documents, and notices."),
     featureRow("Owner Accounts", "Included", "Balances, invoices, and recorded payments."),
     featureRow("Requests &amp; Communication", "Included", "Private messages to the board."),
     featureRow("Board &amp; Admin Tools", "Included", "Roster, ledger, documents, news, and messages."),
     featureRow("Owner Directory", "Coming Soon", "A searchable homeowner directory is not available yet."),
     featureRow("Pay Assessments Online", "Coming Soon", "Card and ACH payments are not available yet."),
     featureRow("AI Document Chatbot", "Coming Soon", "The document assistant does not answer questions yet."),
-    featureRow("Text Alerts / SMS Notices", "Coming Soon", "The portal does not send text messages."),
-    featureRow("Violation Tracking", "Coming Soon", "Violations are not tracked in the portal."),
-    featureRow("Electronic Voting", "Coming Soon", "The portal does not collect votes."),
+    featureRow("Text Alerts / SMS Notices", "Coming Soon", "The portal does not send text messages yet."),
+    featureRow("Violation Tracking", "Coming Soon", "Violations are not tracked in the portal yet."),
     featureRow("Amenity Reservations", "Coming Soon", "Homeowners cannot reserve amenities yet."),
     featureRow("Accounting Integrations", "Coming Soon", "No connection to accounting software yet."),
     featureRow("Meeting &amp; Notice Compliance Tools", "Coming Soon", "State compliance tools are not included yet."),
@@ -221,18 +285,12 @@ export function hoaPitchPage(): string {
 
   const soon = [
     soonCard(ICONS.spark, "AI Document Assistant", "Get instant answers from your governing documents."),
-    soonCard(ICONS.calendar, "Meeting &amp; Notice Management", "Tools to help with state compliance and meeting requirements."),
     soonCard(ICONS.clipboard, "Violation Tracking", "Track, manage, and resolve violations more easily."),
-    soonCard(ICONS.ballot, "Electronic Voting", "Conduct secure online voting for your community."),
-    soonCard(ICONS.bell, "Email &amp; Text Notifications", "Send important updates via email or SMS."),
+    soonCard(ICONS.bell, "Text Notifications", "Send important updates by text message."),
     soonCard(ICONS.house, "Amenity Reservations", "Let homeowners easily reserve community amenities."),
   ].join("");
 
   const faqs = [
-    faqItem(
-      "Do we need to change management companies?",
-      "No. The portal is a website for your association's documents, announcements, owner accounts, and messages to the board. It does not replace a management company.",
-    ),
     faqItem(
       "Can you import our existing owner list?",
       "Yes. An administrator can import a CSV file of owners. The columns include email, name, lot number, and street address. Optional columns cover role, administrator access, phone, mailing address, a second owner, and a starting balance. Importing the same lot again updates that person and does not add a second opening balance.",
@@ -245,10 +303,6 @@ export function hoaPitchPage(): string {
       "Can multiple board members have administrator access?",
       "Yes. Several people can have administrator access at the same time. Officers have edit access, and a board member or homeowner can be given it too. The association keeps one master admin, who cannot be deleted and must keep edit access. Other admins can be added or changed.",
     ),
-    faqItem(
-      "Can the portal use our existing domain?",
-      "Tango Mar runs this portal on its own domain, mytangomar.com. Domain setup sits outside the portal pages. This site stays on that address. A different web address on this same site would still open Tango Mar. Another association on its own domain would be a separate site.",
-    ),
   ].join("");
 
   return `<nav class="pitch-jump wrap" aria-label="On this page">
@@ -256,7 +310,7 @@ export function hoaPitchPage(): string {
       <a href="#pricing">Pricing</a>
       <a href="#coming-soon">Coming Soon</a>
       <a href="#faq">FAQs</a>
-      <a class="button" href="${DEMO_REQUEST}">Request a Demo <span aria-hidden="true">→</span></a>
+      ${requestLink("demo", "Request a Demo")}
     </nav>
     <section class="pitch-hero" aria-labelledby="pitch-title">
       <div class="wrap pitch-hero-grid">
@@ -266,7 +320,7 @@ export function hoaPitchPage(): string {
           <p class="pitch-sub">A simple, secure homeowner portal built for real community associations.</p>
           <p>Give your homeowners one place for documents, announcements, account information, requests, community resources, and more, all in a modern, easy-to-use portal.</p>
           <p class="actions">
-            <a class="button" href="${DEMO_REQUEST}">Request a Demo <span aria-hidden="true">→</span></a>
+            ${requestLink("demo", "Request a Demo")}
             <a class="button secondary" href="#features">See Features</a>
           </p>
           <p class="muted">This platform powers the Tango Mar homeowner portal you're viewing now.</p>
@@ -356,6 +410,7 @@ export function hoaPitchPage(): string {
         <div class="stack">${faqs}</div>
       </div>
     </section>
+    ${demoForm(intent, formValues, options.error ?? "", Boolean(options.sent))}
     <dialog class="pitch-dialog" id="sample-dialog" aria-label="Sample homeowner dashboard">
       <form method="dialog" class="pitch-dialog-bar">
         <p>Sample dashboard. Demo data only.</p>

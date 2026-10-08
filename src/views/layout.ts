@@ -169,8 +169,10 @@ form.email-prefs h2 { margin: 0.75rem 0 0; font-size: 1.05rem; }
   color: var(--muted);
   font-weight: 600;
 }
-.lot-fold { border-bottom: 1px solid var(--line); }
+.lot-fold { border-bottom: 1px solid var(--line); max-width: 100%; }
 .lot-summary {
+  min-width: 0;
+  max-width: 100%;
   padding: 0.55rem 0.4rem;
   cursor: pointer;
   list-style: none;
@@ -179,7 +181,7 @@ form.email-prefs h2 { margin: 0.75rem 0 0; font-size: 1.05rem; }
 .lot-summary::marker { content: ""; }
 .lot-summary:focus-visible { outline: 2px solid var(--gulf); outline-offset: -2px; }
 .lot-place, .lot-person { min-width: 0; }
-.lot-house, .lot-address { display: block; }
+.lot-house, .lot-address { display: block; overflow-wrap: anywhere; }
 .lot-lot a, .lot-balance, .lot-phone, .lot-lot .badge { white-space: nowrap; }
 .lot-chevron {
   width: 0.42rem;
@@ -221,16 +223,20 @@ form.email-prefs h2 { margin: 0.75rem 0 0; font-size: 1.05rem; }
 .lot-edit form.fields { max-width: 36rem; margin-top: 0.75rem; }
 .lot-search-empty { margin: 0.4rem 0 0; }
 @media (max-width: 720px) {
+  main.wrap:has(#lots) { grid-template-columns: minmax(0, 1fr); }
+  main.wrap:has(#lots) > * { min-width: 0; }
   .lot-head { display: none; }
   .lot-summary {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(0, 1fr) 1.15rem;
     grid-template-areas:
       "lot chevron"
       "place place"
       "person person"
       "balance status";
     row-gap: 0.35rem;
+    width: 100%;
   }
+  .lot-lot, .lot-place, .lot-person, .lot-balance, .lot-state { max-width: 100%; }
   .lot-lot { grid-area: lot; }
   .lot-chevron { grid-area: chevron; align-self: center; margin-top: 0; }
   .lot-place { grid-area: place; }

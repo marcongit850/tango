@@ -17,10 +17,23 @@
       var summary = fold.querySelector("summary");
       if (!summary) return;
       var sync = function () {
-        summary.setAttribute("aria-expanded", fold.hasAttribute("open") ? "true" : "false");
+        summary.setAttribute("aria-expanded", fold.open ? "true" : "false");
       };
       sync();
-      fold.addEventListener("toggle", sync);
+      fold.addEventListener("toggle", function (event) {
+        var opened = event.newState ? event.newState === "open" : fold.open;
+        summary.setAttribute("aria-expanded", opened ? "true" : "false");
+      });
+      summary.addEventListener("click", function (event) {
+        var target = event.target;
+        if (target && target.closest && target.closest("a")) return;
+        window.setTimeout(sync, 0);
+      });
+      summary.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" || event.target !== summary) return;
+        event.preventDefault();
+        fold.open = !fold.open;
+      });
       Array.prototype.forEach.call(summary.querySelectorAll("a"), function (link) {
         link.addEventListener("mousedown", function (event) {
           event.stopPropagation();

@@ -728,6 +728,9 @@ body:has(.ask-portal) main { padding-bottom: 5rem; }
 .pitch-soon h3 { font-family: var(--sans); font-weight: 700; font-size: 1.05rem; letter-spacing: 0; margin: 0 0 0.35rem; }
 .pitch-soon .badge { margin-bottom: 0.55rem; }
 .pitch-faq .stack { text-align: left; }
+.pitch-form { max-width: 36rem; margin: 0 auto; text-align: left; }
+.pitch-form h2 { font-size: 2rem; }
+.pitch section[id] { scroll-margin-top: 1rem; }
 .pitch-dialog {
   width: min(68rem, calc(100vw - 2rem));
   max-height: calc(100vh - 2rem);

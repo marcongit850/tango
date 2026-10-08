@@ -48,22 +48,50 @@ describe("bring this to your HOA", () => {
     expect(html).not.toContain("/tango-mar-dunes.webp");
     expect(html).not.toContain("\u2014");
     expect(html).not.toContain("\u2013");
+    expect(html).not.toContain("mailto:");
+    expect(html).not.toContain("whpinc");
+    expect(html).not.toContain("Electronic Voting");
+    expect(html).not.toContain("Electronic voting");
+    expect(html).not.toContain("Meeting &amp; Notice Management");
+    expect(html).not.toContain("management compan");
+    expect(html).not.toContain("existing domain");
+    expect(html).toContain("The portal does not send text messages yet.");
+    expect(html).toContain("Violations are not tracked in the portal yet.");
+    expect(html).toContain('id="demo-form"');
     expect(pageText(html)).not.toContain("palm");
 
     const home = await app.request("http://localhost/", {}, env);
     expect(await home.text()).toContain(`href="${PATH}">Bring This to Your HOA</a>`);
   });
 
-  it("asks Marc for a demo by email and answers from the current product", () => {
+  it("collects a demo request on the page and answers from the current product", () => {
     const html = hoaPitchPage();
-    expect(html).toContain("mailto:marc@whpinc.com?subject=Demo%20request%20for%20Bring%20This%20to%20Your%20HOA");
-    expect(html).toContain("mailto:marc@whpinc.com?subject=Pricing%20request%20for%20Bring%20This%20to%20Your%20HOA");
-    expect(html).toContain("mailto:marc@whpinc.com?subject=Custom%20setup%20demo%20for%20Bring%20This%20to%20Your%20HOA");
+    expect(html).not.toContain("mailto:");
+    expect(html).not.toContain("whpinc");
+    expect(html).not.toContain("marc@");
+    expect(html).toContain('action="/bring-this-to-your-hoa"');
+    expect(html).toContain('name="name"');
+    expect(html).toContain('name="email"');
+    expect(html).toContain('name="hoa"');
+    expect(html).toContain('name="phone"');
+    expect(html).toContain('name="homes"');
+    expect(html).toContain('name="message"');
+    expect(html).toContain('<input type="hidden" name="intent" value="demo">');
+    expect(html).toContain('data-demo-intent="demo"');
+    expect(html).toContain('data-demo-intent="pricing"');
+    expect(html).toContain('data-demo-intent="setup"');
+    expect(html).toContain("Email Notifications");
+    expect(html).toContain("The board can email homeowners about announcements, events, documents, and notices.");
+    expect(html).toContain("Text Notifications");
+    expect(html).toContain("The portal does not send text messages yet.");
+    expect(html).toContain("Violations are not tracked in the portal yet.");
+    expect(html).not.toContain("Electronic Voting");
+    expect(html).not.toContain("Meeting &amp; Notice Management");
+    expect(html).not.toContain("Do we need to change management companies?");
+    expect(html).not.toContain("Can the portal use our existing domain?");
     expect(html).toContain("An administrator can import a CSV file of owners.");
     expect(html).toContain("The portal does not accept card or ACH payments.");
     expect(html).toContain("Several people can have administrator access at the same time.");
-    expect(html).toContain("mytangomar.com");
-    expect(html).toContain("It does not replace a management company.");
     expect(html).toContain('src="/bring/dashboard-desktop.webp"');
     expect(html).toContain('src="/bring/dashboard-phone.webp"');
     expect(html).toContain('src="/bring/dashboard-full.webp"');

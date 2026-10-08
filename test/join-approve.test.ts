@@ -424,6 +424,89 @@ describe("owner login filters", () => {
     expect(logins).not.toContain(">Balance<");
     expect(logins).not.toContain("Admin notes");
   });
+
+  it("uses a compact expandable roster and keeps edit controls off the view-only page", () => {
+    const lot = {
+      id: "prop_12",
+      lot_number: "12",
+      street_address: "105 Test Lane",
+      city: "Miramar Beach",
+      state: "FL",
+      postal_code: "32550",
+      status: "active",
+      lot_type: "improved" as const,
+      house_name: "VACATION HOUSE",
+      mailing_street: "505 Mock Road",
+      mailing_city: "Pensacola",
+      mailing_state: "FL",
+      mailing_postal_code: "32501",
+      owner_user_id: "user_parker",
+      owner_name: "Parker Mock",
+      owner_email: "parker.mock@example.com",
+      owner_phone: "850-555-0105",
+      admin_notes: "Gate code 4412",
+      balance_cents: 52525,
+      delinquent: true,
+    };
+    const linked = new Map([
+      [
+        "prop_12",
+        [
+          { userId: "user_parker", name: "Parker Mock", email: "parker.mock@example.com", phone: "850-555-0105", isPrimary: true },
+          { userId: "user_ada", name: "Ada Mock", email: "ada.mock@example.com", phone: "850-555-0111", isPrimary: false },
+        ],
+      ],
+    ]);
+    const editable = ownersPage(association, [lot], [], false, true, linked);
+    expect(editable).toContain('class="lot-search"');
+    expect(editable).toContain('placeholder="Name, lot, house, address, or email"');
+    expect(editable).toContain('class="lot-fold"');
+    expect(editable).toContain('src="/owners-roster.js"');
+    expect(editable).toContain('class="active" href="/a/tango-mar/admin/owners#lots">All lots');
+    expect(editable).toContain('href="/a/tango-mar/admin/owners?delinquent=1#lots">Past due only');
+    expect(editable).toContain('href="/a/tango-mar/admin/ledger/prop_12">Lot 12</a>');
+    expect(editable).toContain('class="badge late">Past due</span>');
+    expect(editable).toContain("VACATION HOUSE");
+    expect(editable).toContain("105 Test Lane, Miramar Beach, FL 32550");
+    expect(editable).not.toContain("105 Test Lane<br>");
+    expect(editable).toContain("Parker Mock");
+    expect(editable).toMatch(/data-search="[^"]*ada\.mock@example\.com/);
+    expect(editable).toMatch(/data-search="[^"]*505 Mock Road/);
+    expect(editable).toContain("850-555-0111");
+    expect(editable).toContain('class="lot-phone"');
+    expect(editable).toContain('class="money-link" href="/a/tango-mar/admin/ledger/prop_12"');
+    expect(editable).toContain('class="money owe"');
+    expect(editable).toContain("Improved");
+    expect(editable).toContain("Gate code 4412");
+    expect(editable).toContain("<summary>Edit</summary>");
+    expect(editable).toContain('action="/a/tango-mar/admin/lots/prop_12"');
+    expect(editable).toContain('action="/a/tango-mar/admin/lots/prop_12/owner"');
+    expect(editable).toContain('action="/a/tango-mar/admin/lots/prop_12/owners"');
+    expect(editable).toContain(">Add owner<");
+    expect(editable).toContain("Expand a lot and open Edit to add another owner.");
+    expect(editable).not.toContain("\u2014");
+    expect(editable).not.toContain("\u2013");
+
+    const view = ownersPage(association, [lot], [], false, false, linked);
+    expect(view).not.toContain("<summary>Edit</summary>");
+    expect(view).not.toContain("Save lot");
+    expect(view).not.toContain(">Add owner<");
+    expect(view).not.toContain('name="admin_notes"');
+    expect(view).not.toContain("<h2>Add a lot</h2>");
+    expect(view).toContain("Gate code 4412");
+    expect(view).toContain("850-555-0105");
+    expect(view).toContain('class="lot-fold"');
+    expect(view).toContain("View only.");
+
+    const addressOnly = ownersPage(association, [{ ...lot, house_name: "" }], [], false, false);
+    expect(addressOnly).toContain("105 Test Lane, Miramar Beach, FL 32550");
+    expect(addressOnly).not.toContain("lot-house");
+
+    const pastDue = ownersPage(association, [{ ...lot, delinquent: false }], [], true, false);
+    expect(pastDue).toContain("No past due lots.");
+    expect(pastDue).not.toContain("VACATION HOUSE");
+    expect(pastDue).not.toContain('class="lot-search"');
+  });
 });
 
 describe("join requests admin page", () => {

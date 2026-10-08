@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { canEditAdmin, canViewAdmin, canViewPropertyFinancials, isAdmin, isBoardMember } from "../lib/access";
+import { canEditAdmin, canViewAdmin, canViewPropertyFinancials, isAdmin } from "../lib/access";
 import { timeZoneLabel, todayIso } from "../lib/dates";
 import { resendApiKey, sendResendEmail, SUPPORT_INBOX, supportEmailText } from "../lib/email";
 import { ForbiddenError, isMissingColumn, isMissingTable, NotFoundError } from "../lib/errors";
@@ -430,7 +430,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
   app.get("/a/:slug/documents", async (c) => {
     const { association, membership } = requireMember(c);
     await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
-    const documents = await listDocuments(c.env.DB, association.id, isBoardMember(membership));
+    const documents = await listDocuments(c.env.DB, association.id, canViewAdmin(membership));
     return render(c, { title: "Documents", active: "documents", body: documentsPage(association, documents) });
   });
 
@@ -861,7 +861,7 @@ async function streamCurrent(c: AppContext, association: Association, membership
     .bind(association.id, documentId)
     .first<{ id: string; visibility: "residents" | "board"; current_version_id: string | null }>();
   if (!document?.current_version_id) throw new NotFoundError();
-  if (document.visibility === "board" && !isBoardMember(membership)) throw new ForbiddenError();
+  if (document.visibility === "board" && !canViewAdmin(membership)) throw new ForbiddenError();
   const version = await versionById(c.env.DB, association.id, document.current_version_id);
   if (!version || version.document_id !== document.id) throw new NotFoundError();
   await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);

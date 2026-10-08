@@ -361,12 +361,22 @@ describe("saving a document date", () => {
 });
 
 describe("signed-in documents page", () => {
-  it("shows board-only files below resident folders and hides them from homeowners", async () => {
+  it("shows board-only files to board members and admin homeowners, and hides them from homeowners", async () => {
     const { sqlite, db } = openPortal(THROUGH_DATE);
     const app = createApp();
     const env = portalEnv(db);
     const jordan = await signIn(sqlite, "user_jordan");
     const sam = await signIn(sqlite, "user_sam");
+    const casey = await signIn(sqlite, "user_casey");
+    sqlite.prepare("UPDATE memberships SET is_admin = 1 WHERE user_id = ? AND role_id = 'homeowner'").run("user_casey");
+    expect(sqlite.prepare("SELECT role_id, is_admin FROM memberships WHERE user_id = 'user_casey'").get()).toEqual({
+      role_id: "homeowner",
+      is_admin: 1,
+    });
+    expect(sqlite.prepare("SELECT role_id, is_admin FROM memberships WHERE user_id = 'user_sam'").get()).toEqual({
+      role_id: "homeowner",
+      is_admin: 0,
+    });
     sqlite.prepare("UPDATE documents SET folder = ?, document_date = ? WHERE id = ?").run("2026", "2026-02-01", "doc_budget");
     sqlite
       .prepare(
@@ -414,6 +424,16 @@ describe("signed-in documents page", () => {
       expect(ownerHtml).not.toContain("2026 budget (sample)");
       expect(ownerHtml).not.toContain("Closed session");
 
+      const adminPage = await app.request("http://localhost/a/tango-mar/documents", { headers: { Cookie: `tango_session=${casey}` } }, env);
+      expect(adminPage.status).toBe(200);
+      const adminHtml = await adminPage.text();
+      const adminSplit = adminHtml.indexOf("<h2>Board only</h2>");
+      expect(adminSplit).toBeGreaterThan(adminHtml.indexOf("<h1>Documents</h1>"));
+      expect(adminHtml.slice(0, adminSplit)).not.toContain("2026 budget (sample)");
+      expect(adminHtml.slice(adminSplit)).toContain("Private to board members.");
+      expect(adminHtml.slice(adminSplit)).toContain("2026 budget (sample)");
+      expect(adminHtml.slice(adminSplit)).toContain("Closed session");
+
       const denied = await app.request(
         "http://localhost/a/tango-mar/documents/doc_budget/file",
         { headers: { Cookie: `tango_session=${sam}` } },
@@ -421,6 +441,13 @@ describe("signed-in documents page", () => {
       );
       expect(denied.status).toBe(403);
       expect(await denied.text()).not.toContain("2026 budget");
+
+      const allowed = await app.request(
+        "http://localhost/a/tango-mar/documents/doc_budget/file",
+        { headers: { Cookie: `tango_session=${casey}` } },
+        env,
+      );
+      expect(allowed.status).not.toBe(403);
     } finally {
       sqlite.close();
     }

@@ -1763,8 +1763,12 @@ describe("email owners", () => {
   it("puts an unchecked Email owners box on document publish and version upload", () => {
     const list = documentsAdminPage(association, []);
     const publish = formByAction(list, "/a/tango-mar/admin/documents");
-    expect(publish).toContain('<input type="checkbox" name="email_owners" value="1"> Email owners');
+    expect(publish).toContain('<div data-email-owners><label><input type="checkbox" name="email_owners" value="1"> Email owners</label></div>');
+    expect(publish).not.toContain("data-email-owners hidden");
     expect(publish).not.toMatch(/name="email_owners"[^>]*checked/);
+    expect(list).toContain('<script src="/document-email.js"></script>');
+    expect(list).not.toContain("\u2014");
+    expect(list).not.toContain("\u2013");
 
     const version: VersionRow = {
       id: "ver-pdf",
@@ -1784,11 +1788,60 @@ describe("email owners", () => {
         [version],
       );
       const form = formByAction(html, "/a/tango-mar/admin/documents/doc-pdf/versions");
-      expect(form).toContain('<input type="checkbox" name="email_owners" value="1"> Email owners');
+      const emailBox = visibility === "board" ? '<div data-email-owners hidden>' : '<div data-email-owners>';
+      expect(form).toContain(`${emailBox}<label><input type="checkbox" name="email_owners" value="1"> Email owners</label></div>`);
       expect(form).not.toMatch(/name="email_owners"[^>]*checked/);
+      expect(html).toContain('<script src="/document-email.js"></script>');
       expect(formByAction(html, "/a/tango-mar/admin/documents/doc-pdf/visibility")).not.toContain("email_owners");
       expect(formByAction(html, "/a/tango-mar/admin/documents/doc-pdf/delete")).not.toContain("email_owners");
     }
+  });
+
+  it("hides Email owners when Who can see it is Board only and shows it unchecked again", () => {
+    const source = readFileSync("public/document-email.js", "utf8");
+    expect(source).not.toContain("\u2014");
+    expect(source).not.toContain("\u2013");
+    const sandbox: {
+      tangoDocumentEmail?: {
+        emailOwnersAllowed: (visibility: string) => boolean;
+        installDocumentEmailOwners: (doc: { querySelector: (selector: string) => unknown }) => void;
+      };
+    } = {};
+    new Function("globalThis", source)(sandbox);
+    const api = sandbox.tangoDocumentEmail;
+    expect(api?.emailOwnersAllowed("board")).toBe(false);
+    expect(api?.emailOwnersAllowed("residents")).toBe(true);
+    if (!api) return;
+    const listeners: Record<string, () => void> = {};
+    const checkbox = { checked: true };
+    const block = {
+      hidden: false,
+      querySelector: (selector: string) => (selector === 'input[name="email_owners"]' ? checkbox : null),
+    };
+    const select = {
+      value: "residents",
+      addEventListener: (event: string, listener: () => void) => {
+        listeners[event] = listener;
+      },
+    };
+    api.installDocumentEmailOwners({
+      querySelector: (selector: string) => {
+        if (selector === 'select[name="visibility"]') return select;
+        if (selector === "[data-email-owners]") return block;
+        return null;
+      },
+    });
+    expect(block.hidden).toBe(false);
+    expect(checkbox.checked).toBe(true);
+    select.value = "board";
+    listeners.change?.();
+    expect(block.hidden).toBe(true);
+    expect(checkbox.checked).toBe(false);
+    checkbox.checked = true;
+    select.value = "residents";
+    listeners.change?.();
+    expect(block.hidden).toBe(false);
+    expect(checkbox.checked).toBe(false);
   });
 
   it("writes a short portal link and does not attach a file", () => {

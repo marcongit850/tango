@@ -834,7 +834,7 @@ export function documentsAdminPage(association: Association, documents: Document
           ])}
           ${areaField("Notes", "notes")}
           <label>File<input type="file" name="file" required></label>
-          ${emailOwnersField()}
+          ${documentEmailOwnersField()}
           <button type="submit">Publish</button>
         </form>
       </article>`
@@ -847,7 +847,8 @@ export function documentsAdminPage(association: Association, documents: Document
         ${rows ? `<table><thead><tr><th>Category</th><th>Date</th><th>Subfolder</th><th>Title</th><th>Visibility</th><th>Current</th></tr></thead><tbody>${rows}</tbody></table>` : empty("No documents yet.")}
       </article>
       ${publish}
-    </section>`;
+    </section>
+    ${canEdit ? `<script src="/document-email.js"></script>` : ""}`;
 }
 
 export function documentDetailPage(
@@ -894,7 +895,7 @@ export function documentDetailPage(
       <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/documents/${esc(document.id)}/versions" enctype="multipart/form-data">
         ${areaField("Notes", "notes")}
         <label>File<input type="file" name="file" required></label>
-        ${emailOwnersField()}
+        ${documentEmailOwnersField(document.visibility === "board")}
         <button type="submit">Upload and make current</button>
       </form>
     </section>
@@ -914,7 +915,8 @@ export function documentDetailPage(
       ${visibility}
       ${rows ? `<table><thead><tr><th>Version</th><th>File</th><th>Notes</th><th>Uploaded</th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table>` : ""}
     </section>
-    ${upload}`;
+    ${upload}
+    ${canEdit ? `<script src="/document-email.js"></script>` : ""}`;
 }
 
 export type NewsEdit =
@@ -1279,6 +1281,10 @@ function duesAmountField(kind: "improved" | "unimproved", schedule: DuesSchedule
 
 function emailOwnersField(label = "Email owners", name = "email_owners"): string {
   return `<label><input type="checkbox" name="${name}" value="1"> ${label}</label>`;
+}
+
+function documentEmailOwnersField(startHidden = false): string {
+  return `<div data-email-owners${startHidden ? " hidden" : ""}>${emailOwnersField()}</div>`;
 }
 
 function newsItemActions(

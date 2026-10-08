@@ -1463,7 +1463,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     });
     if (stored.error) return redirectTo(c, `/a/${association.slug}/admin/documents`, stored.error, "warn");
     const mailed = await maybeEmailOwners(c, {
-      requested: fields.email_owners === "1",
+      requested: visibility !== "board" && fields.email_owners === "1",
       association,
       audience: loginAudienceForVisibility(visibility),
       kind: "document",
@@ -1516,7 +1516,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     if (stored.error) return redirectTo(c, documentPath(association.slug, document.id), stored.error, "warn");
     const versionLabel = `Version ${Number(max?.n ?? 0) + 1}`;
     const mailed = await maybeEmailOwners(c, {
-      requested: fields.email_owners === "1",
+      requested: document.visibility !== "board" && fields.email_owners === "1",
       association,
       audience: loginAudienceForVisibility(document.visibility),
       kind: "document",

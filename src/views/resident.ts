@@ -626,21 +626,38 @@ function formatMailing(association: Association): string {
   return [association.address_line1, association.city, association.state, association.postal_code].filter(Boolean).join(", ");
 }
 
+export type SupportFormValues = {
+  kind?: string;
+  subject?: string;
+  details?: string;
+};
+
 export function supportPage(
   association: Association,
   sender: { name: string; email: string },
-  message = "",
+  values: SupportFormValues = {},
   error = "",
 ): string {
   const name = sender.name.trim();
   const from = name ? `${name} (${sender.email})` : sender.email;
+  const kind = values.kind ?? "";
+  const option = (value: string, label: string) =>
+    `<option value="${value}"${kind === value ? " selected" : ""}>${label}</option>`;
   return `<section class="panel">
       <h1>Support</h1>
-      <p>Send a message about the portal. It includes your name and the email on your account.</p>
+      <p>Send a question, an issue, or a feature request about the portal. It includes your name, email, and role.</p>
       <p class="muted">From ${esc(from)}</p>
       ${error ? `<p class="flash warn">${esc(error)}</p>` : ""}
-      <form class="fields" method="post" action="/a/${esc(association.slug)}/support">
-        ${areaField("Message", "body", message, true)}
+      <form class="fields" method="post" action="/a/${esc(association.slug)}/admin/support" enctype="multipart/form-data">
+        <label>Type<select name="kind" required>
+          ${option("", "Choose one")}
+          ${option("issue", "Issue")}
+          ${option("question", "Question")}
+          ${option("feature", "Feature request")}
+        </select></label>
+        ${textField("Subject", "subject", { value: values.subject ?? "", required: true })}
+        ${areaField("Details", "details", values.details ?? "", true)}
+        <label>Attachment, optional<input type="file" name="file" accept="${DOCUMENT_FILE_ACCEPT}"></label>
         <button type="submit">Send message</button>
       </form>
     </section>`;

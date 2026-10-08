@@ -49,7 +49,7 @@ import {
   versionById,
   writeAudit,
 } from "../db";
-import { activeAdminContacts, keepsAnAdmin, MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE, masterKeepsAdminWrites } from "../lib/access";
+import { activeAdminContacts, isAdmin, keepsAnAdmin, MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE, masterKeepsAdminWrites } from "../lib/access";
 import { changeLoginEmail } from "../lib/login-email";
 import {
   categoryLabel,
@@ -64,13 +64,20 @@ import { parseOwnersCsv } from "../lib/csv";
 import { OWNER_IMPORT_TEMPLATE } from "../lib/owner-import-template";
 import { formatAddress, formatDateTime, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../lib/dates";
 import {
+  allowSupportRequest,
   deliverOwnerEmails,
+  fileToResendAttachment,
   resendAttachment,
   loginAudienceForVisibility,
   ownerEmailFlash,
   ownerNoticeEmail,
   resendApiKey,
   sendResendEmail,
+  SUPPORT_INBOX,
+  supportEmailText,
+  supportFieldError,
+  supportKindLabel,
+  supportSubject,
   uniqueLoginEmails,
   type LoginAudience,
   type OwnerNoticeKind,
@@ -97,11 +104,13 @@ import {
   joinRequestsPage,
   ledgerLotPage,
   ledgerPage,
+  adminSupportPage,
   newsAdminPage,
   ownerDetailPage,
   ownersPage,
   type NewsEdit,
 } from "../views/admin";
+import { roleLabel } from "../views/bits";
 import { render } from "../views/layout";
 import { canEditAdmin } from "../lib/access";
 import { fileValue, readForm, redirectTo, requireEditor, requireStaff, streamMessageAttachment, textValue, type AppContext, type FormFields } from "./common";
@@ -113,11 +122,93 @@ const INVOICE_STATUSES = new Set(["open", "partial", "paid", "void"]);
 
 export function registerAdminRoutes(app: Hono<AppBindings>): void {
   const blockViewOnlyWrites = async (c: AppContext, next: () => Promise<void>) => {
-    if (c.req.method !== "GET" && c.req.method !== "HEAD") requireEditor(c);
+    const supportPost = c.req.method === "POST" && /\/admin\/support\/?$/.test(c.req.path);
+    if (c.req.method !== "GET" && c.req.method !== "HEAD" && !supportPost) requireEditor(c);
     await next();
   };
   app.use("/a/:slug/admin", blockViewOnlyWrites);
   app.use("/a/:slug/admin/*", blockViewOnlyWrites);
+
+  app.get("/a/:slug/admin/support", async (c) => {
+    const { association, user, membership } = requireStaff(c);
+    return render(c, {
+      title: "Support",
+      active: "admin",
+      body: adminSupportPage(association, user, {}, "", canEditAdmin(membership)),
+    });
+  });
+
+  app.post("/a/:slug/admin/support", async (c) => {
+    const { association, user, membership } = requireStaff(c);
+    const fields = await readForm(c);
+    const values = {
+      kind: textValue(fields, "kind", 20),
+      subject: textValue(fields, "subject", 200),
+      details: textValue(fields, "details", 5000),
+    };
+    const show = (error: string, status: number) =>
+      render(c, {
+        title: "Support",
+        active: "admin",
+        status,
+        body: adminSupportPage(association, user, values, error, canEditAdmin(membership)),
+      });
+    const error = supportFieldError(values);
+    if (error) return show(error, 400);
+    const uploaded = fields.file;
+    const files = Array.isArray(uploaded) ? uploaded.filter((item): item is File => item instanceof File && item.size > 0) : [];
+    if (files.length > 1) return show("Attach one file.", 400);
+    const file = fileValue(fields, "file");
+    let attachment = null;
+    if (file && file.size > 0) {
+      const problem = noticeFileProblem(file);
+      if (problem) return show(problem, 400);
+      attachment = await fileToResendAttachment(file);
+      if (!attachment) return show("Upload a PDF, text file, image, or Word document.", 400);
+    }
+    if (!allowSupportRequest(user.id)) return show("Please wait a few minutes, then try again.", 429);
+    const kind = supportKindLabel(values.kind);
+    if (!kind) return show("Choose a type.", 400);
+    const name = user.name.replace(/[\r\n]+/g, " ").trim();
+    const email = user.email.replace(/[\r\n]+/g, "").trim();
+    const apiKey = resendApiKey(c.env);
+    let sent = false;
+    if (apiKey) {
+      try {
+        sent = await sendResendEmail({
+          apiKey,
+          from: c.env.EMAIL_FROM,
+          to: SUPPORT_INBOX,
+          replyTo: email,
+          subject: supportSubject(association.name, kind, values.subject),
+          text: supportEmailText({
+            name,
+            email,
+            role: roleLabel(membership.role_id, isAdmin(membership)),
+            page: new URL(c.req.url).pathname,
+            time: new Date().toISOString(),
+            message: values.details,
+          }),
+          attachments: attachment ? [attachment] : undefined,
+        });
+      } catch (error) {
+        logError("support_email", { message: error instanceof Error ? error.message : "unknown" });
+      }
+    } else {
+      logError("support_email", { message: "email not configured" });
+    }
+    if (!sent) return show("Your message could not be sent. Please try again later.", 503);
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "support_request",
+      entityType: "support",
+      entityId: user.id,
+      detail: `${kind}: ${values.subject}`.slice(0, 240),
+    });
+    logInfo("support_email", { associationId: association.id, userId: user.id });
+    return redirectTo(c, `/a/${association.slug}/admin/support`, "Thanks. Your message was sent.");
+  });
 
   app.get("/a/:slug/admin", async (c) => {
     const { association, membership } = requireStaff(c);

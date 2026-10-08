@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
-import { sendResendEmail, SUPPORT_INBOX, supportEmailText } from "../src/lib/email";
+import { resetSupportRateLimit, sendResendEmail, SUPPORT_INBOX, supportEmailText } from "../src/lib/email";
 import { sha256Hex } from "../src/lib/tokens";
 import type { Association } from "../src/types";
+import { adminSupportPage } from "../src/views/admin";
 import { siteFooter } from "../src/views/layout";
-import { supportPage } from "../src/views/resident";
 
 const association: Association = {
   id: "assoc_tango_mar",
@@ -110,29 +110,46 @@ describe("site footer", () => {
 });
 
 describe("support page", () => {
-  it("asks the signed-in resident for a message", () => {
-    const html = supportPage(association, { name: "Sam Rivera", email: "sam.rivera@example.com" }, "Hello");
-    expect(html).toContain('action="/a/tango-mar/support"');
-    expect(html).toContain('name="body"');
-    expect(html).toContain("Sam Rivera");
-    expect(html).toContain("sam.rivera@example.com");
+  it("asks for a type, subject, details, and one attachment", () => {
+    const html = adminSupportPage(
+      association,
+      { name: "Jordan Lee", email: "jordan.lee@example.com" },
+      { kind: "feature", subject: "Gate codes", details: "Hello" },
+    );
+    expect(html).toContain('href="/a/tango-mar/admin">Overview</a>');
+    expect(html).toContain('href="/a/tango-mar/admin/support">Support</a>');
+    expect(html).toContain('action="/a/tango-mar/admin/support"');
+    expect(html).toContain('name="kind"');
+    expect(html).toContain('name="subject"');
+    expect(html).toContain('name="details"');
+    expect(html).toContain('name="file"');
+    expect(html).toContain("Feature request");
+    expect(html).toContain("Jordan Lee");
+    expect(html).toContain("jordan.lee@example.com");
     expect(html).toContain("Hello");
     expect(html).toContain("Send message");
     expect(html).not.toContain(SUPPORT_INBOX);
+    expect(html).not.toContain("whpinc");
+    expect(html).not.toContain("marc@");
     expect(html).not.toContain("\u2014");
     expect(html).not.toContain("\u2013");
   });
 });
 
 describe("support email", () => {
-  it("includes the sender name, email, and message", () => {
+  it("includes the sender name, email, role, page, and time", () => {
     const text = supportEmailText({
-      name: "Sam Rivera",
-      email: "sam.rivera@example.com",
+      name: "Jordan Lee",
+      email: "jordan.lee@example.com",
+      role: "Board member, edit access",
+      page: "/a/tango-mar/admin/support",
+      time: "2026-10-08T02:16:00.000Z",
       message: "The gate code is not working.",
     });
-    expect(text).toBe("Name: Sam Rivera\nEmail: sam.rivera@example.com\n\nThe gate code is not working.");
-    expect(SUPPORT_INBOX).toBe("352marc@gmail.com");
+    expect(text).toBe(
+      "Name: Jordan Lee\nEmail: jordan.lee@example.com\nRole: Board member, edit access\nPage: /a/tango-mar/admin/support\nTime: 2026-10-08T02:16:00.000Z\n\nThe gate code is not working.",
+    );
+    expect(SUPPORT_INBOX).toBe("marc@whpinc.com");
   });
 
   it("sends through Resend and sets reply-to", async () => {
@@ -141,11 +158,14 @@ describe("support email", () => {
       apiKey: "test",
       from: "Tango Mar <donotreply@mytangomar.com>",
       to: SUPPORT_INBOX,
-      replyTo: "sam.rivera@example.com",
-      subject: "Support message from Sam Rivera",
+      replyTo: "jordan.lee@example.com",
+      subject: "[Tango Mar support] Feature request: Gate codes",
       text: supportEmailText({
-        name: "Sam Rivera",
-        email: "sam.rivera@example.com",
+        name: "Jordan Lee",
+        email: "jordan.lee@example.com",
+        role: "Board member, edit access",
+        page: "/a/tango-mar/admin/support",
+        time: "2026-10-08T02:16:00.000Z",
         message: "The gate code is not working.",
       }),
       fetchImpl: async (_url, init) => {
@@ -156,20 +176,34 @@ describe("support email", () => {
     expect(sent).toBe(true);
     expect(payload).toEqual({
       from: "Tango Mar <donotreply@mytangomar.com>",
-      to: ["352marc@gmail.com"],
-      subject: "Support message from Sam Rivera",
-      text: "Name: Sam Rivera\nEmail: sam.rivera@example.com\n\nThe gate code is not working.",
-      reply_to: "sam.rivera@example.com",
+      to: ["marc@whpinc.com"],
+      subject: "[Tango Mar support] Feature request: Gate codes",
+      text: "Name: Jordan Lee\nEmail: jordan.lee@example.com\nRole: Board member, edit access\nPage: /a/tango-mar/admin/support\nTime: 2026-10-08T02:16:00.000Z\n\nThe gate code is not working.",
+      reply_to: "jordan.lee@example.com",
     });
   });
 });
 
 describe("support access", () => {
-  it("hides Support from logged-out visitors and emails the inbox for a resident", async () => {
+  beforeEach(() => {
+    resetSupportRateLimit();
+  });
+
+  it("shows the admin tab to people who can view admin and emails the inbox", async () => {
     const { sqlite, db } = openPortal();
     const app = createApp();
     const env = portalEnv(db, "test-key");
     const token = await signIn(sqlite, "user_sam");
+    const jordan = await signIn(sqlite, "user_jordan");
+    sqlite
+      .prepare("INSERT INTO users (id, email, name, phone, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run("user_board", "board.viewer@example.com", "Board Viewer", "", "2026-10-06T00:00:00.000Z");
+    sqlite
+      .prepare(
+        "INSERT INTO memberships (id, association_id, user_id, role_id, is_admin, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run("mem_board", "assoc_tango_mar", "user_board", "board", 0, "active", "2026-10-06T00:00:00.000Z");
+    const board = await signIn(sqlite, "user_board");
     const calls: { url: string; body: unknown }[] = [];
     const original = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
@@ -178,9 +212,9 @@ describe("support access", () => {
     };
 
     try {
-      const loggedOut = await app.request("http://localhost/a/tango-mar/support", {}, env);
+      const loggedOut = await app.request("http://localhost/a/tango-mar/admin/support", {}, env);
       expect(loggedOut.status).toBe(303);
-      expect(loggedOut.headers.get("Location")).toBe("/login?next=%2Fa%2Ftango-mar%2Fsupport");
+      expect(loggedOut.headers.get("Location")).toBe("/login?next=%2Fa%2Ftango-mar%2Fadmin%2Fsupport");
 
       const login = await app.request("http://localhost/login", {}, env);
       const loggedOutLogin = await login.text();
@@ -192,7 +226,12 @@ describe("support access", () => {
       expect(loginHtml).toContain(siteFooter());
       expect(loginHtml).not.toContain(">Support</a>");
 
-      const page = await app.request("http://localhost/a/tango-mar/support", { headers: { Cookie: `tango_session=${token}` } }, env);
+      const homeowner = await app.request("http://localhost/a/tango-mar/admin/support", { headers: { Cookie: `tango_session=${token}` } }, env);
+      expect(homeowner.status).toBe(403);
+      const homeownerFaq = await app.request("http://localhost/a/tango-mar/faq", { headers: { Cookie: `tango_session=${token}` } }, env);
+      expect(await homeownerFaq.text()).not.toContain("/admin/support");
+
+      const page = await app.request("http://localhost/a/tango-mar/admin/support", { headers: { Cookie: `tango_session=${jordan}` } }, env);
       expect(page.status).toBe(200);
       const html = await page.text();
       const footer = html.slice(html.indexOf("<footer"));
@@ -200,6 +239,9 @@ describe("support access", () => {
       expect(footer).toContain(siteFooter());
       expect(footer).not.toContain(">Support</a>");
       expect(nav).not.toContain("Support");
+      expect(html).toContain('href="/a/tango-mar/admin/support">Support</a>');
+      expect(html).not.toContain(SUPPORT_INBOX);
+      expect(html).not.toContain("whpinc");
 
       for (const path of ["/privacy", "/terms"]) {
         const legal = await app.request(`http://localhost${path}`, { headers: { Cookie: `tango_session=${token}` } }, env);
@@ -209,59 +251,190 @@ describe("support access", () => {
         expect(legalFooter).toContain(siteFooter());
         expect(legalHtml).toContain(path === "/privacy" ? "<h1>Privacy Policy</h1>" : "<h1>Terms of Use</h1>");
       }
-      expect(html).toContain("Sam Rivera");
-      expect(html).toContain("sam.rivera@example.com");
-      expect(html).toContain('name="body"');
+      expect(html).toContain("Jordan Lee");
+      expect(html).toContain("jordan.lee@example.com");
+      expect(html).toContain('name="details"');
 
       const empty = await app.request(
-        "http://localhost/a/tango-mar/support",
+        "http://localhost/a/tango-mar/admin/support",
         {
           method: "POST",
           headers: {
-            Cookie: `tango_session=${token}`,
+            Cookie: `tango_session=${jordan}`,
             Origin: "http://localhost",
             "Content-Type": "application/x-www-form-urlencoded",
           },
-          body: "body=",
+          body: "kind=feature&subject=&details=",
         },
         env,
       );
       expect(empty.status).toBe(400);
-      expect(await empty.text()).toContain("Write a message before sending.");
+      expect(await empty.text()).toContain("Enter a subject.");
       expect(calls).toHaveLength(0);
 
       const sent = await app.request(
-        "http://localhost/a/tango-mar/support",
+        "http://localhost/a/tango-mar/admin/support",
         {
           method: "POST",
           headers: {
-            Cookie: `tango_session=${token}`,
+            Cookie: `tango_session=${jordan}`,
             Origin: "http://localhost",
             "Content-Type": "application/x-www-form-urlencoded",
           },
-          body: new URLSearchParams({ body: "The gate code is not working." }),
+          body: new URLSearchParams({ kind: "feature", subject: "Gate codes", details: "The gate code is not working." }),
         },
         env,
       );
       expect(sent.status).toBe(303);
-      expect(sent.headers.get("Location")).toBe("/a/tango-mar/support");
-      expect(decodeURIComponent(sent.headers.get("Set-Cookie") ?? "")).toContain("ok:Your message was sent.");
-      expect(calls).toEqual([
+      expect(sent.headers.get("Location")).toBe("/a/tango-mar/admin/support");
+      expect(decodeURIComponent(sent.headers.get("Set-Cookie") ?? "")).toContain("ok:Thanks. Your message was sent.");
+      const body = calls[0]?.body as { text: string; subject: string; reply_to: string; to: string[]; from: string };
+      expect(calls[0]?.url).toBe("https://api.resend.com/emails");
+      expect(body.from).toBe("Tango Mar <donotreply@mytangomar.com>");
+      expect(body.to).toEqual(["marc@whpinc.com"]);
+      expect(body.reply_to).toBe("jordan.lee@example.com");
+      expect(body.subject).toBe("[Tango Mar support] Feature request: Gate codes");
+      expect(body.text).toContain("Role: Board member, edit access");
+      expect(body.text).toContain("Page: /a/tango-mar/admin/support");
+      expect(body.text).toContain("The gate code is not working.");
+      const audit = sqlite.prepare("SELECT action, detail, actor_user_id FROM audit_log WHERE action = ?").get("support_request") as {
+        action: string;
+        detail: string;
+        actor_user_id: string;
+      };
+      expect(audit).toMatchObject({ action: "support_request", detail: "Feature request: Gate codes", actor_user_id: "user_jordan" });
+
+      const viewer = await app.request("http://localhost/a/tango-mar/admin/support", { headers: { Cookie: `tango_session=${board}` } }, env);
+      expect(viewer.status).toBe(200);
+      expect(await viewer.text()).toContain('href="/a/tango-mar/admin/support">Support</a>');
+      calls.length = 0;
+      const viewerSent = await app.request(
+        "http://localhost/a/tango-mar/admin/support",
         {
-          url: "https://api.resend.com/emails",
-          body: {
-            from: "Tango Mar <donotreply@mytangomar.com>",
-            to: ["352marc@gmail.com"],
-            reply_to: "sam.rivera@example.com",
-            subject: "Support message from Sam Rivera",
-            text: "Name: Sam Rivera\nEmail: sam.rivera@example.com\n\nThe gate code is not working.",
+          method: "POST",
+          headers: {
+            Cookie: `tango_session=${board}`,
+            Origin: "http://localhost",
+            "Content-Type": "application/x-www-form-urlencoded",
           },
+          body: new URLSearchParams({ kind: "question", subject: "Hours", details: "When is the office open?" }),
         },
-      ]);
+        env,
+      );
+      expect(viewerSent.status).toBe(303);
+      expect(calls[0]?.body).toMatchObject({
+        subject: "[Tango Mar support] Question: Hours",
+        reply_to: "board.viewer@example.com",
+        text: expect.stringContaining("Role: Board member"),
+      });
+
+      sqlite.prepare("UPDATE memberships SET is_admin = 1 WHERE user_id = ?").run("user_sam");
+      const adminOwner = await app.request("http://localhost/a/tango-mar/admin/support", { headers: { Cookie: `tango_session=${token}` } }, env);
+      expect(adminOwner.status).toBe(200);
+      expect(await adminOwner.text()).toContain('href="/a/tango-mar/admin/support">Support</a>');
     } finally {
       globalThis.fetch = original;
       sqlite.close();
     }
+  });
+
+  it("attaches one file, refuses a second kind of file, and limits repeats", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db, "test-key");
+    const jordan = await signIn(sqlite, "user_jordan");
+    const calls: { body: { attachments?: { filename: string; content_type: string }[] } }[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = async (...args: Parameters<typeof fetch>) => {
+      calls.push({ body: JSON.parse(String(args[1]?.body)) });
+      return new Response("{}", { status: 200 });
+    };
+    try {
+      const form = new FormData();
+      form.set("kind", "issue");
+      form.set("subject", "Broken total");
+      form.set("details", "The balance looks wrong.");
+      form.set("file", new File([Uint8Array.from([1, 2, 3])], "shot.png", { type: "image/png" }));
+      const sent = await app.request(
+        "http://localhost/a/tango-mar/admin/support",
+        { method: "POST", headers: { Cookie: `tango_session=${jordan}`, Origin: "http://localhost" }, body: form },
+        env,
+      );
+      expect(sent.status).toBe(303);
+      expect(calls[0]?.body.attachments).toEqual([{ filename: "shot.png", content: "AQID", content_type: "image/png" }]);
+
+      const bad = new FormData();
+      bad.set("kind", "issue");
+      bad.set("subject", "Zip");
+      bad.set("details", "Not allowed.");
+      bad.set("file", new File([Uint8Array.from([1])], "notes.zip", { type: "application/zip" }));
+      const refused = await app.request(
+        "http://localhost/a/tango-mar/admin/support",
+        { method: "POST", headers: { Cookie: `tango_session=${jordan}`, Origin: "http://localhost" }, body: bad },
+        env,
+      );
+      expect(refused.status).toBe(400);
+      expect(await refused.text()).toContain("Upload a PDF, text file, image, or Word document.");
+
+      for (let i = 0; i < 4; i += 1) {
+        const ok = await app.request(
+          "http://localhost/a/tango-mar/admin/support",
+          {
+            method: "POST",
+            headers: {
+              Cookie: `tango_session=${jordan}`,
+              Origin: "http://localhost",
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({ kind: "issue", subject: `Again ${i}`, details: "Still broken." }),
+          },
+          env,
+        );
+        expect(ok.status).toBe(303);
+      }
+      const blocked = await app.request(
+        "http://localhost/a/tango-mar/admin/support",
+        {
+          method: "POST",
+          headers: {
+            Cookie: `tango_session=${jordan}`,
+            Origin: "http://localhost",
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({ kind: "issue", subject: "Too many", details: "Still broken." }),
+        },
+        env,
+      );
+      expect(blocked.status).toBe(429);
+      expect(await blocked.text()).toContain("Please wait a few minutes, then try again.");
+    } finally {
+      globalThis.fetch = original;
+      sqlite.close();
+    }
+  });
+
+  it("says the message could not be sent when email is not configured", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const jordan = await signIn(sqlite, "user_jordan");
+    const response = await app.request(
+      "http://localhost/a/tango-mar/admin/support",
+      {
+        method: "POST",
+        headers: {
+          Cookie: `tango_session=${jordan}`,
+          Origin: "http://localhost",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({ kind: "issue", subject: "Gate", details: "It is stuck." }),
+      },
+      portalEnv(db, ""),
+    );
+    expect(response.status).toBe(503);
+    const html = await response.text();
+    expect(html).toContain("Your message could not be sent. Please try again later.");
+    expect(html).not.toContain(SUPPORT_INBOX);
+    sqlite.close();
   });
 });
 
@@ -291,11 +464,11 @@ describe("privacy and terms header", () => {
     const guest = await signIn(sqlite, "user_guest");
 
     try {
-      const portal = await app.request("http://localhost/a/tango-mar/support", { headers: { Cookie: `tango_session=${sam}` } }, env);
+      const portal = await app.request("http://localhost/a/tango-mar/profile", { headers: { Cookie: `tango_session=${sam}` } }, env);
       expect(portal.status).toBe(200);
       const portalHtml = await portal.text();
       const adminPortal = await app.request(
-        "http://localhost/a/tango-mar/support",
+        "http://localhost/a/tango-mar/profile",
         { headers: { Cookie: `tango_session=${jordan}` } },
         env,
       );

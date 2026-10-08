@@ -46,7 +46,7 @@ import {
   textField,
   visibilityLabel,
 } from "./bits";
-import { threadPage } from "./resident";
+import { supportPage, threadPage, type SupportFormValues } from "./resident";
 
 function adminNav(slug: string, current: string, canEdit = true): string {
   const links = [
@@ -59,6 +59,7 @@ function adminNav(slug: string, current: string, canEdit = true): string {
     ["messages", "Messages"],
     ["joins", "Join requests"],
     ["audit", "Activity"],
+    ["support", "Support"],
   ];
   return `<p class="actions">${links
     .map(([id, label]) => {
@@ -1125,6 +1126,16 @@ function joinStatusLabel(status: string): string {
   if (status === "approved") return "Approved";
   if (status === "declined") return "Declined";
   return status;
+}
+
+export function adminSupportPage(
+  association: Association,
+  sender: { name: string; email: string },
+  values: SupportFormValues = {},
+  error = "",
+  canEdit = true,
+): string {
+  return `${adminNav(association.slug, "support", canEdit)}${supportPage(association, sender, values, error)}`;
 }
 
 export function auditPage(association: Association, rows: AuditRow[], canEdit = true): string {

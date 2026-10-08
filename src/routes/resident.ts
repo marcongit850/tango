@@ -1,9 +1,8 @@
 import type { Hono } from "hono";
 import { canEditAdmin, canViewAdmin, canViewPropertyFinancials, isAdmin } from "../lib/access";
 import { timeZoneLabel, todayIso } from "../lib/dates";
-import { resendApiKey, sendResendEmail, SUPPORT_INBOX, supportEmailText } from "../lib/email";
 import { ForbiddenError, isMissingColumn, isMissingTable, NotFoundError } from "../lib/errors";
-import { logError, logInfo } from "../lib/log";
+import { logInfo } from "../lib/log";
 import { isValidEmail, normalizeEmail } from "../lib/homeowner-account";
 import { ensureSeedFiles } from "../lib/seed-files";
 import { issueEmailChangeLink } from "./auth";
@@ -62,10 +61,9 @@ import {
   paymentDetailPage,
   paymentListPage,
   profilePage,
-  supportPage,
   threadPage,
 } from "../views/resident";
-import { fileValues, readForm, redirectTo, requireEditor, requireMember, streamMessageAttachment, textValue, type AppContext } from "./common";
+import { fileValues, readForm, redirectTo, requireEditor, requireMember, requireStaff, streamMessageAttachment, textValue, type AppContext } from "./common";
 
 const MESSAGE_FILES_UNAVAILABLE =
   "Apply the message file migration in D1, then try again. The steps are in the README under Message files.";
@@ -522,57 +520,9 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     return redirectTo(c, `/a/${association.slug}/board`, "Mailing address saved.");
   });
 
-  app.get("/a/:slug/support", async (c) => {
-    const { association, user } = requireMember(c);
-    return render(c, {
-      title: "Support",
-      active: "support",
-      body: supportPage(association, user),
-    });
-  });
-
-  app.post("/a/:slug/support", async (c) => {
-    const { association, user } = requireMember(c);
-    const fields = await readForm(c);
-    const message = textValue(fields, "body", 5000);
-    if (!message) {
-      return render(c, {
-        title: "Support",
-        active: "support",
-        status: 400,
-        body: supportPage(association, user, "", "Write a message before sending."),
-      });
-    }
-    const name = user.name.replace(/[\r\n]+/g, " ").trim();
-    const email = user.email.replace(/[\r\n]+/g, "").trim();
-    const apiKey = resendApiKey(c.env);
-    let sent = false;
-    if (apiKey) {
-      try {
-        sent = await sendResendEmail({
-          apiKey,
-          from: c.env.EMAIL_FROM,
-          to: SUPPORT_INBOX,
-          replyTo: email,
-          subject: `Support message from ${name || email}`.slice(0, 200),
-          text: supportEmailText({ name, email, message }),
-        });
-      } catch (error) {
-        logError("support_email", { message: error instanceof Error ? error.message : "unknown" });
-      }
-    } else {
-      logError("support_email", { message: "email not configured" });
-    }
-    if (!sent) {
-      return render(c, {
-        title: "Support",
-        active: "support",
-        status: 503,
-        body: supportPage(association, user, message, "Your message could not be sent. Please try again later."),
-      });
-    }
-    logInfo("support_email", { associationId: association.id, userId: user.id });
-    return redirectTo(c, `/a/${association.slug}/support`, "Your message was sent.");
+  app.get("/a/:slug/support", (c) => {
+    const { association } = requireStaff(c);
+    return c.redirect(`/a/${association.slug}/admin/support`, 302);
   });
 
   app.get("/a/:slug/messages", async (c) => {

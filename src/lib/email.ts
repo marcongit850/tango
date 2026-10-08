@@ -3,8 +3,12 @@ import { logError } from "./log";
 
 const PORTAL_ORIGIN = "https://mytangomar.com";
 
-/** Inbox for resident support messages from the portal. */
-export const SUPPORT_INBOX = "352marc@gmail.com";
+/** Inbox for portal support requests. Kept off the public page. */
+export const SUPPORT_INBOX = "marc@whpinc.com";
+
+const SUPPORT_WINDOW_MS = 10 * 60 * 1000;
+const SUPPORT_MAX = 5;
+const supportHits = new Map<string, number[]>();
 
 export type LoginAudience = "owners" | "board";
 export type OwnerNoticeKind = "announcement" | "event" | "document" | "account";
@@ -21,8 +25,60 @@ export function resendApiKey(env: Env): string | undefined {
   return value ? value : undefined;
 }
 
-export function supportEmailText(input: { name: string; email: string; message: string }): string {
-  return [`Name: ${input.name}`, `Email: ${input.email}`, "", input.message].join("\n");
+export function supportKindLabel(kind: string): string | null {
+  if (kind === "issue") return "Issue";
+  if (kind === "question") return "Question";
+  if (kind === "feature") return "Feature request";
+  return null;
+}
+
+export function supportFieldError(input: { kind: string; subject: string; details: string }): string {
+  if (!supportKindLabel(input.kind)) return "Choose a type.";
+  if (!input.subject) return "Enter a subject.";
+  if (!input.details) return "Enter the details.";
+  return "";
+}
+
+export function supportSubject(associationName: string, kindLabel: string, subject: string): string {
+  const name = oneLine(associationName) || "Support";
+  const title = oneLine(subject) || "Request";
+  return `[${name} support] ${kindLabel}: ${title}`.slice(0, 200);
+}
+
+export function supportEmailText(input: {
+  name: string;
+  email: string;
+  role: string;
+  page: string;
+  time: string;
+  message: string;
+}): string {
+  return [
+    `Name: ${oneLine(input.name)}`,
+    `Email: ${oneLine(input.email)}`,
+    `Role: ${oneLine(input.role)}`,
+    `Page: ${oneLine(input.page)}`,
+    `Time: ${oneLine(input.time)}`,
+    "",
+    input.message.trim(),
+  ].join("\n");
+}
+
+/** Five requests per person in ten minutes. The window lives in this isolate and clears on restart. */
+export function allowSupportRequest(userId: string, now = Date.now()): boolean {
+  const key = userId.trim() || "unknown";
+  const recent = (supportHits.get(key) ?? []).filter((time) => now - time < SUPPORT_WINDOW_MS);
+  if (recent.length >= SUPPORT_MAX) {
+    supportHits.set(key, recent);
+    return false;
+  }
+  recent.push(now);
+  supportHits.set(key, recent);
+  return true;
+}
+
+export function resetSupportRateLimit(): void {
+  supportHits.clear();
 }
 
 export function loginAudienceForVisibility(visibility: string): LoginAudience {

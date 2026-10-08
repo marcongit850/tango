@@ -1,16 +1,23 @@
 import type { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { findAssociationBySlug, findMembership, findUserByEmail, writeAudit } from "../db";
+import { findAssociationBySlug, findMembership, findUserByEmail, findUserById, notifyStaff, writeAudit } from "../db";
 import { shouldRevealMagicLink, safeNextPath } from "../lib/access";
 import { formatPlace } from "../lib/dates";
 import { resendApiKey, sendResendEmail } from "../lib/email";
 import { isHttps } from "../lib/html";
 import { NotFoundError } from "../lib/errors";
-import { logInfo } from "../lib/log";
+import { logError, logInfo } from "../lib/log";
+import {
+  changeLoginEmail,
+  emailChangedLetter,
+  emailChangeLetter,
+  emailChangeRedirect,
+  parseEmailChangeUserId,
+} from "../lib/login-email";
 import { randomToken, sha256Hex } from "../lib/tokens";
 import type { AppBindings } from "../types";
 import { render } from "../views/layout";
-import { checkEmailPage, invalidLinkPage, loginPage } from "../views/public";
+import { checkEmailPage, emailChangeBlockedPage, invalidLinkPage, loginPage } from "../views/public";
 import { readForm, redirectTo, textValue, type AppContext } from "./common";
 
 const HOME_SLUG = "tango-mar";
@@ -83,6 +90,15 @@ export function registerAuthRoutes(app: Hono<AppBindings>): void {
       .run();
     if ((consumed.meta.changes ?? 0) === 0) return renderInvalid(c);
 
+    const emailChangeUserId = parseEmailChangeUserId(link.redirect_path);
+    if (emailChangeUserId) {
+      const applied = await applyEmailChange(c, { userId: emailChangeUserId, newEmail: link.email, associationId: link.association_id });
+      if (!applied) return renderInvalid(c);
+      if (applied === "taken") {
+        return render(c, { title: "Email not changed", active: "login", status: 400, body: emailChangeBlockedPage() });
+      }
+    }
+
     const user = await findUserByEmail(c.env.DB, link.email);
     if (!user) return renderInvalid(c);
     await c.env.DB.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").bind(now, user.id).run();
@@ -101,7 +117,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>): void {
           )
           .bind(association.id, user.id)
           .run();
-        destination = safeNextPath(association.slug, link.redirect_path || `/a/${association.slug}/dashboard`);
+        destination = emailChangeUserId
+          ? `/a/${association.slug}/profile`
+          : safeNextPath(association.slug, link.redirect_path || `/a/${association.slug}/dashboard`);
         await writeAudit(c.env.DB, {
           associationId: association.id,
           actorUserId: user.id,
@@ -127,6 +145,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>): void {
       maxAge: SESSION_SECONDS,
     });
     logInfo("login", { associationId: link.association_id });
+    if (emailChangeUserId) return redirectTo(c, destination, "Your email is updated.");
     return c.redirect(destination, 303);
   });
 
@@ -145,20 +164,11 @@ async function issueMagicLink(
   c: AppContext,
   input: { email: string; associationId: string; associationName: string; place: string; redirectPath: string },
 ): Promise<string | null> {
-  const now = new Date();
-  await c.env.DB.prepare("DELETE FROM magic_links WHERE expires_at < ?").bind(now.toISOString()).run();
-  const token = randomToken();
-  const expires = new Date(now.getTime() + LINK_MINUTES * 60 * 1000).toISOString();
-  await c.env.DB
-    .prepare(
-      `INSERT INTO magic_links (id, email, association_id, token_hash, redirect_path, expires_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(crypto.randomUUID(), input.email, input.associationId, await sha256Hex(token), input.redirectPath, expires, now.toISOString())
-    .run();
-
-  const url = new URL(c.req.url);
-  const link = `${url.origin}/auth/verify?token=${token}`;
+  const link = await storeMagicLink(c, {
+    email: input.email,
+    associationId: input.associationId,
+    redirectPath: input.redirectPath,
+  });
   const text = [
     `Use this link to sign in to the ${input.associationName} owner portal.`,
     `It expires in ${LINK_MINUTES} minutes and works once.`,
@@ -170,19 +180,126 @@ async function issueMagicLink(
     `${input.associationName} is ${input.place.startsWith("Miramar") ? "a beach neighborhood in" : "located in"} ${input.place}.`,
     "This portal is not legal advice.",
   ].join("\n");
+  return deliverMagicLink(c, {
+    email: input.email,
+    associationId: input.associationId,
+    subject: `Your ${input.associationName} sign-in link`,
+    text,
+    link,
+  });
+}
 
+export async function issueEmailChangeLink(
+  c: AppContext,
+  input: { userId: string; newEmail: string; associationId: string; associationName: string },
+): Promise<string | null> {
+  const link = await storeMagicLink(c, {
+    email: input.newEmail,
+    associationId: input.associationId,
+    redirectPath: emailChangeRedirect(input.userId),
+    replaceSameRedirect: true,
+  });
+  const letter = emailChangeLetter({ associationName: input.associationName, link, minutes: LINK_MINUTES });
+  return deliverMagicLink(c, {
+    email: input.newEmail,
+    associationId: input.associationId,
+    subject: letter.subject,
+    text: letter.text,
+    link,
+  });
+}
+
+async function storeMagicLink(
+  c: AppContext,
+  input: { email: string; associationId: string; redirectPath: string; replaceSameRedirect?: boolean },
+): Promise<string> {
+  const now = new Date();
+  await c.env.DB.prepare("DELETE FROM magic_links WHERE expires_at < ?").bind(now.toISOString()).run();
+  if (input.replaceSameRedirect) {
+    await c.env.DB.prepare("DELETE FROM magic_links WHERE redirect_path = ? AND used_at IS NULL").bind(input.redirectPath).run();
+  }
+  const token = randomToken();
+  const expires = new Date(now.getTime() + LINK_MINUTES * 60 * 1000).toISOString();
+  await c.env.DB
+    .prepare(
+      `INSERT INTO magic_links (id, email, association_id, token_hash, redirect_path, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(crypto.randomUUID(), input.email, input.associationId, await sha256Hex(token), input.redirectPath, expires, now.toISOString())
+    .run();
+  return `${new URL(c.req.url).origin}/auth/verify?token=${token}`;
+}
+
+async function deliverMagicLink(
+  c: AppContext,
+  input: { email: string; associationId: string; subject: string; text: string; link: string },
+): Promise<string | null> {
   const apiKey = resendApiKey(c.env);
   const sent = apiKey
     ? await sendResendEmail({
         apiKey,
         from: c.env.EMAIL_FROM,
         to: input.email,
-        subject: `Your ${input.associationName} sign-in link`,
-        text,
+        subject: input.subject,
+        text: input.text,
       })
     : false;
   logInfo("magic_link_issued", { associationId: input.associationId, emailed: sent });
-  return shouldRevealMagicLink({ appEnv: `${c.env.APP_ENV}`, hostname: url.hostname, emailSent: sent }) ? link : null;
+  const url = new URL(c.req.url);
+  return shouldRevealMagicLink({ appEnv: `${c.env.APP_ENV}`, hostname: url.hostname, emailSent: sent }) ? input.link : null;
+}
+
+async function applyEmailChange(
+  c: AppContext,
+  input: { userId: string; newEmail: string; associationId: string | null },
+): Promise<true | "taken" | false> {
+  const current = await findUserById(c.env.DB, input.userId);
+  if (!current) return false;
+  const previousEmail = current.email;
+  const updated = await changeLoginEmail(c.env.DB, current.id, input.newEmail);
+  if (!updated.ok) return updated.reason === "taken" ? "taken" : false;
+  if (!updated.changed || !input.associationId) return true;
+
+  const association = await c.env.DB
+    .prepare("SELECT id, slug, name FROM associations WHERE id = ?")
+    .bind(input.associationId)
+    .first<{ id: string; slug: string; name: string }>();
+  if (!association) return true;
+
+  const label = current.name || previousEmail;
+  await writeAudit(c.env.DB, {
+    associationId: association.id,
+    actorUserId: current.id,
+    action: "profile_email",
+    entityType: "user",
+    entityId: current.id,
+    detail: `${label} changed their login email from ${previousEmail} to ${updated.email}.`,
+  });
+  await notifyStaff(c.env.DB, {
+    associationId: association.id,
+    kind: "profile",
+    title: "Login email changed",
+    body: `${label} changed their login email from ${previousEmail} to ${updated.email}.`,
+    href: `/a/${association.slug}/admin/owners/${current.id}`,
+  });
+
+  const apiKey = resendApiKey(c.env);
+  if (apiKey && previousEmail.toLowerCase() !== updated.email.toLowerCase()) {
+    const letter = emailChangedLetter({ associationName: association.name, newEmail: updated.email });
+    try {
+      await sendResendEmail({
+        apiKey,
+        from: c.env.EMAIL_FROM,
+        to: previousEmail,
+        subject: letter.subject,
+        text: letter.text,
+      });
+    } catch (error) {
+      logError("profile_email_notice", { message: error instanceof Error ? error.message : "unknown" });
+    }
+  }
+  logInfo("profile_email", { associationId: association.id });
+  return true;
 }
 
 function renderInvalid(c: AppContext): Promise<Response> {

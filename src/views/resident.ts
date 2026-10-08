@@ -8,6 +8,7 @@ import type {
   FaqRow,
   InvoiceRow,
   NoticeRow,
+  OwnerLotProfile,
   PaymentRow,
   MessageRow,
 } from "../db";
@@ -17,7 +18,7 @@ import { DOCUMENT_FILE_ACCEPT, isImageContentType } from "../lib/files";
 import { clip, paragraphs, esc } from "../lib/html";
 import { formatMoney } from "../lib/money";
 import type { Association } from "../types";
-import { addressLine, addressLocality, confirmDeleteButton, contactPhones, dateCell, dateTimeCell, documentFileLinks, empty, mailingAddressHtml, methodLabel, moneySpan, propertyAddressHtml, textField, areaField } from "./bits";
+import { addressLine, addressLocality, confirmDeleteButton, contactPhones, dateCell, dateTimeCell, documentFileLinks, empty, mailingAddressHtml, methodLabel, moneySpan, propertyAddressHtml, selectField, textField, areaField } from "./bits";
 
 function excerpt(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -233,6 +234,87 @@ export function propertyPage(options: {
     ${contactPhones(options.contacts)}
     <p><a href="${base}/invoices">Invoice history</a></p>
   </section>`;
+}
+
+function lotHeading(lot: OwnerLotProfile): string {
+  const house = lot.house_name.trim();
+  return house ? `Lot ${lot.lot_number}, ${house}` : `Lot ${lot.lot_number}`;
+}
+
+export function profilePage(options: {
+  association: Association;
+  name: string;
+  email: string;
+  phone: string;
+  lots: OwnerLotProfile[];
+  devLink?: string | null;
+}): string {
+  const base = `/a/${esc(options.association.slug)}`;
+  const dev = options.devLink
+    ? `<div class="devbox"><p><strong>Local confirmation link.</strong> Outbound email is not configured, so the link is shown here instead of being sent.</p><p><a href="${esc(options.devLink)}">Open confirmation link</a></p></div>`
+    : "";
+  const mailing = options.lots
+    .map(
+      (lot) => `<section class="panel">
+        <h2>Mailing address for ${esc(lotHeading(lot))}</h2>
+        <p class="muted">Leave this blank if mail should go to the lot. This does not change the lot address.</p>
+        <form class="fields" method="post" action="${base}/profile/lots/${esc(lot.id)}">
+          ${textField("Mailing street", "mailing_street", { value: lot.mailing_street })}
+          ${textField("Mailing city", "mailing_city", { value: lot.mailing_city })}
+          ${textField("Mailing state", "mailing_state", { value: lot.mailing_state })}
+          ${textField("Mailing ZIP", "mailing_postal_code", { value: lot.mailing_postal_code })}
+          <button type="submit">Save mailing address</button>
+        </form>
+      </section>`,
+    )
+    .join("");
+  const lotField =
+    options.lots.length > 1
+      ? selectField(
+          "Lot",
+          "property_id",
+          options.lots.map((lot) => ({ value: lot.id, label: lotHeading(lot) })),
+        )
+      : options.lots.length === 1
+        ? `<input type="hidden" name="property_id" value="${esc(options.lots[0].id)}"><p>Lot ${esc(options.lots[0].lot_number)}</p>`
+        : "";
+  const coOwner = options.lots.length
+    ? `<section class="panel">
+        <h2>Add another owner</h2>
+        <p class="muted">The board approves this before that person can sign in. You cannot add a login yourself.</p>
+        <form class="fields" method="post" action="${base}/profile/owner">
+          ${textField("Name", "name", { required: true })}
+          ${textField("Email", "email", { type: "email", required: true })}
+          ${lotField}
+          <button type="submit">Send request</button>
+        </form>
+      </section>`
+    : "";
+  const noLots = options.lots.length
+    ? ""
+    : `<section class="panel"><p class="muted">No lot is linked to this login.</p></section>`;
+  return `<section class="panel">
+      <h1>My profile</h1>
+      <p class="muted">Your name and phone are on your login. Your phone is listed on each lot you own.</p>
+      <form class="fields" method="post" action="${base}/profile">
+        ${textField("Name", "name", { value: options.name, required: true })}
+        ${textField("Phone", "phone", { value: options.phone })}
+        <button type="submit">Save name and phone</button>
+      </form>
+    </section>
+    <section class="panel">
+      <h2>Email</h2>
+      <p>Current email: ${esc(options.email)}</p>
+      <p class="muted">This is also your login. We send a link to the new address. The login changes after you open that link.</p>
+      ${dev}
+      <form class="fields" method="post" action="${base}/profile/email">
+        ${textField("New email", "email", { type: "email", required: true })}
+        <button type="submit">Send confirmation link</button>
+      </form>
+    </section>
+    ${mailing}
+    ${noLots}
+    ${coOwner}`;
 }
 
 export function invoiceListPage(association: Association, invoices: InvoiceRow[]): string {

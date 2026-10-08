@@ -46,6 +46,7 @@ nav a.active { color: var(--gulf); box-shadow: inset 0 -2px 0 var(--gulf); }
 .site-header .account { padding-right: 1rem; }
 .account a.account-admin { text-decoration: none; color: var(--ink); padding-bottom: 0.15rem; }
 .account a.account-admin.active { color: var(--gulf); box-shadow: inset 0 -2px 0 var(--gulf); }
+.account a.account-name { color: inherit; text-underline-offset: 0.15em; }
 button, .button {
   background: var(--gulf); color: white; border: 0; border-radius: 0;
   padding: 0.5rem 0.95rem; font: inherit; cursor: pointer; text-decoration: none; display: inline-block;
@@ -698,7 +699,9 @@ export function landingAccount(name: string, portal: { dashboardHref: string; ad
         portal.adminHref ? `<a class="button secondary" href="${esc(portal.adminHref)}">Admin</a>` : ""
       }`
     : "";
-  return `${enter}${esc(name)} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`;
+  const profileHref = portal ? portal.dashboardHref.replace(/\/dashboard\/?$/, "/profile") : "";
+  const nameHtml = profileHref ? `<a class="account-name" href="${esc(profileHref)}">${esc(name)}</a>` : esc(name);
+  return `${enter}${nameHtml} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`;
 }
 
 export async function render(
@@ -763,10 +766,13 @@ export async function render(
     resident && canViewAdmin(membership)
       ? `<a class="account-admin${options.active === "admin" ? " active" : ""}" href="${esc(`${base}/admin`)}">Admin</a>`
       : "";
+  const displayName = user ? esc(user.name || user.email) : "";
+  const profileHref = resident ? `${base}/profile` : "";
+  const nameHtml = profileHref ? `<a class="account-name" href="${esc(profileHref)}">${displayName}</a>` : displayName;
   const account = user
     ? onPublicHome
       ? landingAccount(user.name || user.email, options.portal ?? null)
-      : `${adminLink}${esc(user.name || user.email)} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`
+      : `${adminLink}${nameHtml} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`
     : "";
   const body = shell({
     title: options.title,

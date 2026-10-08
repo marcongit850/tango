@@ -2,13 +2,19 @@ import type { Hono } from "hono";
 import { canEditAdmin, canViewAdmin, canViewPropertyFinancials, isAdmin, isBoardMember } from "../lib/access";
 import { timeZoneLabel, todayIso } from "../lib/dates";
 import { resendApiKey, sendResendEmail, SUPPORT_INBOX, supportEmailText } from "../lib/email";
-import { ForbiddenError, isMissingTable, NotFoundError } from "../lib/errors";
+import { ForbiddenError, isMissingColumn, isMissingTable, NotFoundError } from "../lib/errors";
 import { logError, logInfo } from "../lib/log";
+import { isValidEmail, normalizeEmail } from "../lib/homeowner-account";
 import { ensureSeedFiles } from "../lib/seed-files";
+import { issueEmailChangeLink } from "./auth";
 import { applyDocumentResponseHeaders, contentTypeForUpload, deleteStoredFiles, MAX_MESSAGE_FILES, noticeFileProblem, safeFilename } from "../lib/files";
 import {
   contactsForProperty,
+  findUserByEmail,
+  insertJoinRequest,
   invoiceById,
+  joinRequestNoticeHref,
+  lotsOwnedByUser,
   invoicesForUser,
   ledgerForUser,
   listContacts,
@@ -26,6 +32,7 @@ import {
   ownerIdsForProperty,
   paymentById,
   paymentsForUser,
+  notifyStaff,
   propertyInAssociation,
   staffUserIds,
   threadMessages,
@@ -54,6 +61,7 @@ import {
   noticesPage,
   paymentDetailPage,
   paymentListPage,
+  profilePage,
   supportPage,
   threadPage,
 } from "../views/resident";
@@ -98,6 +106,220 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
         today,
       }),
     });
+  });
+
+  app.get("/a/:slug/profile", async (c) => {
+    const { association, user } = requireMember(c);
+    const lots = await lotsOwnedByUser(c.env.DB, association.id, user.id);
+    return render(c, {
+      title: `My profile · ${association.name}`,
+      body: profilePage({
+        association,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        lots,
+      }),
+    });
+  });
+
+  app.post("/a/:slug/profile", async (c) => {
+    const { association, user } = requireMember(c);
+    const fields = await readForm(c);
+    const back = profilePath(association.slug);
+    const name = textValue(fields, "name", 120);
+    const phone = textValue(fields, "phone", 40);
+    if (!name) return redirectTo(c, back, "Enter your name.", "warn");
+    const nameChanged = name !== user.name;
+    const phoneChanged = phone !== user.phone;
+    if (!nameChanged && !phoneChanged) return redirectTo(c, back, "Name and phone saved.");
+    await c.env.DB.prepare("UPDATE users SET name = ?, phone = ? WHERE id = ?").bind(name, phone, user.id).run();
+    if (nameChanged) {
+      await writeAudit(c.env.DB, {
+        associationId: association.id,
+        actorUserId: user.id,
+        action: "profile_name",
+        entityType: "user",
+        entityId: user.id,
+        detail: `${user.name} to ${name}`,
+      });
+    }
+    if (phoneChanged) {
+      await writeAudit(c.env.DB, {
+        associationId: association.id,
+        actorUserId: user.id,
+        action: "profile_phone",
+        entityType: "user",
+        entityId: user.id,
+        detail: `${user.phone} to ${phone}`,
+      });
+      await notifyStaff(c.env.DB, {
+        associationId: association.id,
+        kind: "profile",
+        title: "Phone number updated",
+        body: `${name} updated their phone.`,
+        href: `/a/${association.slug}/admin/owners/${user.id}`,
+      });
+    }
+    return redirectTo(c, back, "Name and phone saved.");
+  });
+
+  app.post("/a/:slug/profile/email", async (c) => {
+    const { association, user } = requireMember(c);
+    const fields = await readForm(c);
+    const back = profilePath(association.slug);
+    const email = normalizeEmail(textValue(fields, "email", 200));
+    if (!isValidEmail(email) || email.length > 200) return redirectTo(c, back, "Enter a valid email.", "warn");
+    if (email === user.email.trim().toLowerCase()) return redirectTo(c, back, "That is already your email.");
+    const taken = await findUserByEmail(c.env.DB, email);
+    if (taken && taken.id !== user.id) return redirectTo(c, back, "That email is already used.", "warn");
+    const devLink = await issueEmailChangeLink(c, {
+      userId: user.id,
+      newEmail: email,
+      associationId: association.id,
+      associationName: association.name,
+    });
+    if (devLink) {
+      const lots = await lotsOwnedByUser(c.env.DB, association.id, user.id);
+      return render(c, {
+        title: `My profile · ${association.name}`,
+        body: profilePage({
+          association,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          lots,
+          devLink,
+        }),
+      });
+    }
+    return redirectTo(c, back, "Check the new email. Your login changes after you open the link.");
+  });
+
+  app.post("/a/:slug/profile/lots/:propertyId", async (c) => {
+    const { association, user } = requireMember(c);
+    const fields = await readForm(c);
+    const back = profilePath(association.slug);
+    const propertyId = c.req.param("propertyId");
+    const lots = await lotsOwnedByUser(c.env.DB, association.id, user.id);
+    const lot = lots.find((row) => row.id === propertyId);
+    if (!lot) return redirectTo(c, back, "Choose one of your lots.", "warn");
+    const mailing = {
+      street: textValue(fields, "mailing_street", 200),
+      city: textValue(fields, "mailing_city", 80),
+      state: textValue(fields, "mailing_state", 40),
+      postal: textValue(fields, "mailing_postal_code", 20),
+    };
+    const unchanged =
+      mailing.street === lot.mailing_street &&
+      mailing.city === lot.mailing_city &&
+      mailing.state === lot.mailing_state &&
+      mailing.postal === lot.mailing_postal_code;
+    if (unchanged) return redirectTo(c, back, "Mailing address saved.");
+    try {
+      const updated = await c.env.DB
+        .prepare(
+          `UPDATE properties
+           SET mailing_street = ?, mailing_city = ?, mailing_state = ?, mailing_postal_code = ?
+           WHERE association_id = ? AND id = ?
+             AND EXISTS (
+               SELECT 1 FROM property_owners po
+               WHERE po.association_id = properties.association_id
+                 AND po.property_id = properties.id
+                 AND po.user_id = ?
+             )`,
+        )
+        .bind(mailing.street, mailing.city, mailing.state, mailing.postal, association.id, propertyId, user.id)
+        .run();
+      if ((updated.meta.changes ?? 0) === 0) return redirectTo(c, back, "Choose one of your lots.", "warn");
+    } catch (error) {
+      if (isMissingColumn(error)) {
+        return redirectTo(c, back, "Apply the lot details migration in D1, then try again. The steps are in the README under Lot details.", "warn");
+      }
+      throw error;
+    }
+    const label = user.name || user.email;
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "profile_mailing",
+      entityType: "property",
+      entityId: propertyId,
+      detail: `${label} updated the mailing address for lot ${lot.lot_number}.`,
+    });
+    await notifyStaff(c.env.DB, {
+      associationId: association.id,
+      kind: "profile",
+      title: "Mailing address updated",
+      body: `${label} updated the mailing address for lot ${lot.lot_number}.`,
+      href: `/a/${association.slug}/admin/ledger/${propertyId}`,
+    });
+    return redirectTo(c, back, "Mailing address saved.");
+  });
+
+  app.post("/a/:slug/profile/owner", async (c) => {
+    const { association, user } = requireMember(c);
+    const fields = await readForm(c);
+    const back = profilePath(association.slug);
+    const name = textValue(fields, "name", 120);
+    const email = normalizeEmail(textValue(fields, "email", 200));
+    const propertyId = textValue(fields, "property_id", 80);
+    if (!name || !isValidEmail(email)) return redirectTo(c, back, "Enter a name and a valid email.", "warn");
+    if (email === user.email.trim().toLowerCase()) return redirectTo(c, back, "Use a different email. This form does not change your login.", "warn");
+    const lots = await lotsOwnedByUser(c.env.DB, association.id, user.id);
+    const lot = lots.find((row) => row.id === propertyId);
+    if (!lot) return redirectTo(c, back, "Choose one of your lots.", "warn");
+    const contacts = await contactsForProperty(c.env.DB, association.id, lot.id);
+    if (contacts.some((contact) => contact.email.trim().toLowerCase() === email)) {
+      return redirectTo(c, back, "That person is already an owner of this lot.", "warn");
+    }
+    const requester = user.name || user.email;
+    const note = `${requester} asked to add this person as another owner of lot ${lot.lot_number}.`;
+    try {
+      const pending = await c.env.DB
+        .prepare(
+          `SELECT id FROM join_requests
+           WHERE association_id = ? AND property_id = ? AND email = ? AND status IN ('pending', 'reviewed')`,
+        )
+        .bind(association.id, lot.id, email)
+        .first<{ id: string }>();
+      if (pending) return redirectTo(c, back, "A request for that email is already waiting.", "warn");
+      const id = await insertJoinRequest(c.env.DB, {
+        associationId: association.id,
+        name,
+        email,
+        address: `Lot ${lot.lot_number}`,
+        note,
+        propertyId: lot.id,
+      });
+      await writeAudit(c.env.DB, {
+        associationId: association.id,
+        actorUserId: user.id,
+        action: "co_owner_request",
+        entityType: "join_request",
+        entityId: id,
+        detail: `${requester} asked to add ${name} (${email}) on lot ${lot.lot_number}.`,
+      });
+      await notifyStaff(c.env.DB, {
+        associationId: association.id,
+        kind: "join_request",
+        title: `Second owner request for lot ${lot.lot_number}`,
+        body: email,
+        href: joinRequestNoticeHref(association.slug, id),
+      });
+      logInfo("co_owner_request", { associationId: association.id });
+    } catch (error) {
+      if (isMissingColumn(error) || isMissingTable(error)) {
+        return redirectTo(
+          c,
+          back,
+          "Apply the co-owner request migration in D1, then try again. The steps are in the README under My profile.",
+          "warn",
+        );
+      }
+      throw error;
+    }
+    return redirectTo(c, back, "Request sent. The board will review it.");
   });
 
   app.get("/a/:slug/lots/:propertyId", async (c) => {
@@ -596,6 +818,10 @@ async function assertPropertyAccess(c: AppContext, associationId: string, proper
   if (!property) throw new NotFoundError();
   const owners = await ownerIdsForProperty(c.env.DB, associationId, propertyId);
   if (!canViewPropertyFinancials(membership, user.id, owners)) throw new ForbiddenError();
+}
+
+function profilePath(slug: string): string {
+  return `/a/${slug}/profile`;
 }
 
 async function ownedProperties(c: AppContext, associationId: string, userId: string) {

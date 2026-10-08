@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { findAssociationBySlug, findMembership, findUserByEmail, findUserById, notifyStaff, writeAudit } from "../db";
+import { findAssociationBySlug, findMembership, findUserByEmail, findUserById, notifyStaff, recordEmailChangeConsent, writeAudit } from "../db";
 import { shouldRevealMagicLink, safeNextPath } from "../lib/access";
 import { formatPlace } from "../lib/dates";
 import { resendApiKey, sendResendEmail } from "../lib/email";
@@ -282,6 +282,25 @@ async function applyEmailChange(
     body: `${label} changed their login email from ${previousEmail} to ${updated.email}.`,
     href: `/a/${association.slug}/admin/owners/${current.id}`,
   });
+  const recorded = await recordEmailChangeConsent(c.env.DB, {
+    associationId: association.id,
+    userId: current.id,
+    ownerName: current.name,
+    newEmail: updated.email,
+    ip: (c.req.header("cf-connecting-ip") ?? "").trim().slice(0, 80),
+    userAgent: (c.req.header("user-agent") ?? "").trim().slice(0, 400),
+    sessionId: "",
+  });
+  if (recorded) {
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: current.id,
+      action: "consent_revoked",
+      entityType: "user",
+      entityId: current.id,
+      detail: `email_changed ${updated.email}`,
+    });
+  }
 
   const apiKey = resendApiKey(c.env);
   if (apiKey && previousEmail.toLowerCase() !== updated.email.toLowerCase()) {

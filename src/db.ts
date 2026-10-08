@@ -24,7 +24,7 @@ const EDIT_ACCESS_MEMBER_SQL =
 
 async function hasColumn(
   db: D1Database,
-  table: "memberships" | "properties" | "assessments" | "messages" | "documents",
+  table: "memberships" | "properties" | "assessments" | "messages" | "documents" | "users",
   column: string,
 ): Promise<boolean> {
   const names = await columnNames(db, table);
@@ -1570,6 +1570,7 @@ export async function activeLoginEmails(
   associationId: string,
   audience: "owners" | "board",
 ): Promise<{ id: string; email: string }[]> {
+  const optedIn = (await announcementPreferenceReady(db)) ? "AND COALESCE(u.email_announcements, 1) = 1" : "";
   const { results } = await db
     .prepare(
       `SELECT u.id, u.email
@@ -1578,6 +1579,7 @@ export async function activeLoginEmails(
        WHERE m.association_id = ?
          AND m.status = 'active'
          AND TRIM(u.email) != ''
+         ${optedIn}
          AND (
            (? = 'owners' AND m.role_id IN ('homeowner', 'board', 'officer'))
            OR (? = 'board' AND m.role_id IN ('board', 'officer'))
@@ -1587,6 +1589,191 @@ export async function activeLoginEmails(
     .bind(associationId, audience, audience)
     .all<{ id: string; email: string }>();
   return results;
+}
+
+export async function announcementPreferenceReady(db: D1Database): Promise<boolean> {
+  return hasColumn(db, "users", "email_announcements");
+}
+
+/** Missing column means the preference is still the default: send announcement emails. */
+export async function announcementEmailsOn(db: D1Database, userId: string): Promise<boolean> {
+  if (!(await announcementPreferenceReady(db))) return true;
+  const row = await db
+    .prepare("SELECT email_announcements AS on_flag FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ on_flag: number | null }>();
+  if (!row) return true;
+  return Number(row.on_flag) !== 0;
+}
+
+export async function setAnnouncementEmails(db: D1Database, userId: string, on: boolean): Promise<void> {
+  await db.prepare("UPDATE users SET email_announcements = ? WHERE id = ?").bind(on ? 1 : 0, userId).run();
+}
+
+export type ConsentAction = "granted" | "revoked";
+
+export type ConsentLogRow = {
+  id: string;
+  user_id: string;
+  owner_name: string;
+  lots: string;
+  email: string;
+  action: ConsentAction;
+  reason: string;
+  ip: string;
+  user_agent: string;
+  session_id: string;
+  created_at: string;
+};
+
+const CONSENT_SELECT = `id, user_id, owner_name, lots, email, action, reason, ip, user_agent, session_id, created_at`;
+
+export async function consentLogReady(db: D1Database): Promise<boolean> {
+  const row = await db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'electronic_notice_consent'")
+    .first<{ name: string }>();
+  return Boolean(row);
+}
+
+export async function latestConsent(db: D1Database, associationId: string, userId: string): Promise<ConsentLogRow | null> {
+  if (!(await consentLogReady(db))) return null;
+  return db
+    .prepare(
+      `SELECT ${CONSENT_SELECT}
+       FROM electronic_notice_consent
+       WHERE association_id = ? AND user_id = ?
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+    )
+    .bind(associationId, userId)
+    .first<ConsentLogRow>();
+}
+
+export async function latestConsentByUser(
+  db: D1Database,
+  associationId: string,
+): Promise<Map<string, { action: ConsentAction; created_at: string }>> {
+  const map = new Map<string, { action: ConsentAction; created_at: string }>();
+  if (!(await consentLogReady(db))) return map;
+  const { results } = await db
+    .prepare(
+      `SELECT user_id, action, created_at
+       FROM (
+         SELECT user_id, action, created_at,
+                ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC, id DESC) AS rn
+         FROM electronic_notice_consent
+         WHERE association_id = ?
+       )
+       WHERE rn = 1`,
+    )
+    .bind(associationId)
+    .all<{ user_id: string; action: ConsentAction; created_at: string }>();
+  for (const row of results) map.set(row.user_id, { action: row.action, created_at: row.created_at });
+  return map;
+}
+
+export async function consentHistory(db: D1Database, associationId: string, userId: string): Promise<ConsentLogRow[]> {
+  if (!(await consentLogReady(db))) return [];
+  const { results } = await db
+    .prepare(
+      `SELECT ${CONSENT_SELECT}
+       FROM electronic_notice_consent
+       WHERE association_id = ? AND user_id = ?
+       ORDER BY created_at DESC, id DESC`,
+    )
+    .bind(associationId, userId)
+    .all<ConsentLogRow>();
+  return results;
+}
+
+export async function consentLogExport(db: D1Database, associationId: string): Promise<ConsentLogRow[]> {
+  if (!(await consentLogReady(db))) return [];
+  const { results } = await db
+    .prepare(
+      `SELECT ${CONSENT_SELECT}
+       FROM electronic_notice_consent
+       WHERE association_id = ?
+       ORDER BY created_at, id`,
+    )
+    .bind(associationId)
+    .all<ConsentLogRow>();
+  return results;
+}
+
+export async function insertConsentLog(
+  db: D1Database,
+  entry: {
+    associationId: string;
+    userId: string;
+    ownerName: string;
+    lots: string;
+    email: string;
+    action: ConsentAction;
+    reason?: string;
+    ip?: string;
+    userAgent?: string;
+    sessionId?: string;
+    createdAt?: string;
+  },
+): Promise<string> {
+  const id = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO electronic_notice_consent (
+         id, association_id, user_id, owner_name, lots, email, action, reason, ip, user_agent, session_id, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      id,
+      entry.associationId,
+      entry.userId,
+      entry.ownerName.slice(0, 120),
+      entry.lots.slice(0, 400),
+      entry.email.slice(0, 200),
+      entry.action,
+      (entry.reason ?? "").slice(0, 40),
+      (entry.ip ?? "").slice(0, 80),
+      (entry.userAgent ?? "").slice(0, 400),
+      (entry.sessionId ?? "").slice(0, 80),
+      entry.createdAt ?? new Date().toISOString(),
+    )
+    .run();
+  return id;
+}
+
+/** Appends a revoked row for the new address. Does nothing until the consent table exists. */
+export async function recordEmailChangeConsent(
+  db: D1Database,
+  input: {
+    associationId: string;
+    userId: string;
+    ownerName: string;
+    newEmail: string;
+    ip?: string;
+    userAgent?: string;
+    sessionId?: string;
+  },
+): Promise<boolean> {
+  if (!(await consentLogReady(db))) return false;
+  const lots = await lotsOwnedByUser(db, input.associationId, input.userId);
+  await insertConsentLog(db, {
+    associationId: input.associationId,
+    userId: input.userId,
+    ownerName: input.ownerName,
+    lots: lots.map((lot) => lot.lot_number).filter(Boolean).join(", "),
+    email: input.newEmail,
+    action: "revoked",
+    reason: "email_changed",
+    ip: input.ip,
+    userAgent: input.userAgent,
+    sessionId: input.sessionId,
+  });
+  return true;
+}
+
+export async function findSessionId(db: D1Database, tokenHash: string): Promise<string> {
+  const row = await db.prepare("SELECT id FROM sessions WHERE token_hash = ?").bind(tokenHash).first<{ id: string }>();
+  return row?.id ?? "";
 }
 
 export async function staffUserIds(db: D1Database, associationId: string): Promise<string[]> {

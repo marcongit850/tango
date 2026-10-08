@@ -248,6 +248,9 @@ export function profilePage(options: {
   phone: string;
   lots: OwnerLotProfile[];
   devLink?: string | null;
+  announcementsOn?: boolean;
+  consentGranted?: boolean;
+  noticesReady?: boolean;
 }): string {
   const base = `/a/${esc(options.association.slug)}`;
   const dev = options.devLink
@@ -293,6 +296,12 @@ export function profilePage(options: {
   const noLots = options.lots.length
     ? ""
     : `<section class="panel"><p class="muted">No lot is linked to this login.</p></section>`;
+  const announcementsOn = options.announcementsOn !== false;
+  const consentGranted = options.consentGranted === true;
+  const noticesNote =
+    options.noticesReady === false
+      ? `<p class="muted">Apply the email preferences migration in D1, then these choices can be saved. The steps are in the README under Email preferences.</p>`
+      : "";
   return `<section class="panel">
       <h1>My profile</h1>
       <p class="muted">Your name and phone are on your login. Your phone is listed on each lot you own.</p>
@@ -300,6 +309,17 @@ export function profilePage(options: {
         ${textField("Name", "name", { value: options.name, required: true })}
         ${textField("Phone", "phone", { value: options.phone })}
         <button type="submit">Save name and phone</button>
+      </form>
+    </section>
+    <section class="panel">
+      <h2>Email preferences</h2>
+      <form class="fields" method="post" action="${base}/profile/notices">
+        ${noticesNote}
+        <label><input type="checkbox" name="email_announcements" value="1"${announcementsOn ? " checked" : ""}> Email me portal announcements and updates</label>
+        <h2>Electronic Notice Consent</h2>
+        <p>I consent to receiving official association notices electronically at this email address.</p>
+        <label><input type="checkbox" name="electronic_consent" value="1"${consentGranted ? " checked" : ""}> I agree</label>
+        <button type="submit">Save email preferences</button>
       </form>
     </section>
     <section class="panel">

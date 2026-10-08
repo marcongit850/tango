@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
+import { activeLoginEmails } from "../src/db";
 import { emailChangedLetter, emailChangeLetter } from "../src/lib/login-email";
+import { uniqueLoginEmails } from "../src/lib/email";
 import { sha256Hex } from "../src/lib/tokens";
 
 const MIGRATIONS = [
@@ -19,6 +21,7 @@ const MIGRATIONS = [
   "migrations/0011_lot_details.sql",
   "migrations/0012_message_attachments.sql",
   "migrations/0013_co_owner_request.sql",
+  "migrations/0014_email_preferences.sql",
 ];
 
 class SqliteStatement {
@@ -69,10 +72,13 @@ class SqliteD1 {
   }
 }
 
-function openPortal(): { sqlite: DatabaseSync; db: D1Database } {
+function openPortal(includeNotices = true): { sqlite: DatabaseSync; db: D1Database } {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("PRAGMA foreign_keys = ON");
-  for (const file of MIGRATIONS) sqlite.exec(readFileSync(file, "utf8"));
+  for (const file of MIGRATIONS) {
+    if (!includeNotices && file.endsWith("0014_email_preferences.sql")) continue;
+    sqlite.exec(readFileSync(file, "utf8"));
+  }
   return { sqlite, db: new SqliteD1(sqlite) as unknown as D1Database };
 }
 
@@ -350,6 +356,11 @@ describe("my profile", () => {
       };
       expect(notice).toEqual({ user_id: "user_jordan", title: "Login email changed" });
       expect(count(sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'profile_email'")).toBe(1);
+      expect(sqlite.prepare("SELECT action, reason, email FROM electronic_notice_consent").get()).toEqual({
+        action: "revoked",
+        reason: "email_changed",
+        email: "sam.new@example.com",
+      });
 
       const again = await app.request("http://localhost/a/tango-mar/profile", { headers: { Cookie: `tango_session=${sam}` } }, env);
       expect(await again.text()).toContain("sam.new@example.com");
@@ -484,6 +495,148 @@ describe("my profile", () => {
         { email: "pat@example.com", is_primary: 0 },
       ]);
       expect(sqlite.prepare("SELECT status FROM join_requests WHERE id = ?").get(requestId)).toEqual({ status: "approved" });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("saves announcement email and an append-only consent log, and skips broadcast email when off", async () => {
+    const { sqlite, db } = openPortal();
+    try {
+      const app = createApp();
+      const sam = await signIn(sqlite, "user_sam");
+      const jordan = await signIn(sqlite, "user_jordan");
+      const env = portalEnv(db);
+      const page = await app.request("http://localhost/a/tango-mar/profile", { headers: { Cookie: `tango_session=${sam}` } }, env);
+      const html = await page.text();
+      expect(html).toContain("Email me portal announcements and updates");
+      expect(html).toContain("Electronic Notice Consent");
+      expect(html).toContain("I consent to receiving official association notices electronically at this email address.");
+      expect(html).toContain("I agree");
+      expect(html).toMatch(/name="email_announcements"[^>]*checked/);
+      expect(html).not.toMatch(/name="electronic_consent"[^>]*checked/);
+      expect(html.indexOf("Save name and phone")).toBeLessThan(html.indexOf("Electronic Notice Consent"));
+      expect(html.indexOf("Electronic Notice Consent")).toBeLessThan(html.indexOf("<h2>Email</h2>"));
+      expect(html).not.toContain("\u2014");
+      expect(html).not.toContain("\u2013");
+
+      const saved = await app.request(
+        "http://localhost/a/tango-mar/profile/notices",
+        {
+          method: "POST",
+          headers: {
+            Cookie: `tango_session=${sam}`,
+            Origin: "http://localhost",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "CF-Connecting-IP": "203.0.113.10",
+            "User-Agent": "ProfileTest",
+          },
+          body: new URLSearchParams({ electronic_consent: "1" }),
+        },
+        env,
+      );
+      expect(saved.status).toBe(303);
+      expect(flash(saved)).toContain("Email preferences saved.");
+      expect(sqlite.prepare("SELECT email_announcements FROM users WHERE id = 'user_sam'").get()).toEqual({ email_announcements: 0 });
+      const granted = sqlite.prepare("SELECT action, email, lots, ip, user_agent, session_id, reason FROM electronic_notice_consent").get() as {
+        action: string;
+        email: string;
+        lots: string;
+        ip: string;
+        user_agent: string;
+        session_id: string;
+        reason: string;
+      };
+      expect(granted.action).toBe("granted");
+      expect(granted.email).toBe("sam.rivera@example.com");
+      expect(granted.lots).toBe("14");
+      expect(granted.ip).toBe("203.0.113.10");
+      expect(granted.user_agent).toBe("ProfileTest");
+      expect(granted.reason).toBe("");
+      expect(granted.session_id.startsWith("sess_user_sam_")).toBe(true);
+      expect(count(sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'profile_announcements'")).toBe(1);
+      expect(count(sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'consent_granted'")).toBe(1);
+
+      const owners = uniqueLoginEmails(await activeLoginEmails(db, "assoc_tango_mar", "owners")).map((row) => row.email);
+      expect(owners).not.toContain("sam.rivera@example.com");
+      expect(owners).toContain("jordan.lee@example.com");
+
+      mockResend();
+      const confirm = await app.request(
+        "http://localhost/a/tango-mar/profile/email",
+        post(sam, { email: "sam.optout@example.com" }),
+        portalEnv(db, "re_test"),
+      );
+      expect(confirm.status).toBe(303);
+      expect(sentEmails[0]?.to).toBe("sam.optout@example.com");
+      sentEmails.length = 0;
+      const reminder = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_sam/remind",
+        post(jordan, {}),
+        portalEnv(db, "re_test"),
+      );
+      expect(reminder.status).toBe(303);
+      expect(sentEmails.some((message) => message.to === "sam.rivera@example.com" && message.subject.includes("balance reminder"))).toBe(true);
+
+      const revoked = await app.request(
+        "http://localhost/a/tango-mar/profile/notices",
+        post(sam, { email_announcements: "1" }),
+        env,
+      );
+      expect(flash(revoked)).toContain("Email preferences saved.");
+      const history = sqlite
+        .prepare("SELECT action, reason FROM electronic_notice_consent ORDER BY created_at, id")
+        .all() as { action: string; reason: string }[];
+      expect(history).toEqual([
+        { action: "granted", reason: "" },
+        { action: "revoked", reason: "" },
+      ]);
+      expect(sqlite.prepare("SELECT email_announcements FROM users WHERE id = 'user_sam'").get()).toEqual({ email_announcements: 1 });
+
+      const admin = await app.request(
+        "http://localhost/a/tango-mar/admin/owners/user_sam",
+        { headers: { Cookie: `tango_session=${jordan}` } },
+        env,
+      );
+      const adminHtml = await admin.text();
+      expect(adminHtml).toContain("Current status: Revoked");
+      expect(adminHtml).toContain(">On<");
+      expect(adminHtml).toContain("Granted");
+      expect(adminHtml).toContain("203.0.113.10");
+      expect(adminHtml).not.toContain("Delete consent");
+      const roster = await app.request("http://localhost/a/tango-mar/admin/owners", { headers: { Cookie: `tango_session=${jordan}` } }, env);
+      const rosterHtml = await roster.text();
+      const users = rosterHtml.slice(rosterHtml.indexOf('id="logins"'));
+      expect(users).toContain(">Consent<");
+      expect(users).toContain("Revoked");
+      const csv = await app.request("http://localhost/a/tango-mar/admin/consent.csv", { headers: { Cookie: `tango_session=${jordan}` } }, env);
+      expect(csv.headers.get("Content-Type")).toContain("text/csv");
+      const csvText = await csv.text();
+      expect(csvText).toContain("user_id,owner_name,lots,email,action,reason,created_at_utc,ip,user_agent,session_id");
+      expect(csvText).toContain("granted");
+      expect(csvText).toContain("revoked");
+      expect(csvText).toContain("sam.rivera@example.com");
+      const homeownerCsv = await app.request("http://localhost/a/tango-mar/admin/consent.csv", { headers: { Cookie: `tango_session=${sam}` } }, env);
+      expect(homeownerCsv.status).toBe(403);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("still opens My profile before the email preferences migration is applied", async () => {
+    const { sqlite, db } = openPortal(false);
+    try {
+      const app = createApp();
+      const sam = await signIn(sqlite, "user_sam");
+      const env = portalEnv(db);
+      const page = await app.request("http://localhost/a/tango-mar/profile", { headers: { Cookie: `tango_session=${sam}` } }, env);
+      expect(page.status).toBe(200);
+      expect(await page.text()).toContain("Email me portal announcements and updates");
+      const saved = await app.request("http://localhost/a/tango-mar/profile/notices", post(sam, { email_announcements: "1", electronic_consent: "1" }), env);
+      expect(saved.status).toBe(303);
+      expect(flash(saved)).toContain("Apply the email preferences migration");
+      const owners = uniqueLoginEmails(await activeLoginEmails(db, "assoc_tango_mar", "owners")).map((row) => row.email);
+      expect(owners).toContain("sam.rivera@example.com");
     } finally {
       sqlite.close();
     }

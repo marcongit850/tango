@@ -1,6 +1,6 @@
 import { DOCUMENT_CATEGORIES } from "../lib/categories";
 import { DOCUMENT_FILE_ACCEPT } from "../lib/files";
-import { zonedIsoDate } from "../lib/dates";
+import { formatDateTime, zonedIsoDate } from "../lib/dates";
 import { assessmentDisplayName, compareDuesRows, DUES_SCHEDULE_OPTIONS, duesAmountFieldLabel, latestDuesPrefill, lotTypeLabel, type DuesSchedule } from "../lib/dues";
 import { MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE } from "../lib/access";
 import { esc, paragraphs } from "../lib/html";
@@ -9,6 +9,7 @@ import type { Association, DocumentCategory } from "../types";
 import { messageWaitingOnBoard, type MessageRow } from "../db";
 import type {
   AnnouncementRow,
+  ConsentLogRow,
   AssessmentAdminRow,
   AuditRow,
   BalanceRow,
@@ -286,6 +287,7 @@ export function ownersPage(
   delinquentOnly: boolean,
   canEdit = true,
   ownersByLot: ReadonlyMap<string, LotOwnerControl[]> = new Map(),
+  consentByUser: ReadonlyMap<string, { action: "granted" | "revoked"; created_at: string }> = new Map(),
 ): string {
   const shownLots = delinquentOnly ? lots.filter((lot) => lot.delinquent) : lots;
   const loginRows = owners
@@ -294,6 +296,7 @@ export function ownersPage(
         <td><a href="/a/${esc(association.slug)}/admin/owners/${esc(owner.user_id)}">${esc(owner.name)}</a></td>
         <td>${esc(owner.email)}</td>
         <td>${esc(accountAccessLabel(owner))}</td>
+        <td>${esc(consentListLabel(consentByUser.get(owner.user_id)))}</td>
         <td>${lastLoginLabel(owner.last_login_at, association.timezone)}</td>
       </tr>`,
     )
@@ -359,9 +362,35 @@ export function ownersPage(
     </section>
     <section class="panel" id="logins">
       <h2>Users</h2>
-      <p class="muted">Sign-in accounts only. Email, admin access, and last login. Lot details stay in Owners and lots above.</p>
-      ${loginRows ? `<table><thead><tr><th>Person</th><th>Email</th><th>Access</th><th>Last login</th></tr></thead><tbody>${loginRows}</tbody></table>` : empty("No sign-in accounts.")}
+      <p class="muted">Sign-in accounts only. Email, admin access, electronic notice consent, and last login. Lot details stay in Owners and lots above.</p>
+      <p><a href="/a/${esc(association.slug)}/admin/consent.csv">Download consent log (CSV)</a></p>
+      ${loginRows ? `<table><thead><tr><th>Person</th><th>Email</th><th>Access</th><th>Consent</th><th>Last login</th></tr></thead><tbody>${loginRows}</tbody></table>` : empty("No sign-in accounts.")}
     </section>`;
+}
+
+const CONSENT_TIME_ZONE = "America/Chicago";
+
+function consentListLabel(row: { action: "granted" | "revoked"; created_at: string } | undefined): string {
+  if (!row) return "No";
+  if (row.action === "granted") return "Yes";
+  return `Revoked ${formatDateTime(row.created_at, CONSENT_TIME_ZONE)}`;
+}
+
+function consentHistoryTable(rows: ConsentLogRow[]): string {
+  if (rows.length === 0) return empty("No consent history.");
+  const body = rows
+    .map(
+      (row) => `<tr>
+        <td>${esc(formatDateTime(row.created_at, CONSENT_TIME_ZONE))}</td>
+        <td>${esc(row.action === "granted" ? "Granted" : "Revoked")}</td>
+        <td>${esc(row.email)}</td>
+        <td>${esc(row.lots)}</td>
+        <td>${esc(row.ip)}</td>
+        <td>${esc(row.reason)}</td>
+      </tr>`,
+    )
+    .join("");
+  return `<table><thead><tr><th>When</th><th>Action</th><th>Email</th><th>Lots</th><th>IP</th><th>Reason</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
 function editAccessField(owner: OwnerListRow): string {
@@ -382,10 +411,27 @@ export function ownerDetailPage(options: {
   lots: PropertyRow[];
   properties: PropertyRow[];
   canEdit?: boolean;
+  announcementsOn?: boolean;
+  consent?: { action: "granted" | "revoked"; created_at: string } | null;
+  consentHistory?: ConsentLogRow[];
+  noticesReady?: boolean;
 }): string {
   const { association, owner } = options;
   const canEdit = options.canEdit !== false;
   const base = `/a/${association.slug}/admin/owners/${owner.user_id}`;
+  const announcements = options.announcementsOn === false ? "Off" : "On";
+  const noticesNote =
+    options.noticesReady === false
+      ? `<p class="muted">Apply the email preferences migration in D1 to store consent. The steps are in the README under Email preferences.</p>`
+      : "";
+  const consentBlock = `<h2>Email announcements</h2>
+      <p>${announcements}</p>
+      <p class="muted">The owner sets this on My profile. Off skips announcement, document, and notice emails to this login. Sign-in links, email confirmations, welcome emails, and balance reminders still send.</p>
+      <h2>Electronic Notice Consent</h2>
+      ${noticesNote}
+      <p>Current status: ${esc(consentListLabel(options.consent ?? undefined))}</p>
+      ${consentHistoryTable(options.consentHistory ?? [])}
+      <p><a href="/a/${esc(association.slug)}/admin/consent.csv">Download consent log (CSV)</a></p>`;
   const lotChoices = options.properties
     .map((property) => ({ value: property.id, label: `Lot ${property.lot_number}, ${property.street_address}` }));
   const writes = canEdit
@@ -463,6 +509,7 @@ export function ownerDetailPage(options: {
       <p>${esc(owner.email)}${owner.phone ? ` · ${esc(owner.phone)}` : ""}</p>
       <p>${esc(roleLabel(owner.role_id, owner.is_admin === 1))} · ${esc(owner.status)}${owner.is_master === 1 ? " · Master admin" : ""}</p>
       <p>Primary lot balance ${options.balance === null ? "" : options.balanceHref ? moneyLink(options.balanceHref, options.balance) : moneySpan(options.balance)}</p>
+      ${consentBlock}
       ${writes || "</section>"}`;
 }
 

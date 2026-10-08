@@ -134,6 +134,7 @@ input, select, textarea {
 input[type="checkbox"] { width: auto; justify-self: start; }
 textarea { min-height: 7rem; }
 form.fields { display: grid; gap: 0.75rem; }
+form.email-prefs h2 { margin: 0.75rem 0 0; font-size: 1.05rem; }
 .mailing-edit { margin-top: 0.75rem; }
 .mailing-edit > summary {
   display: inline-block;

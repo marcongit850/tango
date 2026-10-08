@@ -313,12 +313,11 @@ export function profilePage(options: {
     </section>
     <section class="panel">
       <h2>Email preferences</h2>
-      <form class="fields" method="post" action="${base}/profile/notices">
+      <form class="fields email-prefs" method="post" action="${base}/profile/notices">
         ${noticesNote}
         <label><input type="checkbox" name="email_announcements" value="1"${announcementsOn ? " checked" : ""}> Email me portal announcements and updates</label>
         <h2>Electronic Notice Consent</h2>
-        <p>I consent to receiving official association notices electronically at this email address.</p>
-        <label><input type="checkbox" name="electronic_consent" value="1"${consentGranted ? " checked" : ""}> I agree</label>
+        <label><input type="checkbox" name="electronic_consent" value="1"${consentGranted ? " checked" : ""}> I consent to receiving official association notices electronically at this email address.</label>
         <button type="submit">Save email preferences</button>
       </form>
     </section>

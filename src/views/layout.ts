@@ -777,6 +777,7 @@ export function siteFooter(): string {
         <a href="${base}/documents">Documents</a>
         <a href="${base}/faq">FAQs</a>
         <a href="${base}/messages">Contact</a>
+        <a href="${base}/estoppel">Estoppel Requests</a>
         <a href="/bring-this-to-your-hoa">Bring This to Your HOA</a>
       </nav>
       <div class="home-footer-end">

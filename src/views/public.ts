@@ -1,3 +1,5 @@
+import { formatAddress } from "../lib/dates";
+import { ESTOPPEL_STATUTE_URL, type EstoppelFormValues } from "../lib/estoppel";
 import { esc, paragraphs } from "../lib/html";
 import type { Association } from "../types";
 
@@ -141,6 +143,48 @@ export function joinRequestPage(
         <label>Email<input type="email" name="email" autocomplete="email" maxlength="200" required value="${esc(values.email)}"></label>
         <label>Address or lot, optional<input type="text" name="address" autocomplete="street-address" maxlength="200" value="${esc(values.address)}"></label>
         <label>Note, optional<textarea name="note" maxlength="2000">${esc(values.note)}</textarea></label>
+        <button type="submit">Send request</button>
+      </form>
+    </section>`;
+}
+
+export function estoppelPage(
+  association: Association,
+  options: { error?: string; values?: EstoppelFormValues; sent?: boolean } = {},
+): string {
+  const values = options.values ?? {
+    name: "",
+    company: "",
+    email: "",
+    phone: "",
+    property: "",
+    owners: "",
+    closingDate: "",
+    notes: "",
+  };
+  const address = association.address_line1.trim() ? formatAddress(association) : "";
+  const sent = options.sent
+    ? `<p class="flash">Your request was sent.</p>`
+    : "";
+  const error = options.error ? `<p class="flash warn">${esc(options.error)}</p>` : "";
+  return `<section class="panel">
+      <h1>Estoppel Requests</h1>
+      <p>Under <a href="${esc(ESTOPPEL_STATUTE_URL)}" target="_blank" rel="noopener">Section 720.30851, Florida Statutes</a>, the association designates the following to receive estoppel certificate requests:</p>
+      <p>${esc(association.name)}<br>Attn: Board of Directors${address ? `<br>${esc(address)}` : ""}</p>
+      <p>The association will respond to estoppel certificate requests within 10 business days, as required by Florida law.</p>
+      <p>Requests may be mailed to the address above or submitted with the form below.</p>
+      ${sent}
+      ${error}
+      <form class="fields" method="post" action="/a/${esc(association.slug)}/estoppel">
+        <label class="hp">Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+        <label>Your name<input type="text" name="name" autocomplete="name" maxlength="120" required value="${esc(values.name)}"></label>
+        <label>Company, title company or law firm, optional<input type="text" name="company" maxlength="160" value="${esc(values.company)}"></label>
+        <label>Email<input type="email" name="email" autocomplete="email" maxlength="200" required value="${esc(values.email)}"></label>
+        <label>Phone<input type="tel" name="phone" autocomplete="tel" maxlength="40" required value="${esc(values.phone)}"></label>
+        <label>Property address or lot number<input type="text" name="property" maxlength="200" required value="${esc(values.property)}"></label>
+        <label>Owner name(s)<input type="text" name="owners" maxlength="200" required value="${esc(values.owners)}"></label>
+        <label>Anticipated closing date, optional<input type="date" name="closing_date" value="${esc(values.closingDate)}"></label>
+        <label>Notes, optional<textarea name="notes" maxlength="2000">${esc(values.notes)}</textarea></label>
         <button type="submit">Send request</button>
       </form>
     </section>`;

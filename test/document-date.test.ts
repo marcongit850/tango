@@ -453,3 +453,75 @@ describe("signed-in documents page", () => {
     }
   });
 });
+
+describe("board only document email", () => {
+  it("ignores email_owners when the document is board only", async () => {
+    const { sqlite, db } = openPortal(THROUGH_DATE);
+    const app = createApp();
+    const env = { ...portalEnv(db), RESEND_API_KEY: "test-key" } as Env;
+    const token = await signIn(sqlite, "user_jordan");
+    const calls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      calls.push(String(input));
+      return new Response("ok", { status: 200 });
+    };
+    const publish = (visibility: string, title: string) => {
+      const body = new FormData();
+      body.set("title", title);
+      body.set("category", "budgets");
+      body.set("visibility", visibility);
+      body.set("document_date", "");
+      body.set("folder", "");
+      body.set("notes", "Budget notes");
+      body.set("email_owners", "1");
+      body.set("file", new File(["Budget"], `${title}.txt`, { type: "text/plain" }));
+      return app.request(
+        "http://localhost/a/tango-mar/admin/documents",
+        { method: "POST", headers: { Cookie: `tango_session=${token}`, Origin: "http://localhost" }, body },
+        env,
+      );
+    };
+    try {
+      const board = await publish("board", "Board budget");
+      expect(board.status).toBe(303);
+      const boardFlash = decodeURIComponent(board.headers.get("Set-Cookie") ?? "");
+      expect(boardFlash).toContain("ok:Document published.");
+      expect(boardFlash).not.toContain("Email");
+      expect(boardFlash).not.toContain("Emailed");
+      expect(calls).toEqual([]);
+      const boardRow = sqlite.prepare("SELECT id, visibility FROM documents WHERE title = 'Board budget'").get() as {
+        id: string;
+        visibility: string;
+      };
+      expect(boardRow.visibility).toBe("board");
+      const boardAudit = sqlite.prepare("SELECT detail FROM audit_log WHERE entity_id = ?").get(boardRow.id) as { detail: string };
+      expect(boardAudit.detail).toBe("Board budget");
+
+      const versionBody = new FormData();
+      versionBody.set("notes", "Next draft");
+      versionBody.set("email_owners", "1");
+      versionBody.set("file", new File(["Budget 2"], "budget-2.txt", { type: "text/plain" }));
+      const version = await app.request(
+        `http://localhost/a/tango-mar/admin/documents/${boardRow.id}/versions`,
+        { method: "POST", headers: { Cookie: `tango_session=${token}`, Origin: "http://localhost" }, body: versionBody },
+        env,
+      );
+      expect(version.status).toBe(303);
+      const versionFlash = decodeURIComponent(version.headers.get("Set-Cookie") ?? "");
+      expect(versionFlash).toContain("ok:New version is now current.");
+      expect(versionFlash).not.toContain("Email");
+      expect(versionFlash).not.toContain("Emailed");
+      expect(calls).toEqual([]);
+
+      const residents = await publish("residents", "Resident budget");
+      expect(residents.status).toBe(303);
+      expect(decodeURIComponent(residents.headers.get("Set-Cookie") ?? "")).toContain("Emailed");
+      expect(calls.length).toBeGreaterThan(0);
+      expect(calls.every((url) => url === "https://api.resend.com/emails")).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+      sqlite.close();
+    }
+  });
+});

@@ -17,6 +17,7 @@ import { logError, logInfo } from "../lib/log";
 import type { AppBindings } from "../types";
 import { render } from "../views/layout";
 import { privacyPage, termsPage } from "../views/legal";
+import { hoaPitchPage } from "../views/pitch";
 import { homePage, joinReceivedPage, joinRequestPage, legalPage, loginPage, type HomePortal } from "../views/public";
 import { readForm, redirectTo, requireAssociation, textValue, type AppContext } from "./common";
 
@@ -48,6 +49,15 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
   app.get("/", async (c) => {
     const portal = await portalForUser(c);
     return render(c, { title: "Tango Mar", active: "home", body: homePage(showDemo(c), portal), portal });
+  });
+
+  app.get("/bring-this-to-your-hoa", async (c) => {
+    return render(c, {
+      title: "Bring This to Your HOA · Tango Mar",
+      active: "bring",
+      marketing: true,
+      body: hoaPitchPage(),
+    });
   });
 
   app.get("/legal", async (c) => render(c, { title: "Not legal advice", active: "legal", body: legalPage() }));

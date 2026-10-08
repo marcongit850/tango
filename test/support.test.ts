@@ -98,6 +98,7 @@ describe("site footer", () => {
     expect(html).toContain('href="/a/tango-mar/documents">Documents</a>');
     expect(html).toContain('href="/a/tango-mar/faq">FAQs</a>');
     expect(html).toContain('href="/a/tango-mar/messages">Contact</a>');
+    expect(html).toContain('href="/bring-this-to-your-hoa">Bring This to Your HOA</a>');
     expect(html).toContain('href="/privacy">Privacy Policy</a>');
     expect(html).toContain('href="/terms">Terms of Use</a>');
     expect(html).toContain("© 2026 Tango Mar Property Owners Association");

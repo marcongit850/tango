@@ -545,6 +545,215 @@ body:has(.ask-portal) main { padding-bottom: 5rem; }
   .lot { flex-direction: column; }
   .lot-figures { text-align: left; }
 }
+.pitch { padding-bottom: 0; }
+.pitch-jump {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 1.1rem;
+  padding: 0.2rem 0 0.4rem;
+}
+.pitch-jump a:not(.button) { color: var(--ink); text-decoration: none; padding-bottom: 0.15rem; }
+.pitch-jump a:not(.button):hover, .pitch-jump a:not(.button):focus { color: var(--gulf); }
+.pitch-jump .button { margin-left: auto; }
+.pitch-hero { padding: 0.4rem 0 2.2rem; }
+.pitch-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 1.05fr);
+  gap: 2rem 1.75rem;
+  align-items: center;
+}
+.pitch h1 { font-size: clamp(2.35rem, 5vw, 3.45rem); line-height: 1.05; color: #1a2744; }
+.pitch-sub { margin: 0 0 0.75rem; font-size: 1.12rem; color: #1a2744; }
+.pitch-hero-copy > p:last-child { margin-bottom: 0; }
+.pitch .rule.pitch-rule-left { margin-left: 0; }
+.pitch-devices { position: relative; margin: 0; padding: 0 1.4rem 1.6rem 0; }
+.pitch-laptop, .pitch-phone { margin: 0; }
+.pitch-laptop-bezel {
+  background: var(--ink);
+  border: 0.55rem solid var(--ink);
+  border-bottom-width: 0.65rem;
+  border-radius: 0.65rem 0.65rem 0 0;
+}
+.pitch-laptop-bezel img, .pitch-phone img, .pitch-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--sand);
+}
+.pitch-laptop-base {
+  height: 0.7rem;
+  background: #24343c;
+  border-radius: 0 0 0.4rem 0.4rem;
+  position: relative;
+}
+.pitch-laptop-base::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -0.32rem;
+  transform: translateX(-50%);
+  width: 22%;
+  height: 0.32rem;
+  background: #31434c;
+  border-radius: 0 0 0.2rem 0.2rem;
+}
+.pitch-phone {
+  position: absolute;
+  width: 30%;
+  right: 0;
+  bottom: 0;
+  background: var(--ink);
+  border-radius: 0.8rem;
+  padding: 0.38rem;
+  box-shadow: 0 12px 28px rgba(28, 40, 48, 0.18);
+}
+.pitch-phone img {
+  height: 13rem;
+  object-fit: cover;
+  object-position: top center;
+  border-radius: 0.45rem;
+}
+.pitch-center { text-align: center; }
+.pitch-section { padding: 2.3rem 0; }
+.pitch .home-card h3 {
+  font-family: var(--serif);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  text-transform: none;
+  font-size: 1.4rem;
+  line-height: 1.2;
+}
+.pitch .home-card .badge { margin-top: 0.35rem; }
+.pitch-see-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(15rem, 0.75fr);
+  gap: 1.5rem 1.75rem;
+  align-items: center;
+}
+.pitch-shot {
+  margin: 0;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+.pitch-shot a { display: block; }
+.pitch-shot a:focus-visible { outline: 2px solid var(--gulf); outline-offset: 3px; }
+.pitch-checks { list-style: none; margin: 0 0 1.15rem; padding: 0; display: grid; gap: 0.55rem; }
+.pitch-checks li { display: flex; gap: 0.55rem; align-items: flex-start; }
+.pitch-checks svg { width: 1.25rem; height: 1.25rem; flex: 0 0 auto; margin-top: 0.15rem; color: var(--ok); }
+.pitch-board { background: var(--gulf-dark); color: #fffdf8; }
+.pitch-board h2, .pitch-board h3 { color: #fffdf8; }
+.pitch-board .pitch-sub { color: #d7e6e3; }
+.pitch-board .rule { background: #c6a15a; }
+.pitch-board-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin-top: 1.35rem;
+}
+.pitch-board-icon { width: 2.1rem; height: 2.1rem; color: #c6a15a; margin-bottom: 0.55rem; }
+.pitch-board-icon svg { width: 100%; height: 100%; display: block; }
+.pitch-board h3 { font-size: 1.45rem; margin: 0 0 0.3rem; }
+.pitch-board p { margin: 0; color: #d7e6e3; }
+.pitch-prices {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  text-align: left;
+}
+.pitch-price {
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  padding: 1.2rem 1.15rem 1.25rem;
+}
+.pitch-price.popular { border-top: 3px solid var(--gulf); }
+.pitch-popular {
+  margin: 0 0 0.35rem;
+  color: var(--gulf);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.pitch-price h3 { font-size: 1.65rem; }
+.pitch-amount {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 2.15rem;
+  line-height: 1.1;
+  margin: 0.15rem 0 0.7rem;
+  color: var(--gulf-dark);
+}
+.pitch-price ul { margin: 0.4rem 0 1.1rem; padding-left: 1.15rem; flex: 1; }
+.pitch-price li { margin: 0.32rem 0; }
+.pitch-price .button { text-align: center; }
+.pitch-table-wrap { overflow-x: auto; }
+.pitch-status {
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 650;
+  padding: 0.08rem 0.45rem;
+  background: #e7f4ee;
+  color: var(--ok);
+  white-space: nowrap;
+}
+.pitch-status.soon { background: #fff4e5; color: var(--warn); }
+.pitch-soon {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  text-align: left;
+}
+.pitch-soon article {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  padding: 1.15rem 1.15rem 1.2rem;
+}
+.pitch-soon-icon {
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  margin-bottom: 0.7rem;
+  background: #d7e7f8;
+  color: #1c3558;
+}
+.pitch-soon-icon svg { width: 1.25rem; height: 1.25rem; display: block; }
+.pitch-soon h3 { font-family: var(--sans); font-weight: 700; font-size: 1.05rem; letter-spacing: 0; margin: 0 0 0.35rem; }
+.pitch-soon .badge { margin-bottom: 0.55rem; }
+.pitch-faq .stack { text-align: left; }
+.pitch-dialog {
+  width: min(68rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  border: 1px solid var(--line);
+  background: var(--paper);
+  padding: 0.75rem 0.75rem 0.9rem;
+  box-shadow: 0 16px 40px rgba(28, 40, 48, 0.16);
+}
+.pitch-dialog::backdrop { background: rgba(27, 40, 48, 0.45); }
+.pitch-dialog-bar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin: 0 0 0.65rem; }
+.pitch-dialog-bar p { margin: 0; }
+.pitch-dialog img { width: 100%; height: auto; display: block; border: 1px solid var(--line); }
+@media (max-width: 900px) {
+  .pitch .home-cards { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 800px) {
+  .pitch-jump .button { margin-left: 0; }
+  .pitch-hero-grid, .pitch-see-grid, .pitch-prices, .pitch-soon { grid-template-columns: 1fr; }
+  .pitch-board-grid { grid-template-columns: 1fr 1fr; }
+  .pitch-devices { padding: 0; }
+  .pitch-phone { position: static; width: min(16rem, 72%); margin: 1rem auto 0; }
+  .pitch-phone img { height: auto; object-fit: contain; }
+}
+@media (max-width: 560px) {
+  .pitch .home-cards, .pitch-board-grid { grid-template-columns: 1fr; }
+}
 `;
 
 const HOME_SLUG = "tango-mar";
@@ -564,6 +773,7 @@ export function siteFooter(): string {
         <a href="${base}/documents">Documents</a>
         <a href="${base}/faq">FAQs</a>
         <a href="${base}/messages">Contact</a>
+        <a href="/bring-this-to-your-hoa">Bring This to Your HOA</a>
       </nav>
       <div class="home-footer-end">
         <p><a href="/privacy">Privacy Policy</a> | <a href="/terms">Terms of Use</a></p>
@@ -618,6 +828,7 @@ function shell(options: {
   account: string;
   body: string;
   landing?: boolean;
+  marketing?: boolean;
   askPortal?: boolean;
 }): string {
   if (options.landing) {
@@ -663,7 +874,7 @@ function shell(options: {
     <nav>${options.nav}</nav>
     <div class="account">${options.account}</div>
   </header>
-  <main id="content" class="wrap stack">${options.body}</main>
+  <main id="content" class="${options.marketing ? "pitch" : "wrap stack"}">${options.body}</main>
   ${options.askPortal ? askPortalWidget() : ""}
   ${siteFooter()}
 </body>
@@ -711,6 +922,7 @@ export async function render(
     active?: string;
     body: string;
     status?: number;
+    marketing?: boolean;
     portal?: { dashboardHref: string; adminHref: string | null } | null;
   },
 ): Promise<Response> {
@@ -780,6 +992,7 @@ export async function render(
     nav: onPublicHome ? "" : nav,
     account,
     landing: onPublicHome,
+    marketing: options.marketing,
     askPortal: resident,
     body: `${flashHtml}${options.body}`,
   });

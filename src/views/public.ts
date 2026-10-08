@@ -1,5 +1,5 @@
 import { formatAddress } from "../lib/dates";
-import type { EstoppelFormValues } from "../lib/estoppel";
+import { ESTOPPEL_STATUTE_URL, type EstoppelFormValues } from "../lib/estoppel";
 import { esc, paragraphs } from "../lib/html";
 import type { Association } from "../types";
 
@@ -169,8 +169,9 @@ export function estoppelPage(
   const error = options.error ? `<p class="flash warn">${esc(options.error)}</p>` : "";
   return `<section class="panel">
       <h1>Estoppel Requests</h1>
-      <p>Under Section 720.30851, Florida Statutes, the association designates the following to receive estoppel certificate requests:</p>
+      <p>Under <a href="${esc(ESTOPPEL_STATUTE_URL)}" target="_blank" rel="noopener">Section 720.30851, Florida Statutes</a>, the association designates the following to receive estoppel certificate requests:</p>
       <p>${esc(association.name)}<br>Attn: Board of Directors${address ? `<br>${esc(address)}` : ""}</p>
+      <p>The association will respond to estoppel certificate requests within 10 business days, as required by Florida law.</p>
       <p>Requests may be mailed to the address above or submitted with the form below.</p>
       ${sent}
       ${error}

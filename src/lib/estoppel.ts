@@ -3,6 +3,10 @@ import { isIsoDate } from "./dates";
 /** Inbox for estoppel certificate requests. Kept off the public page. */
 export const ESTOPPEL_INBOX = "marc@whpinc.com";
 
+/** Official text of section 720.30851 on Online Sunshine. */
+export const ESTOPPEL_STATUTE_URL =
+  "https://www.leg.state.fl.us/statutes/index.cfm?App_mode=Display_Statute&URL=0700-0799/0720/Sections/0720.30851.html";
+
 const WINDOW_MS = 10 * 60 * 1000;
 const MAX_HITS = 5;
 const hits = new Map<string, number[]>();

@@ -401,6 +401,30 @@ Until this file runs, My profile can still save a name, phone, mailing address, 
 
 Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0012` is already on the remote database.
 
+## Email preferences (paste this before merge)
+
+`migrations/0014_email_preferences.sql` adds the announcement email choice and the electronic notice consent log. Paste it in the Cloudflare dashboard before you merge the pull request. Marc does not need a terminal.
+
+What it does:
+
+- Adds `email_announcements` on `users`, default 1. Existing and new logins keep announcement emails until the owner turns the box off.
+- Creates `electronic_notice_consent`. Each save appends a row. Do not update or delete those rows. Current status is the newest row for that login.
+- The log stores the login id, name, lots, email, granted or revoked, UTC time, IP, user agent, and session id when one exists.
+
+Dashboard steps:
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database**.
+2. Select the database named **tango**.
+3. Open **Console**.
+4. Paste the full contents of `migrations/0014_email_preferences.sql`.
+5. Select **Execute**.
+
+Run that file once, after `0013`. If the console says a column or table already exists, this file was already applied. Do not paste it again.
+
+Until this file runs, My profile still saves a name, phone, mailing address, and email confirmation. Save email preferences asks you to apply this file first. Announcement emails still go out, which is the default. Consent stays not recorded.
+
+Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0013` is already on the remote database.
+
 ## Second owner on a lot
 
 No D1 migration. Marc does not paste SQL for this change. A lot can already have more than one row in `property_owners`.

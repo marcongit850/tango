@@ -1,6 +1,15 @@
 import type { Hono } from "hono";
 import {
   activeLoginEmails,
+  announcementEmailsOn,
+  announcementPreferenceReady,
+  consentHistory,
+  consentLogExport,
+  consentLogReady,
+  findSessionId,
+  latestConsent,
+  latestConsentByUser,
+  recordEmailChangeConsent,
   allAnnouncements,
   assignAssessmentInvoices,
   countActiveAdmins,
@@ -104,6 +113,8 @@ import {
 } from "../views/admin";
 import { render } from "../views/layout";
 import { canEditAdmin } from "../lib/access";
+import { getCookie } from "hono/cookie";
+import { sha256Hex } from "../lib/tokens";
 import { fileValue, readForm, redirectTo, requireEditor, requireStaff, streamMessageAttachment, textValue, type AppContext, type FormFields } from "./common";
 
 const ROLES = new Set<MembershipRole>(["homeowner", "board"]);
@@ -186,10 +197,11 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       });
       ownersByLot.set(link.property_id, list);
     }
+    const consentByUser = await latestConsentByUser(c.env.DB, association.id);
     return render(c, {
       title: delinquentOnly ? "Past due lots" : "Owners & lots",
       active: "admin",
-      body: ownersPage(association, decoratedLots, owners, delinquentOnly, canEditAdmin(membership), ownersByLot),
+      body: ownersPage(association, decoratedLots, owners, delinquentOnly, canEditAdmin(membership), ownersByLot, consentByUser),
     });
   });
 
@@ -204,6 +216,12 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     ]);
     const primary = owner.property_id ? ledger.find((row) => row.property_id === owner.property_id) : undefined;
     const balanceLot = primary ?? (ledger.length === 1 ? ledger[0] : undefined);
+    const [announcementsOn, consent, history, noticesReady] = await Promise.all([
+      announcementEmailsOn(c.env.DB, owner.user_id),
+      latestConsent(c.env.DB, association.id, owner.user_id),
+      consentHistory(c.env.DB, association.id, owner.user_id),
+      Promise.all([announcementPreferenceReady(c.env.DB), consentLogReady(c.env.DB)]).then(([announcements, consentTable]) => announcements && consentTable),
+    ]);
     return render(c, {
       title: owner.name,
       active: "admin",
@@ -215,6 +233,10 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         lots: [],
         properties,
         canEdit: canEditAdmin(membership),
+        announcementsOn,
+        consent,
+        consentHistory: history,
+        noticesReady,
       }),
     });
   });
@@ -284,6 +306,26 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         entityId: owner.user_id,
         detail: `${owner.email} to ${result.email}`,
       });
+      const token = getCookie(c, "tango_session");
+      const recorded = await recordEmailChangeConsent(c.env.DB, {
+        associationId: association.id,
+        userId: owner.user_id,
+        ownerName: owner.name,
+        newEmail: result.email,
+        ip: (c.req.header("cf-connecting-ip") ?? "").trim().slice(0, 80),
+        userAgent: (c.req.header("user-agent") ?? "").trim().slice(0, 400),
+        sessionId: token ? await findSessionId(c.env.DB, await sha256Hex(token)) : "",
+      });
+      if (recorded) {
+        await writeAudit(c.env.DB, {
+          associationId: association.id,
+          actorUserId: user.id,
+          action: "consent_revoked",
+          entityType: "user",
+          entityId: owner.user_id,
+          detail: `email_changed ${result.email}`,
+        });
+      }
     }
     return redirectTo(c, back, "Login email saved.");
   });
@@ -1385,6 +1427,32 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     return redirectTo(c, `/a/${association.slug}/admin/ledger`, "Payment recorded.");
   });
 
+  app.get("/a/:slug/admin/consent.csv", async (c) => {
+    const { association } = requireStaff(c);
+    const rows = await consentLogExport(c.env.DB, association.id);
+    const lines = [["user_id", "owner_name", "lots", "email", "action", "reason", "created_at_utc", "ip", "user_agent", "session_id"].join(",")];
+    for (const row of rows) {
+      lines.push(
+        [
+          csvText(row.user_id),
+          csvText(row.owner_name),
+          csvText(row.lots),
+          csvText(row.email),
+          csvText(row.action),
+          csvText(row.reason),
+          csvText(row.created_at),
+          csvText(row.ip),
+          csvText(row.user_agent),
+          csvText(row.session_id),
+        ].join(","),
+      );
+    }
+    return c.body(lines.join("\n"), 200, {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${association.slug}-electronic-notice-consent.csv"`,
+    });
+  });
+
   app.get("/a/:slug/admin/export.csv", async (c) => {
     const { association } = requireStaff(c);
     const today = todayIso(association.timezone);
@@ -2393,6 +2461,10 @@ async function maybeEmailOneOwner(
   },
 ): Promise<{ message: string; tone: "ok" | "warn"; detailNote: string }> {
   if (!input.requested) return { message: input.saved, tone: "ok", detailNote: "" };
+  if (!(await announcementEmailsOn(c.env.DB, input.ownerId))) {
+    const note = "This owner turned off announcement emails.";
+    return { message: `${input.saved} ${note}`, tone: "warn", detailNote: note };
+  }
   try {
     const row = await c.env.DB
       .prepare(

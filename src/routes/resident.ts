@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { getCookie } from "hono/cookie";
 import { canEditAdmin, canViewAdmin, canViewPropertyFinancials, isAdmin } from "../lib/access";
 import { timeZoneLabel, todayIso } from "../lib/dates";
 import { resendApiKey, sendResendEmail, SUPPORT_INBOX, supportEmailText } from "../lib/email";
@@ -6,15 +7,23 @@ import { ForbiddenError, isMissingColumn, isMissingTable, NotFoundError } from "
 import { logError, logInfo } from "../lib/log";
 import { isValidEmail, normalizeEmail } from "../lib/homeowner-account";
 import { ensureSeedFiles } from "../lib/seed-files";
+import { sha256Hex } from "../lib/tokens";
 import { issueEmailChangeLink } from "./auth";
 import { applyDocumentResponseHeaders, contentTypeForUpload, deleteStoredFiles, MAX_MESSAGE_FILES, noticeFileProblem, safeFilename } from "../lib/files";
 import {
+  announcementEmailsOn,
+  announcementPreferenceReady,
+  consentLogReady,
   contactsForProperty,
+  findSessionId,
   findUserByEmail,
+  insertConsentLog,
+  latestConsent,
   insertJoinRequest,
   invoiceById,
   joinRequestNoticeHref,
   lotsOwnedByUser,
+  setAnnouncementEmails,
   invoicesForUser,
   ledgerForUser,
   listContacts,
@@ -111,6 +120,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
   app.get("/a/:slug/profile", async (c) => {
     const { association, user } = requireMember(c);
     const lots = await lotsOwnedByUser(c.env.DB, association.id, user.id);
+    const notices = await profileNotices(c.env.DB, association.id, user.id);
     return render(c, {
       title: `My profile · ${association.name}`,
       body: profilePage({
@@ -119,6 +129,9 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
         email: user.email,
         phone: user.phone,
         lots,
+        announcementsOn: notices.announcementsOn,
+        consentGranted: notices.consentGranted,
+        noticesReady: notices.ready,
       }),
     });
   });
@@ -164,6 +177,67 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     return redirectTo(c, back, "Name and phone saved.");
   });
 
+  app.post("/a/:slug/profile/notices", async (c) => {
+    const { association, user } = requireMember(c);
+    const fields = await readForm(c);
+    const back = profilePath(association.slug);
+    const ready = (await announcementPreferenceReady(c.env.DB)) && (await consentLogReady(c.env.DB));
+    if (!ready) {
+      return redirectTo(
+        c,
+        back,
+        "Apply the email preferences migration in D1, then try again. The steps are in the README under Email preferences.",
+        "warn",
+      );
+    }
+    const wantAnnouncements = fields.email_announcements === "1";
+    const wantConsent = fields.electronic_consent === "1";
+    const [announcementsOn, current] = await Promise.all([
+      announcementEmailsOn(c.env.DB, user.id),
+      latestConsent(c.env.DB, association.id, user.id),
+    ]);
+    const consentGranted = current?.action === "granted";
+    if (wantAnnouncements === announcementsOn && wantConsent === consentGranted) {
+      return redirectTo(c, back, "Email preferences saved.");
+    }
+    const lots = await lotsOwnedByUser(c.env.DB, association.id, user.id);
+    const lotList = lots.map((lot) => lot.lot_number).filter(Boolean).join(", ");
+    const context = await noticeRequestContext(c);
+    if (wantAnnouncements !== announcementsOn) {
+      await setAnnouncementEmails(c.env.DB, user.id, wantAnnouncements);
+      await writeAudit(c.env.DB, {
+        associationId: association.id,
+        actorUserId: user.id,
+        action: "profile_announcements",
+        entityType: "user",
+        entityId: user.id,
+        detail: wantAnnouncements ? "On" : "Off",
+      });
+    }
+    if (wantConsent !== consentGranted) {
+      await insertConsentLog(c.env.DB, {
+        associationId: association.id,
+        userId: user.id,
+        ownerName: user.name,
+        lots: lotList,
+        email: user.email,
+        action: wantConsent ? "granted" : "revoked",
+        ip: context.ip,
+        userAgent: context.userAgent,
+        sessionId: context.sessionId,
+      });
+      await writeAudit(c.env.DB, {
+        associationId: association.id,
+        actorUserId: user.id,
+        action: wantConsent ? "consent_granted" : "consent_revoked",
+        entityType: "user",
+        entityId: user.id,
+        detail: user.email,
+      });
+    }
+    return redirectTo(c, back, "Email preferences saved.");
+  });
+
   app.post("/a/:slug/profile/email", async (c) => {
     const { association, user } = requireMember(c);
     const fields = await readForm(c);
@@ -180,7 +254,10 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
       associationName: association.name,
     });
     if (devLink) {
-      const lots = await lotsOwnedByUser(c.env.DB, association.id, user.id);
+      const [lots, notices] = await Promise.all([
+        lotsOwnedByUser(c.env.DB, association.id, user.id),
+        profileNotices(c.env.DB, association.id, user.id),
+      ]);
       return render(c, {
         title: `My profile · ${association.name}`,
         body: profilePage({
@@ -190,6 +267,9 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
           phone: user.phone,
           lots,
           devLink,
+          announcementsOn: notices.announcementsOn,
+          consentGranted: notices.consentGranted,
+          noticesReady: notices.ready,
         }),
       });
     }
@@ -822,6 +902,34 @@ async function assertPropertyAccess(c: AppContext, associationId: string, proper
 
 function profilePath(slug: string): string {
   return `/a/${slug}/profile`;
+}
+
+async function profileNotices(
+  db: D1Database,
+  associationId: string,
+  userId: string,
+): Promise<{ announcementsOn: boolean; consentGranted: boolean; ready: boolean }> {
+  const [announcementsReady, consentReady, announcementsOn, current] = await Promise.all([
+    announcementPreferenceReady(db),
+    consentLogReady(db),
+    announcementEmailsOn(db, userId),
+    latestConsent(db, associationId, userId),
+  ]);
+  return {
+    announcementsOn,
+    consentGranted: current?.action === "granted",
+    ready: announcementsReady && consentReady,
+  };
+}
+
+async function noticeRequestContext(c: AppContext): Promise<{ ip: string; userAgent: string; sessionId: string }> {
+  const token = getCookie(c, "tango_session");
+  const sessionId = token ? await findSessionId(c.env.DB, await sha256Hex(token)) : "";
+  return {
+    ip: (c.req.header("cf-connecting-ip") ?? "").trim().slice(0, 80),
+    userAgent: (c.req.header("user-agent") ?? "").trim().slice(0, 400),
+    sessionId,
+  };
 }
 
 async function ownedProperties(c: AppContext, associationId: string, userId: string) {

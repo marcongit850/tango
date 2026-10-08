@@ -8,6 +8,7 @@ import { sha256Hex } from "../src/lib/tokens";
 import {
   approvalSummary,
   approveJoinRequest,
+  planCoOwnerLink,
   planLotLink,
   planMembership,
   planUserName,
@@ -158,6 +159,26 @@ describe("join approval planning", () => {
       propertyId: "p14",
       lotNumber: "14",
     });
+    expect(planCoOwnerLink("p14", properties)).toEqual({
+      kind: "link",
+      propertyId: "p14",
+      lotNumber: "14",
+      asCoOwner: true,
+    });
+    expect(planCoOwnerLink("missing", properties)).toEqual({ kind: "skip", reason: "none" });
+    expect(planCoOwnerLink("p14", [{ ...properties[0], ownedByUser: true }])).toEqual({
+      kind: "already",
+      propertyId: "p14",
+      lotNumber: "14",
+    });
+    expect(
+      approvalSummary({
+        createdUser: true,
+        roleId: "homeowner",
+        lot: { kind: "linked", lotNumber: "14", asCoOwner: true },
+        emailSent: true,
+      }),
+    ).toContain("Added as another owner of lot 14.");
   });
 
   it("reuses a name and keeps an active staff role", () => {
@@ -447,7 +468,7 @@ describe("join requests admin page", () => {
     expect(html).not.toContain("/admin/join-requests/declined-1/decline");
     expect(html).toContain("Approved");
     expect(html).toContain("Declined");
-    expect(html).toContain("Approve creates a login and sends a welcome email. Decline does not. Delete removes the request.");
+    expect(html).toContain("Approve creates a login and sends a welcome email. A request to add someone to a lot links that person as another owner. Decline does not. Delete removes the request.");
     expect(html).toContain('class="actions join-actions"');
     expect(html).not.toContain("\u2014");
   });

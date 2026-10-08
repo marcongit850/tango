@@ -14,9 +14,14 @@ On https://mytangomar.com the signed-in dashboard keeps the same navigation and 
 
 Ask the portal is a button at the bottom right of signed-in pages. Opening it shows a chat-style panel titled Ask the portal, with a short line about covenants, bylaws, and your lot. The panel says SUBSCRIPTION REQUIRED. The message box is disabled. Nothing is sent, and no assistant is connected. The paid assistant can be added later.
 
+The signed-in name next to Log out opens My profile. That page edits the person's name and phone, and the mailing address on each lot they own. It does not show admin notes, and it does not edit the lot address. Changing the login email sends a confirmation link to the new address. The login stays the same until that link is opened. An email already used by someone else is refused. After the change, the previous address gets a short note when email is configured.
+
+Add another owner on that page sends a join request for one lot. It does not create a login. Approve on Join requests creates or reuses the login, links that person to the lot as another owner, and sends the welcome email.
+
 ## Phase 1 includes
 
 - Magic-link email login. No passwords.
+- My profile, from the signed-in name next to Log out. An owner can change their name and phone, the mailing address on each lot they own, and request another owner. A new login email takes effect only after they open a confirmation link sent to that address.
 - Homeowner dashboard: account balance, lot dues, news, upcoming events, invoices, recorded payments, late fees, and personal notices.
 - Documents in nine categories, with versions. On the Documents page each category is a collapsed folder. A file can sit in the category, or in an optional subfolder such as a year under Meeting Minutes. Categories with no subfolders open straight to their files. Residents see the version the board marks current. Budgets can be board-only. Publishing a file can email a short portal link when Email owners is checked. Board-only files go only to board logins, and the email does not include the file.
 - News, emergency notices, meetings, calendar, FAQs, and board contacts. Posting or saving an announcement or event can email active logins the same way. FAQ and contacts do not.
@@ -371,6 +376,30 @@ Run that file once, after `0011`. Pasting it again is safe.
 Sending a message with a file before this runs asks you to apply the file first. A message without a file still sends. On Messages, Attach a file (optional) takes a PDF, text file, image, or Word document, 8 MB or smaller, up to 3 files. The owner and the board open or download the file from that message. Another owner cannot open it. A new message leaves a portal notice for the board. It does not send an email.
 
 Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0011` is already on the remote database.
+
+## My profile co-owner requests (paste this before merge)
+
+`migrations/0013_co_owner_request.sql` lets an owner ask the board to add another person to a lot they already own. Paste it in the Cloudflare dashboard before you merge the pull request. Marc does not need a terminal.
+
+What it does:
+
+- Adds `property_id` on `join_requests`. Existing requests stay blank, which means Approve behaves as it does today.
+- A request from My profile stores the lot id. Approve then links that person to the lot even when the lot already has an owner. The current primary owner stays primary.
+- Phone numbers stay on the person. Mailing address stays on the lot. No other columns are added.
+
+Dashboard steps:
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database**.
+2. Select the database named **tango**.
+3. Open **Console**.
+4. Paste the full contents of `migrations/0013_co_owner_request.sql`.
+5. Select **Execute**.
+
+Run that file once, after `0012`. If the console says a column already exists, this file was already applied. Do not paste it again.
+
+Until this file runs, My profile can still save a name, phone, mailing address, and email confirmation. Send request on Add another owner asks you to apply this file first.
+
+Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0012` is already on the remote database.
 
 ## Second owner on a lot
 

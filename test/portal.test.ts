@@ -655,7 +655,7 @@ describe("public home", () => {
 
   it("keeps the name and log out beside the portal buttons", () => {
     const homeowner = landingAccount("Sam Rivera", { dashboardHref: "/a/tango-mar/dashboard", adminHref: null });
-    expect(homeowner).toContain("Sam Rivera");
+    expect(homeowner).toContain('class="account-name" href="/a/tango-mar/profile">Sam Rivera</a>');
     expect(homeowner).toContain("Log out");
     expect(homeowner).toContain('href="/a/tango-mar/dashboard"');
     expect(homeowner).not.toContain('href="/a/tango-mar/admin"');
@@ -774,7 +774,7 @@ describe("signed-in header", () => {
     expect(nav).toContain("News");
     expect(nav).not.toContain("Admin");
     expect(account).toContain('class="account-admin" href="/a/tango-mar/admin">Admin</a>');
-    expect(account).toContain("Marc");
+    expect(account).toContain('class="account-name" href="/a/tango-mar/profile">Marc</a>');
     expect(account).toContain("Log out");
     expect(account.indexOf(">Admin<")).toBeLessThan(account.indexOf("Marc"));
     expect(account.indexOf("Marc")).toBeLessThan(account.indexOf("Log out"));

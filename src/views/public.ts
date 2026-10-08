@@ -190,6 +190,14 @@ export function checkEmailPage(associationName: string, devLink: string | null):
   </section>`;
 }
 
+export function emailChangeBlockedPage(): string {
+  return `<section class="panel">
+    <h1>Email not changed</h1>
+    <p>That email is already used by another login. Your email was not changed.</p>
+    <p><a class="button" href="/login">Sign in</a></p>
+  </section>`;
+}
+
 export function invalidLinkPage(): string {
   return `<section class="panel">
     <h1>That link is not valid</h1>

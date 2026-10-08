@@ -1,5 +1,6 @@
 import { clearJoinRequestNotices, findMembership, findUserByEmail } from "../db";
-import { isValidEmail, userUpsertSql } from "./homeowner-account";
+import { isMissingColumn } from "./errors";
+import { isValidEmail, linkLotOwner, userUpsertSql } from "./homeowner-account";
 import type { MembershipRole } from "../types";
 
 const LOGIN_URL = "https://mytangomar.com/login";
@@ -14,12 +15,12 @@ export type LotCandidate = {
 };
 
 export type LotPlan =
-  | { kind: "link"; propertyId: string; lotNumber: string }
+  | { kind: "link"; propertyId: string; lotNumber: string; asCoOwner?: boolean }
   | { kind: "already"; propertyId: string; lotNumber: string }
   | { kind: "skip"; reason: "blank" | "none" | "ambiguous" | "occupied"; lotNumber?: string };
 
 export type LotOutcome =
-  | { kind: "linked"; lotNumber: string }
+  | { kind: "linked"; lotNumber: string; asCoOwner?: boolean }
   | { kind: "already"; lotNumber: string }
   | { kind: "skipped"; reason: "blank" | "none" | "ambiguous" | "occupied"; lotNumber?: string };
 
@@ -73,6 +74,14 @@ export function planLotLink(address: string, properties: LotCandidate[]): LotPla
   return { kind: "link", propertyId: match.id, lotNumber: match.lotNumber };
 }
 
+/** A second owner on a lot that already has someone. Primary stays with whoever already has it. */
+export function planCoOwnerLink(propertyId: string, properties: LotCandidate[]): LotPlan {
+  const match = properties.find((property) => property.id === propertyId);
+  if (!match) return { kind: "skip", reason: "none" };
+  if (match.ownedByUser) return { kind: "already", propertyId: match.id, lotNumber: match.lotNumber };
+  return { kind: "link", propertyId: match.id, lotNumber: match.lotNumber, asCoOwner: true };
+}
+
 export function welcomeEmail(input: { associationName: string; email: string; name: string }): { subject: string; text: string } {
   const name = input.name.replace(/[\r\n]+/g, " ").trim();
   const hello = name ? `Hello ${name},` : "Hello,";
@@ -105,7 +114,11 @@ export function approvalSummary(input: {
       ? "Existing board login reused."
       : "Existing login reused.";
   let lot = "No lot matched that address, so no lot was linked.";
-  if (input.lot.kind === "linked") lot = `Linked to lot ${input.lot.lotNumber}.`;
+  if (input.lot.kind === "linked") {
+    lot = input.lot.asCoOwner
+      ? `Added as another owner of lot ${input.lot.lotNumber}.`
+      : `Linked to lot ${input.lot.lotNumber}.`;
+  }
   else if (input.lot.kind === "already") lot = `Already linked to lot ${input.lot.lotNumber}.`;
   else if (input.lot.reason === "blank") lot = "No address was on the request, so no lot was linked.";
   else if (input.lot.reason === "ambiguous") lot = "That address matches more than one lot, so no lot was linked.";
@@ -122,6 +135,7 @@ type JoinRequestRecord = {
   email: string;
   address: string;
   status: string;
+  property_id: string;
 };
 
 type PropertyMatchRow = {
@@ -150,18 +164,33 @@ function validEmail(email: string): boolean {
   return isValidEmail(email);
 }
 
+async function loadApprovableJoinRequest(
+  db: D1Database,
+  associationId: string,
+  requestId: string,
+): Promise<JoinRequestRecord | null> {
+  const where = "WHERE association_id = ? AND id = ? AND status IN ('pending', 'reviewed', 'declined')";
+  try {
+    const row = await db
+      .prepare(`SELECT id, name, email, address, status, property_id FROM join_requests ${where}`)
+      .bind(associationId, requestId)
+      .first<JoinRequestRecord>();
+    return row ? { ...row, property_id: row.property_id ?? "" } : null;
+  } catch (error) {
+    if (!isMissingColumn(error)) throw error;
+    const row = await db
+      .prepare(`SELECT id, name, email, address, status FROM join_requests ${where}`)
+      .bind(associationId, requestId)
+      .first<Omit<JoinRequestRecord, "property_id">>();
+    return row ? { ...row, property_id: "" } : null;
+  }
+}
+
 export async function approveJoinRequest(
   db: D1Database,
   input: { associationId: string; requestId: string },
 ): Promise<ApproveJoinResult> {
-  const request = await db
-    .prepare(
-      `SELECT id, name, email, address, status
-       FROM join_requests
-       WHERE association_id = ? AND id = ? AND status IN ('pending', 'reviewed', 'declined')`,
-    )
-    .bind(input.associationId, input.requestId)
-    .first<JoinRequestRecord>();
+  const request = await loadApprovableJoinRequest(db, input.associationId, input.requestId);
   if (!request) return { ok: false, reason: "missing" };
 
   const email = request.email.trim().toLowerCase();
@@ -184,16 +213,15 @@ export async function approveJoinRequest(
     )
     .bind(userIdForMatch, input.associationId)
     .all<PropertyMatchRow>();
-  const lotPlan = planLotLink(
-    request.address,
-    propertyRows.map((row) => ({
-      id: row.id,
-      lotNumber: row.lot_number,
-      streetAddress: row.street_address,
-      ownerCount: Number(row.owner_count),
-      ownedByUser: Number(row.owned_by_user) > 0,
-    })),
-  );
+  const candidates = propertyRows.map((row) => ({
+    id: row.id,
+    lotNumber: row.lot_number,
+    streetAddress: row.street_address,
+    ownerCount: Number(row.owner_count),
+    ownedByUser: Number(row.owned_by_user) > 0,
+  }));
+  const coOwnerPropertyId = request.property_id.trim();
+  const lotPlan = coOwnerPropertyId ? planCoOwnerLink(coOwnerPropertyId, candidates) : planLotLink(request.address, candidates);
 
   const now = new Date().toISOString();
   const statements = [
@@ -212,7 +240,8 @@ export async function approveJoinRequest(
       )
       .bind(crypto.randomUUID(), input.associationId, role.roleId, now, email),
   ];
-  if (lotPlan.kind === "link") {
+  const asCoOwner = lotPlan.kind === "link" && lotPlan.asCoOwner === true;
+  if (lotPlan.kind === "link" && !asCoOwner) {
     statements.push(
       db
         .prepare(
@@ -261,7 +290,18 @@ export async function approveJoinRequest(
   let lot: LotOutcome;
   if (lotPlan.kind === "already") lot = { kind: "already", lotNumber: lotPlan.lotNumber };
   else if (lotPlan.kind === "skip") lot = { kind: "skipped", reason: lotPlan.reason, lotNumber: lotPlan.lotNumber };
-  else {
+  else if (lotPlan.kind === "link" && lotPlan.asCoOwner) {
+    const linked = await linkLotOwner(db, {
+      associationId: input.associationId,
+      propertyId: lotPlan.propertyId,
+      userId: user.id,
+      now,
+      primary: "if-none",
+    });
+    lot = linked.inserted
+      ? { kind: "linked", lotNumber: lotPlan.lotNumber, asCoOwner: true }
+      : { kind: "already", lotNumber: lotPlan.lotNumber };
+  } else {
     const lotChanges = results[results.length - 2]?.meta.changes ?? 0;
     lot =
       lotChanges > 0

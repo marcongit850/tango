@@ -138,6 +138,10 @@ export async function findUserByEmail(db: D1Database, email: string): Promise<Us
     .first<User>();
 }
 
+export async function findUserById(db: D1Database, userId: string): Promise<User | null> {
+  return db.prepare("SELECT id, email, name, phone FROM users WHERE id = ?").bind(userId).first<User>();
+}
+
 export async function findSessionUser(db: D1Database, tokenHash: string, nowIso: string): Promise<User | null> {
   return db
     .prepare(
@@ -262,6 +266,29 @@ export async function notify(
     .bind(id, entry.associationId, entry.userId, entry.kind, entry.title, entry.body ?? "", entry.href ?? "", createdAt)
     .run();
   return id;
+}
+
+export async function notifyStaff(
+  db: D1Database,
+  entry: {
+    associationId: string;
+    kind: string;
+    title: string;
+    body?: string;
+    href?: string;
+  },
+): Promise<void> {
+  const staff = await listStaffContacts(db, entry.associationId);
+  for (const person of staff) {
+    await notify(db, {
+      associationId: entry.associationId,
+      userId: person.user_id,
+      kind: entry.kind,
+      title: entry.title,
+      body: entry.body,
+      href: entry.href,
+    });
+  }
 }
 
 export type BalanceRow = {
@@ -1152,6 +1179,34 @@ export async function listLotOwners(db: D1Database, associationId: string): Prom
   return results;
 }
 
+export type OwnerLotProfile = {
+  id: string;
+  lot_number: string;
+  house_name: string;
+  mailing_street: string;
+  mailing_city: string;
+  mailing_state: string;
+  mailing_postal_code: string;
+};
+
+/** Lots linked to this login. Admin notes and the lot street address are not selected. */
+export async function lotsOwnedByUser(db: D1Database, associationId: string, userId: string): Promise<OwnerLotProfile[]> {
+  const names = await columnNames(db, "properties");
+  const column = (name: string) => (names.has(name) ? `p.${name}` : `'' AS ${name}`);
+  const { results } = await db
+    .prepare(
+      `SELECT p.id, p.lot_number, ${column("house_name")}, ${column("mailing_street")},
+              ${column("mailing_city")}, ${column("mailing_state")}, ${column("mailing_postal_code")}
+       FROM properties p
+       JOIN property_owners po ON po.property_id = p.id AND po.association_id = p.association_id
+       WHERE p.association_id = ? AND po.user_id = ?
+       ORDER BY p.lot_number`,
+    )
+    .bind(associationId, userId)
+    .all<OwnerLotProfile>();
+  return results;
+}
+
 export async function contactsForProperty(
   db: D1Database,
   associationId: string,
@@ -1426,15 +1481,27 @@ export type JoinRequestRow = {
 
 export async function insertJoinRequest(
   db: D1Database,
-  entry: { associationId: string; name: string; email: string; address: string; note: string },
+  entry: { associationId: string; name: string; email: string; address: string; note: string; propertyId?: string },
 ): Promise<string> {
   const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const propertyId = entry.propertyId?.trim() ?? "";
+  if (propertyId) {
+    await db
+      .prepare(
+        `INSERT INTO join_requests (id, association_id, name, email, address, note, status, created_at, property_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+      )
+      .bind(id, entry.associationId, entry.name, entry.email, entry.address, entry.note, now, propertyId)
+      .run();
+    return id;
+  }
   await db
     .prepare(
       `INSERT INTO join_requests (id, association_id, name, email, address, note, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
     )
-    .bind(id, entry.associationId, entry.name, entry.email, entry.address, entry.note, new Date().toISOString())
+    .bind(id, entry.associationId, entry.name, entry.email, entry.address, entry.note, now)
     .run();
   return id;
 }

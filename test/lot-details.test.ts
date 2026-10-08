@@ -196,15 +196,16 @@ describe("lot details", () => {
       const rosterHtml = await roster.text();
       expect(rosterHtml).toContain("<h1>Owners & lots</h1>");
       expect(rosterHtml).toContain("MELOMAR");
-      expect(rosterHtml).toContain("Lot 14, Tang O Mar Drive<br>Santa Rosa Beach, FL 32459");
+      expect(rosterHtml).toContain("Lot 14, Tang O Mar Drive, Santa Rosa Beach, FL 32459");
+      expect(rosterHtml).not.toContain("Lot 14, Tang O Mar Drive<br>");
       expect(rosterHtml).toContain("Mailing address (if different)");
       expect(rosterHtml).toContain('name="house_name"');
       expect(rosterHtml).not.toContain("such as MELOMAR");
       expect(rosterHtml).not.toContain("AVERITTS FAVORITE");
       expect(rosterHtml).toContain("100 Oak Street");
       expect(rosterHtml).toContain("850-555-0102");
+      expect(rosterHtml).toContain("850-555-0199");
       expect(rosterHtml).toContain(NOTE);
-      expect(rosterHtml).not.toContain("850-555-0199");
       const users = rosterHtml.slice(rosterHtml.indexOf('id="logins"'));
       expect(users).toContain("<h2>Users</h2>");
       expect(users).toContain("Last login");

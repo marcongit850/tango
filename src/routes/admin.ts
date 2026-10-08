@@ -277,13 +277,15 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         delinquent: balance?.delinquent ?? false,
       };
     });
-    const ownersByLot = new Map<string, { userId: string; name: string; email: string; isPrimary: boolean }[]>();
+    const phoneByUser = new Map(owners.map((owner) => [owner.user_id, owner.phone]));
+    const ownersByLot = new Map<string, { userId: string; name: string; email: string; phone: string; isPrimary: boolean }[]>();
     for (const link of links) {
       const list = ownersByLot.get(link.property_id) ?? [];
       list.push({
         userId: link.user_id,
         name: link.name,
         email: link.email,
+        phone: phoneByUser.get(link.user_id) ?? "",
         isPrimary: Number(link.is_primary) === 1,
       });
       ownersByLot.set(link.property_id, list);

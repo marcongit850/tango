@@ -155,6 +155,101 @@ form.email-prefs h2 { margin: 0.75rem 0 0; font-size: 1.05rem; }
 .filters a.active { color: var(--gulf); box-shadow: inset 0 -2px 0 var(--gulf); }
 .badge { display: inline-block; border-radius: 0; padding: 0.05rem 0.5rem; background: #e7eeed; color: var(--gulf-dark); font-size: 0.82rem; }
 .badge.late { background: var(--emergency); color: var(--late); }
+.lot-search { max-width: 24rem; margin: 0 0 0.85rem; }
+.lot-head, .lot-summary {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 0.85fr) minmax(12rem, 2.1fr) minmax(7rem, 1.15fr) auto auto 1.15rem;
+  column-gap: 0.75rem;
+  align-items: start;
+}
+.lot-head {
+  padding: 0.15rem 0.4rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.lot-fold { border-bottom: 1px solid var(--line); }
+.lot-summary {
+  padding: 0.55rem 0.4rem;
+  cursor: pointer;
+  list-style: none;
+}
+.lot-summary::-webkit-details-marker { display: none; }
+.lot-summary::marker { content: ""; }
+.lot-summary:focus-visible { outline: 2px solid var(--gulf); outline-offset: -2px; }
+.lot-place, .lot-person { min-width: 0; }
+.lot-house, .lot-address { display: block; }
+.lot-lot a, .lot-balance, .lot-phone, .lot-lot .badge { white-space: nowrap; }
+.lot-chevron {
+  width: 0.42rem;
+  height: 0.42rem;
+  margin-top: 0.45rem;
+  border-right: 2px solid var(--gulf-dark);
+  border-bottom: 2px solid var(--gulf-dark);
+  transform: rotate(-45deg);
+  justify-self: end;
+}
+.lot-fold[open] > .lot-summary .lot-chevron { transform: rotate(45deg); margin-top: 0.28rem; }
+.lot-kicker {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.lot-detail { margin: 0 0.4rem 0.85rem; padding: 0.75rem 0 0.15rem; border-top: 1px solid var(--line); }
+.lot-detail > :first-child { margin-top: 0; }
+.lot-owners { list-style: none; margin: 0.2rem 0 0.85rem; padding: 0; }
+.lot-owners li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.85rem;
+  align-items: baseline;
+  padding: 0.28rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.lot-owners li:last-child { border-bottom: 0; }
+.lot-email { overflow-wrap: anywhere; }
+.lot-notes { white-space: pre-wrap; margin: 0.2rem 0 0.85rem; }
+.lot-edit { margin-top: 0.25rem; }
+.lot-edit > summary { cursor: pointer; width: fit-content; }
+.lot-edit form.fields { max-width: 36rem; margin-top: 0.75rem; }
+.lot-search-empty { margin: 0.4rem 0 0; }
+@media (max-width: 720px) {
+  .lot-head { display: none; }
+  .lot-summary {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "lot chevron"
+      "place place"
+      "person person"
+      "balance status";
+    row-gap: 0.35rem;
+  }
+  .lot-lot { grid-area: lot; }
+  .lot-chevron { grid-area: chevron; align-self: center; margin-top: 0; }
+  .lot-place { grid-area: place; }
+  .lot-person { grid-area: person; }
+  .lot-balance { grid-area: balance; }
+  .lot-state { grid-area: status; justify-self: end; align-self: end; }
+  .lot-kicker {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--muted);
+  }
+}
 .devbox { border: 1px dashed var(--gulf); border-radius: 0; padding: 0.8rem 1rem; background: #f3faf8; }
 body.landing { background: #f7f4ef; }
 body.landing main { padding: 0; }

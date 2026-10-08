@@ -33,7 +33,6 @@ import {
   dateCell,
   dateTimeCell,
   addressLine,
-  addressLines,
   mailingAddressHtml,
   propertyAddressHtml,
   confirmDeleteButton,
@@ -95,12 +94,6 @@ function accountAccessLabel(owner: OwnerListRow): string {
 function lastLoginLabel(value: string | null | undefined, timeZone: string): string {
   if (!value) return "Has not signed in";
   return dateTimeCell(value, timeZone);
-}
-
-function notePreview(notes: string): string {
-  const flat = notes.replace(/\s+/g, " ").trim();
-  if (flat.length <= 80) return flat;
-  return `${flat.slice(0, 77)}...`;
 }
 
 type LotFormValues = {
@@ -277,8 +270,119 @@ export type LotOwnerControl = {
   userId: string;
   name: string;
   email: string;
+  phone?: string;
   isPrimary: boolean;
 };
+
+type RosterPerson = { name: string; email: string; phone: string; isPrimary: boolean };
+
+function rosterPhone(lot: LotRow, owner: LotOwnerControl): string {
+  const listed = owner.phone?.trim() ?? "";
+  if (listed) return listed;
+  if (owner.isPrimary || owner.userId === lot.owner_user_id) {
+    const primary = lot.owner_phone?.trim() ?? "";
+    if (primary) return primary;
+  }
+  return "No phone on file";
+}
+
+function rosterPeople(lot: LotRow, linked: readonly LotOwnerControl[]): RosterPerson[] {
+  if (linked.length > 0) {
+    return linked.map((owner) => ({
+      name: owner.name,
+      email: owner.email,
+      phone: rosterPhone(lot, owner),
+      isPrimary: owner.isPrimary,
+    }));
+  }
+  if (!lot.owner_user_id && !lot.owner_name && !lot.owner_email) return [];
+  return [
+    {
+      name: lot.owner_name ?? "",
+      email: lot.owner_email ?? "",
+      phone: lot.owner_user_id ? lot.owner_phone?.trim() || "No phone on file" : "",
+      isPrimary: true,
+    },
+  ];
+}
+
+function rosterOwnerList(people: readonly RosterPerson[]): string {
+  if (people.length === 0) return `<p class="muted">No owner</p>`;
+  const items = people
+    .map((person) => {
+      const primary = person.isPrimary ? ` <span class="badge">Primary</span>` : "";
+      const email = person.email ? `<span class="lot-email">${esc(person.email)}</span>` : "";
+      const phone = person.phone ? `<span class="lot-phone">${esc(person.phone)}</span>` : "";
+      return `<li><span class="lot-owner-name">${esc(person.name)}</span>${primary}${email}${phone}</li>`;
+    })
+    .join("");
+  return `<ul class="lot-owners">${items}</ul>`;
+}
+
+function rosterNotes(notes: string): string {
+  const text = notes.trim();
+  if (!text) return `<p class="muted">None</p>`;
+  return `<p class="lot-notes">${esc(text)}</p>`;
+}
+
+function lotSearchText(lot: LotRow, people: readonly RosterPerson[]): string {
+  return [
+    lot.lot_number,
+    `lot ${lot.lot_number}`,
+    lot.house_name,
+    lot.street_address,
+    lot.city,
+    lot.state,
+    lot.postal_code,
+    addressLine(lot.street_address, lot.city, lot.state, lot.postal_code),
+    lot.mailing_street,
+    lot.mailing_city,
+    lot.mailing_state,
+    lot.mailing_postal_code,
+    addressLine(lot.mailing_street, lot.mailing_city, lot.mailing_state, lot.mailing_postal_code),
+    lot.owner_name ?? "",
+    lot.owner_email ?? "",
+    ...people.flatMap((person) => [person.name, person.email]),
+  ]
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function lotSummary(association: Association, lot: LotRow & { delinquent?: boolean }): string {
+  const house = lot.house_name.trim();
+  const address = addressLine(lot.street_address, lot.city, lot.state, lot.postal_code);
+  const place = `${house ? `<span class="lot-house">${esc(house)}</span>` : ""}${address ? `<span class="lot-address">${esc(address)}</span>` : ""}`;
+  const badge = lot.delinquent ? ` <span class="badge late">Past due</span>` : "";
+  const owner = lot.owner_name?.trim() ? esc(lot.owner_name) : "No owner";
+  return `<span class="lot-lot"><a href="/a/${esc(association.slug)}/admin/ledger/${esc(lot.id)}">Lot ${esc(lot.lot_number)}</a>${badge}</span>
+      <span class="lot-place"><span class="lot-kicker">House name</span>${place}</span>
+      <span class="lot-person"><span class="lot-kicker">Primary owner</span>${owner}</span>
+      <span class="lot-balance"><span class="lot-kicker">Balance</span>${lotBalanceCell(association.slug, lot)}</span>
+      <span class="lot-state"><span class="lot-kicker">Status</span>${esc(lot.status)}</span>
+      <span class="lot-chevron" aria-hidden="true"></span>`;
+}
+
+function lotEditBlock(
+  association: Association,
+  lot: LotRow,
+  ownerChoices: { value: string; label: string }[],
+  linked: LotOwnerControl[],
+): string {
+  const edit = `/a/${esc(association.slug)}/admin/lots/${esc(lot.id)}`;
+  return `<details class="lot-edit">
+      <summary>Edit</summary>
+      <form class="fields" method="post" action="${edit}">
+        ${lotDetailFields(lot, "edit")}
+        <button class="secondary" type="submit">Save lot</button>
+      </form>
+      <form class="fields" method="post" action="${edit}/owner">
+        ${selectField("Primary owner", "user_id", [{ value: "", label: "Choose a person" }, ...ownerChoices])}
+        <button class="secondary" type="submit">Assign owner</button>
+      </form>
+      ${lotOwnerEditor(association.slug, lot.id, linked, "owners")}
+    </details>`;
+}
 
 export function ownersPage(
   association: Association,
@@ -304,39 +408,23 @@ export function ownersPage(
   const ownerChoices = owners.map((owner) => ({ value: owner.user_id, label: `${owner.name} (${owner.email})` }));
   const lotRows = shownLots
     .map((lot) => {
-      const edit = `/a/${esc(association.slug)}/admin/lots/${esc(lot.id)}`;
-      const mailing = addressLine(lot.mailing_street, lot.mailing_city, lot.mailing_state, lot.mailing_postal_code);
-      const phone = !lot.owner_user_id ? "" : lot.owner_phone?.trim() || "No phone on file";
-      const editCell = canEdit
-        ? `<td>
-          <details>
-            <summary>Edit</summary>
-            <form class="fields" method="post" action="${edit}">
-              ${lotDetailFields(lot, "edit")}
-              <button class="secondary" type="submit">Save lot</button>
-            </form>
-            <form class="fields" method="post" action="${edit}/owner">
-              ${selectField("Primary owner", "user_id", [{ value: "", label: "Choose a person" }, ...ownerChoices])}
-              <button class="secondary" type="submit">Assign owner</button>
-            </form>
-            ${lotOwnerEditor(association.slug, lot.id, ownersByLot.get(lot.id) ?? [], "owners")}
-          </details>
-        </td>`
-        : "";
-      return `<tr>
-        <td><a href="/a/${esc(association.slug)}/admin/ledger/${esc(lot.id)}">Lot ${esc(lot.lot_number)}</a>${lot.delinquent ? ` <span class="badge late">Past due</span>` : ""}</td>
-        <td>${esc(lot.house_name)}</td>
-        <td>${addressLines(lot.street_address, lot.city, lot.state, lot.postal_code)}</td>
-        <td>${esc(mailing)}</td>
-        <td>${esc(lotTypeLabel(lot.lot_type))}</td>
-        <td>${lot.owner_name ? esc(lot.owner_name) : "No owner"}</td>
-        <td>${lot.owner_email ? esc(lot.owner_email) : ""}</td>
-        <td>${esc(phone)}</td>
-        <td>${lotBalanceCell(association.slug, lot)}</td>
-        <td>${esc(lot.status)}</td>
-        <td>${esc(notePreview(lot.admin_notes))}</td>
-        ${editCell}
-      </tr>`;
+      const linked = ownersByLot.get(lot.id) ?? [];
+      const people = rosterPeople(lot, linked);
+      const edit = canEdit ? lotEditBlock(association, lot, ownerChoices, linked) : "";
+      return `<details class="lot-fold" data-search="${esc(lotSearchText(lot, people))}">
+        <summary class="lot-summary" aria-controls="lot-detail-${esc(lot.id)}">
+          ${lotSummary(association, lot)}
+        </summary>
+        <div class="lot-detail" id="lot-detail-${esc(lot.id)}">
+          ${mailingAddressHtml(lot.mailing_street, lot.mailing_city, lot.mailing_state, lot.mailing_postal_code)}
+          <p class="muted">Owners</p>
+          ${rosterOwnerList(people)}
+          <p><span class="muted">Type</span><br>${esc(lotTypeLabel(lot.lot_type))}</p>
+          <p class="muted">Admin notes</p>
+          ${rosterNotes(lot.admin_notes)}
+          ${edit}
+        </div>
+      </details>`;
     })
     .join("");
   const addLot = canEdit
@@ -346,18 +434,33 @@ export function ownersPage(
         <button type="submit">Add lot</button>
       </form>`
     : "";
-  const lotTable = lotRows
-    ? `<table><thead><tr><th>Lot</th><th>House name</th><th>Address</th><th>Mailing</th><th>Type</th><th>Primary owner</th><th>Email</th><th>Phone</th><th>Balance</th><th>Status</th><th>Admin notes</th>${canEdit ? "<th></th>" : ""}</tr></thead><tbody>${lotRows}</tbody></table>`
+  const lotRoster = lotRows
+    ? `<div class="lot-roster">
+        <label class="lot-search">Search
+          <input type="search" placeholder="Name, lot, house, address, or email" autocomplete="off">
+        </label>
+        <div class="lot-head" aria-hidden="true">
+          <span>Lot</span>
+          <span>House name</span>
+          <span>Primary owner</span>
+          <span>Balance</span>
+          <span>Status</span>
+          <span></span>
+        </div>
+        ${lotRows}
+        <p class="lot-search-empty muted" hidden>No matching lots.</p>
+      </div>
+      <script src="/owners-roster.js"></script>`
     : empty(delinquentOnly ? "No past due lots." : "No lots yet.");
   return `${adminNav(association.slug, "owners", canEdit)}
     <section class="panel" id="lots">
       <h1>Owners & lots</h1>
-      <p class="muted">This is the property roster. Each lot shows its house name, property address, mailing address, primary owner, phone, and balance. Open a lot for every linked phone number. Open Edit on a lot to add another owner. That person can sign in with a magic link at their own email. Admin notes stay on this page and are not shown to owners. CSV import is still the bulk way to add a roster. Set improved or unimproved here before assigning annual dues.</p>
+      <p class="muted">This is the property roster. Each lot shows its house name, property address, mailing address, primary owner, phone, and balance. Open a lot for every linked phone number. Expand a lot and open Edit to add another owner. That person can sign in with a magic link at their own email. Admin notes stay on this page and are not shown to owners. CSV import is still the bulk way to add a roster. Set improved or unimproved here before assigning annual dues.</p>
       <p class="filters">
         <a ${delinquentOnly ? "" : `class="active"`} href="/a/${esc(association.slug)}/admin/owners#lots">All lots</a>
         <a ${delinquentOnly ? `class="active"` : ""} href="/a/${esc(association.slug)}/admin/owners?delinquent=1#lots">Past due only</a>
       </p>
-      ${lotTable}
+      ${lotRoster}
       ${addLot}
     </section>
     <section class="panel" id="logins">

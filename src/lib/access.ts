@@ -31,6 +31,31 @@ export function canEditAdmin(membership: AccessMembership): boolean {
 }
 
 /**
+ * Role label for the admin users list.
+ * Board and legacy officer memberships stay Board member.
+ * A homeowner with edit access is Admin.
+ * Anyone else who can sign in is Owner.
+ * Edit access is a separate yes or no column.
+ */
+export function signInRoleLabel(membership: AccessMembership): "Owner" | "Board member" | "Admin" {
+  if (isBoardMember(membership)) return "Board member";
+  if (isAdmin(membership)) return "Admin";
+  return "Owner";
+}
+
+/** Board members and anyone with edit access. Owners without edit access are the other group. */
+export function isBoardOrAdmin(membership: AccessMembership): boolean {
+  return isBoardMember(membership) || isAdmin(membership);
+}
+
+export type UserListGroup = "all" | "board" | "owners";
+
+export function userListGroup(value: string | undefined): UserListGroup {
+  if (value === "board" || value === "owners") return value;
+  return "all";
+}
+
+/**
  * Admins see ledgers inside their own association.
  * Homeowners and board members without admin see only lots they own.
  * The caller must already have scoped the lot to that association.

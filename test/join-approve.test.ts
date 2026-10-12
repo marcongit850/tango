@@ -398,12 +398,13 @@ describe("owner login filters", () => {
     timezone: "America/Chicago",
   };
 
-  it("keeps past due on the property roster and Users for sign-in accounts", () => {
+  it("keeps past due on the property roster and leaves sign-in accounts off that page", () => {
     const everyone = ownersPage(association, [], [], false);
     const pastDue = ownersPage(association, [], [], true);
     expect(everyone).toContain("<h1>Owners & lots</h1>");
-    expect(everyone).toContain("<h2>Users</h2>");
-    expect(everyone).toContain('id="logins"');
+    expect(everyone).not.toContain("<h2>Users</h2>");
+    expect(everyone).not.toContain('id="logins"');
+    expect(everyone).not.toContain("Download consent log (CSV)");
     expect(everyone).not.toContain(">Logins<");
     expect(everyone).toContain(">All lots<");
     expect(everyone).toContain(">Past due only<");
@@ -413,16 +414,12 @@ describe("owner login filters", () => {
     expect(everyone).not.toContain(">Delinquent<");
     expect(everyone).not.toContain(">Everyone<");
     expect(everyone).not.toContain('class="button" href="/a/tango-mar/admin/owners#logins"');
-    expect(pastDue).toContain("<h2>Users</h2>");
+    expect(pastDue).not.toContain("<h2>Users</h2>");
     expect(pastDue).not.toContain("<h2>Delinquent accounts</h2>");
-    expect(pastDue).toContain('id="logins"');
+    expect(pastDue).not.toContain('id="logins"');
     expect(pastDue).not.toContain(">Logins<");
     expect(pastDue).toContain('class="active" href="/a/tango-mar/admin/owners?delinquent=1#lots">Past due only');
-    const logins = pastDue.slice(pastDue.indexOf('id="logins"'));
-    expect(logins).toContain("last login");
-    expect(logins).not.toContain("Past due only");
-    expect(logins).not.toContain(">Balance<");
-    expect(logins).not.toContain("Admin notes");
+    expect(pastDue).not.toContain(">Balance<");
   });
 
   it("uses a compact expandable roster and keeps edit controls off the view-only page", () => {
@@ -999,7 +996,7 @@ describe("delete a person or a lot", () => {
         env,
       );
       expect(removed.status).toBe(303);
-      expect(removed.headers.get("Location")).toBe("/a/tango-mar/admin/owners#logins");
+      expect(removed.headers.get("Location")).toBe("/a/tango-mar/admin/users");
       expect(decodeURIComponent(removed.headers.get("Set-Cookie") ?? "")).toContain("ok:Casey Nguyen deleted.");
       expect(sqlite.prepare("SELECT id FROM users WHERE id = 'user_casey'").get()).toBeUndefined();
       expect(sqlite.prepare("SELECT id FROM memberships WHERE user_id = 'user_casey'").get()).toBeUndefined();

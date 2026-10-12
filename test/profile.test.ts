@@ -610,9 +610,12 @@ describe("my profile", () => {
       expect(adminHtml).not.toContain("Delete consent");
       const roster = await app.request("http://localhost/a/tango-mar/admin/owners", { headers: { Cookie: `tango_session=${jordan}` } }, env);
       const rosterHtml = await roster.text();
-      const users = rosterHtml.slice(rosterHtml.indexOf('id="logins"'));
+      expect(rosterHtml).not.toContain('id="logins"');
+      const usersPage = await app.request("http://localhost/a/tango-mar/admin/users", { headers: { Cookie: `tango_session=${jordan}` } }, env);
+      const users = await usersPage.text();
       expect(users).toContain(">Consent<");
       expect(users).toContain("Revoked");
+      expect(users).toContain('href="/a/tango-mar/admin/consent.csv">Download consent log (CSV)');
       const csv = await app.request("http://localhost/a/tango-mar/admin/consent.csv", { headers: { Cookie: `tango_session=${jordan}` } }, env);
       expect(csv.headers.get("Content-Type")).toContain("text/csv");
       const csvText = await csv.text();

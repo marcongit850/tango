@@ -225,17 +225,23 @@ form.email-prefs h2 { margin: 0.75rem 0 0; font-size: 1.05rem; }
 .user-roster .lot-head,
 .user-roster .lot-summary {
   grid-template-columns:
+    minmax(4.8rem, 1.05fr)
+    minmax(6rem, 1.35fr)
+    minmax(3.8rem, 0.75fr)
+    minmax(5.2rem, 0.85fr)
+    minmax(3.6rem, 0.55fr)
+    minmax(4rem, 0.9fr)
     minmax(5.5rem, 1.05fr)
-    minmax(7rem, 1.45fr)
-    minmax(4.5rem, 0.8fr)
-    minmax(6.2rem, 0.95fr)
-    minmax(4.2rem, 0.55fr)
-    minmax(7rem, 1.25fr)
     1.15rem;
 }
-.user-name, .user-email, .user-lots { min-width: 0; overflow-wrap: anywhere; }
+.user-name, .user-email, .user-lots, .user-consent { min-width: 0; overflow-wrap: anywhere; }
 .user-role, .user-access, .user-login { min-width: 0; }
 .user-roster .lot-detail form.fields { max-width: 36rem; }
+.user-add { margin: 0 0 0.85rem; }
+.user-add > summary { display: inline-block; width: auto; list-style: none; }
+.user-add > summary::-webkit-details-marker { display: none; }
+.user-add > summary::marker { content: ""; }
+.user-add > form { margin-top: 0.85rem; max-width: 36rem; }
 @media (max-width: 720px) {
   main.wrap:has(#lots) { grid-template-columns: minmax(0, 1fr); }
   main.wrap:has(#lots) > * { min-width: 0; }
@@ -279,6 +285,7 @@ form.email-prefs h2 { margin: 0.75rem 0 0; font-size: 1.05rem; }
       "lots lots"
       "role role"
       "access access"
+      "consent consent"
       "login login";
     row-gap: 0.35rem;
     width: 100%;
@@ -288,6 +295,7 @@ form.email-prefs h2 { margin: 0.75rem 0 0; font-size: 1.05rem; }
   .user-roster .user-lots,
   .user-roster .user-role,
   .user-roster .user-access,
+  .user-roster .user-consent,
   .user-roster .user-login { max-width: 100%; }
   .user-roster .user-name { grid-area: name; }
   .user-roster .lot-chevron { grid-area: chevron; align-self: center; margin-top: 0; }
@@ -295,6 +303,7 @@ form.email-prefs h2 { margin: 0.75rem 0 0; font-size: 1.05rem; }
   .user-roster .user-lots { grid-area: lots; }
   .user-roster .user-role { grid-area: role; }
   .user-roster .user-access { grid-area: access; }
+  .user-roster .user-consent { grid-area: consent; }
   .user-roster .user-login { grid-area: login; }
 }
 .devbox { border: 1px dashed var(--gulf); border-radius: 0; padding: 0.8rem 1rem; background: #f3faf8; }

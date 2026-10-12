@@ -7,7 +7,7 @@ import { MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE } from "../src/l
 import { importOwners } from "../src/lib/import-owners";
 import { sha256Hex } from "../src/lib/tokens";
 import type { Association } from "../src/types";
-import { adminHome, ownerDetailPage, ownersPage } from "../src/views/admin";
+import { adminHome, ownerDetailPage, usersPage } from "../src/views/admin";
 
 const THROUGH_FOLDERS = [
   "migrations/0001_schema.sql",
@@ -199,12 +199,18 @@ describe("master admin protection", () => {
       expect(marcRow).toMatchObject({ is_master: 1, is_admin: 1 });
       expect(samRow).toMatchObject({ is_master: 0, is_admin: 0 });
 
-      const listHtml = ownersPage(tango, [], owners, false, true);
-      expect(listHtml).toContain("marc@whpinc.com");
-      expect(listHtml.slice(listHtml.indexOf("marc@whpinc.com"), listHtml.indexOf("marc@whpinc.com") + 500)).toContain("Master admin");
-      expect(listHtml.slice(listHtml.indexOf("sam.rivera@example.com"), listHtml.indexOf("sam.rivera@example.com") + 400)).not.toContain(
-        "Master admin",
+      const listHtml = usersPage(
+        tango,
+        owners.map((owner) => ({ owner, lots: [] })),
+        owners.length,
+        "all",
+        true,
       );
+      expect(listHtml).toContain("marc@whpinc.com");
+      const marcDetail = listHtml.slice(listHtml.indexOf('id="user-detail-user_marc"'));
+      expect(marcDetail.slice(0, 400)).toContain("Master admin");
+      const samDetailFold = listHtml.slice(listHtml.indexOf('id="user-detail-user_sam"'));
+      expect(samDetailFold.slice(0, 400)).not.toContain("Master admin");
 
       const detail = ownerDetailPage({ association: tango, owner: marcRow!, balance: 0, lots: [], properties: [] });
       expect(detail).toContain("Master admin");

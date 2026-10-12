@@ -40,6 +40,7 @@ import {
   contactsForProperty,
   listLotOwners,
   listLots,
+  findUserByEmail,
   listOwners,
   listProperties,
   markThreadReviewed,
@@ -58,7 +59,7 @@ import {
   versionById,
   writeAudit,
 } from "../db";
-import { activeAdminContacts, isAdmin, isBoardOrAdmin, keepsAnAdmin, MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE, masterKeepsAdminWrites, userListGroup } from "../lib/access";
+import { activeAdminContacts, isAdmin, isBoardOrAdmin, keepsAnAdmin, MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE, masterKeepsAdminWrites, membershipForSignInRole, userListGroup } from "../lib/access";
 import { changeLoginEmail } from "../lib/login-email";
 import {
   categoryLabel,
@@ -292,11 +293,10 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       });
       ownersByLot.set(link.property_id, list);
     }
-    const consentByUser = await latestConsentByUser(c.env.DB, association.id);
     return render(c, {
       title: delinquentOnly ? "Past due lots" : "Owners & lots",
       active: "admin",
-      body: ownersPage(association, decoratedLots, owners, delinquentOnly, canEditAdmin(membership), ownersByLot, consentByUser),
+      body: ownersPage(association, decoratedLots, owners, delinquentOnly, canEditAdmin(membership), ownersByLot),
     });
   });
 
@@ -339,10 +339,11 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
   app.get("/a/:slug/admin/users", async (c) => {
     const { association, membership } = requireStaff(c);
     const group = userListGroup(c.req.query("group"));
-    const [owners, links, properties] = await Promise.all([
+    const [owners, links, properties, consentByUser] = await Promise.all([
       listOwners(c.env.DB, association.id),
       listLotOwners(c.env.DB, association.id),
       listProperties(c.env.DB, association.id),
+      latestConsentByUser(c.env.DB, association.id),
     ]);
     const lotNumber = new Map(properties.map((property) => [property.id, property.lot_number]));
     const lotsByUser = new Map<string, { id: string; lot_number: string }[]>();
@@ -368,8 +369,28 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     return render(c, {
       title: "Users",
       active: "admin",
-      body: usersPage(association, shown, people.length, group, canEditAdmin(membership)),
+      body: usersPage(
+        association,
+        shown,
+        people.length,
+        group,
+        canEditAdmin(membership),
+        consentByUser,
+        properties.map((property) => ({ id: property.id, lot_number: property.lot_number })),
+      ),
     });
+  });
+
+  app.post("/a/:slug/admin/users", async (c) => {
+    const { association, user } = requireEditor(c);
+    const fields = await readForm(c);
+    const back = `/a/${association.slug}/admin/users`;
+    const role = membershipForSignInRole(textValue(fields, "role", 20));
+    if (!role) return redirectTo(c, back, "Choose a valid role.", "warn");
+    const propertyId = textValue(fields, "property_id", 80);
+    const property = propertyId ? await propertyInAssociation(c.env.DB, association.id, propertyId) : null;
+    if (propertyId && !property) return redirectTo(c, back, "Choose a lot on this association.", "warn");
+    return addOwnerAccount(c, { association, actorUserId: user.id, fields, property, back, role });
   });
 
   app.post("/a/:slug/admin/owners/:userId/role", async (c) => {
@@ -675,7 +696,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       removed === "unlinked"
         ? `${owner.name} was removed from this association. The login is still used elsewhere.`
         : `${owner.name} deleted.`;
-    return redirectTo(c, `/a/${association.slug}/admin/owners#logins`, message);
+    return redirectTo(c, `/a/${association.slug}/admin/users`, message);
   });
 
   app.get("/a/:slug/admin/lots", (c) => {
@@ -876,40 +897,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const property = await propertyInAssociation(c.env.DB, association.id, c.req.param("propertyId"));
     if (!property) throw new NotFoundError();
     const back = lotReturnPath(association.slug, property.id, textValue(fields, "return_to", 20));
-    const email = textValue(fields, "email", 200).toLowerCase();
-    const name = textValue(fields, "name", 120);
-    const phone = textValue(fields, "phone", 40);
-    if (!isValidEmail(email)) return redirectTo(c, back, "Enter a valid email.", "warn");
-    const now = new Date().toISOString();
-    const account = await ensureHomeownerAccount(c.env.DB, {
-      associationId: association.id,
-      email,
-      name,
-      phone,
-      now,
-    });
-    const linked = await linkLotOwner(c.env.DB, {
-      associationId: association.id,
-      propertyId: property.id,
-      userId: account.userId,
-      now,
-      primary: "if-none",
-    });
-    const label = personLabel(account.name, account.email);
-    if (!linked.inserted) return redirectTo(c, back, `${label} is already an owner of lot ${property.lot_number}.`);
-    await writeAudit(c.env.DB, {
-      associationId: association.id,
-      actorUserId: user.id,
-      action: "owner_add",
-      entityType: "property",
-      entityId: property.id,
-      detail: `${label} added as an owner of lot ${property.lot_number}.`,
-    });
-    return redirectTo(
-      c,
-      back,
-      `${label} added as an owner of lot ${property.lot_number}. They can sign in with a magic link at their email.`,
-    );
+    return addOwnerAccount(c, { association, actorUserId: user.id, fields, property, back, role: null });
   });
 
   app.post("/a/:slug/admin/lots/:propertyId/owners/:userId/remove", async (c) => {
@@ -2727,6 +2715,125 @@ function lotDetailsEntered(details: LotDetails): boolean {
 function personLabel(name: string, email: string): string {
   const clean = name.replace(/[\r\n]+/g, " ").trim();
   return clean || email;
+}
+
+type SignInRoleWrite = { roleId: "homeowner" | "board"; isAdmin: boolean };
+
+/**
+ * Shared by Add owner to this lot and Add user.
+ * A lot is optional. When a role is sent, it is written only for a new or inactive membership.
+ * An existing active or invited login keeps its role and edit access.
+ */
+async function addOwnerAccount(
+  c: AppContext,
+  input: {
+    association: Association;
+    actorUserId: string;
+    fields: FormFields;
+    property: { id: string; lot_number: string } | null;
+    back: string;
+    role: SignInRoleWrite | null;
+  },
+): Promise<Response> {
+  const { association, actorUserId, fields, property, back, role } = input;
+  const email = textValue(fields, "email", 200).toLowerCase();
+  const name = textValue(fields, "name", 120);
+  const phone = textValue(fields, "phone", 40);
+  if (!isValidEmail(email)) return redirectTo(c, back, "Enter a valid email.", "warn");
+
+  let prior: { role_id: string; is_admin: number; status: string; is_master: number } | null = null;
+  if (role) {
+    const existing = await findUserByEmail(c.env.DB, email);
+    if (existing) {
+      const row = (await listOwners(c.env.DB, association.id)).find((owner) => owner.user_id === existing.id);
+      if (row) prior = { role_id: row.role_id, is_admin: row.is_admin, status: row.status, is_master: row.is_master };
+    }
+  }
+  const applyRole = role !== null && (prior === null || prior.status === "inactive");
+  if (applyRole && prior && role) {
+    if (
+      !masterKeepsAdminWrites({
+        isMaster: prior.is_master === 1,
+        nextIsAdmin: role.isAdmin,
+        nextStatus: "active",
+        nextRole: role.roleId,
+      })
+    ) {
+      return redirectTo(c, back, MASTER_ADMIN_EDIT_MESSAGE, "warn");
+    }
+    if (
+      !keepsAnAdmin({
+        activeAdminCount: await countActiveAdmins(c.env.DB, association.id),
+        currentlyAdmin: prior.is_admin === 1 && prior.status === "active",
+        nextAdmin: role.isAdmin,
+      })
+    ) {
+      return redirectTo(c, back, "Keep at least one person with edit access.", "warn");
+    }
+  }
+
+  const now = new Date().toISOString();
+  const account = await ensureHomeownerAccount(c.env.DB, {
+    associationId: association.id,
+    email,
+    name,
+    phone,
+    now,
+  });
+  if (applyRole && role) {
+    try {
+      await c.env.DB
+        .prepare("UPDATE memberships SET role_id = ?, is_admin = ? WHERE association_id = ? AND user_id = ?")
+        .bind(role.roleId, role.isAdmin ? 1 : 0, association.id, account.userId)
+        .run();
+    } catch (error) {
+      if (isMissingColumn(error)) {
+        return redirectTo(
+          c,
+          back,
+          "Apply the admin migration in D1, then try again. The steps are in the README under Admin improvements.",
+          "warn",
+        );
+      }
+      throw error;
+    }
+  }
+
+  const label = personLabel(account.name, account.email);
+  if (!property) {
+    if (prior && prior.status !== "inactive") return redirectTo(c, back, `${label} already has a sign-in.`);
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId,
+      action: "owner_add",
+      entityType: "membership",
+      entityId: account.userId,
+      detail: `${label} added.`,
+    });
+    return redirectTo(c, back, `${label} added. They can sign in with a magic link at their email.`);
+  }
+
+  const linked = await linkLotOwner(c.env.DB, {
+    associationId: association.id,
+    propertyId: property.id,
+    userId: account.userId,
+    now,
+    primary: "if-none",
+  });
+  if (!linked.inserted) return redirectTo(c, back, `${label} is already an owner of lot ${property.lot_number}.`);
+  await writeAudit(c.env.DB, {
+    associationId: association.id,
+    actorUserId,
+    action: "owner_add",
+    entityType: "property",
+    entityId: property.id,
+    detail: `${label} added as an owner of lot ${property.lot_number}.`,
+  });
+  return redirectTo(
+    c,
+    back,
+    `${label} added as an owner of lot ${property.lot_number}. They can sign in with a magic link at their email.`,
+  );
 }
 
 function lotReturnPath(slug: string, propertyId: string, returnTo: string): string {

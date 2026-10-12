@@ -86,17 +86,6 @@ function lotBalanceCell(slug: string, lot: { id: string; balance_cents?: number 
   return moneyLink(`/a/${slug}/admin/ledger/${lot.id}`, lot.balance_cents);
 }
 
-function accountAccessLabel(owner: OwnerListRow): string {
-  if (owner.is_master === 1) return "Master admin";
-  if (owner.is_admin === 1) return "Edit access";
-  return "No edit access";
-}
-
-function lastLoginLabel(value: string | null | undefined, timeZone: string): string {
-  if (!value) return "Has not signed in";
-  return dateTimeCell(value, timeZone);
-}
-
 type LotFormValues = {
   lot_number?: string;
   street_address?: string;
@@ -182,7 +171,7 @@ export function adminHome(options: {
     <section class="grid">
       ${statCard(formatMoney(options.outstandingCents), "Total Outstanding", `${base}/ledger`)}
       ${statCard(options.lots, "Lots", `${base}/owners#lots`)}
-      ${statCard(options.members, "Active logins", `${base}/owners#logins`)}
+      ${statCard(options.members, "Active logins", `${base}/users`)}
       ${statCard(options.delinquent, "Delinquent lots", `${base}/owners?delinquent=1#lots`)}
       ${statCard(options.waiting, "Messages waiting on the board", `${base}/messages`)}
       ${joins}
@@ -392,20 +381,8 @@ export function ownersPage(
   delinquentOnly: boolean,
   canEdit = true,
   ownersByLot: ReadonlyMap<string, LotOwnerControl[]> = new Map(),
-  consentByUser: ReadonlyMap<string, { action: "granted" | "revoked"; created_at: string }> = new Map(),
 ): string {
   const shownLots = delinquentOnly ? lots.filter((lot) => lot.delinquent) : lots;
-  const loginRows = owners
-    .map(
-      (owner) => `<tr>
-        <td><a href="/a/${esc(association.slug)}/admin/owners/${esc(owner.user_id)}">${esc(owner.name)}</a></td>
-        <td>${esc(owner.email)}</td>
-        <td>${esc(accountAccessLabel(owner))}</td>
-        <td>${esc(consentListLabel(consentByUser.get(owner.user_id)))}</td>
-        <td>${lastLoginLabel(owner.last_login_at, association.timezone)}</td>
-      </tr>`,
-    )
-    .join("");
   const ownerChoices = owners.map((owner) => ({ value: owner.user_id, label: `${owner.name} (${owner.email})` }));
   const lotRows = shownLots
     .map((lot) => {
@@ -463,12 +440,6 @@ export function ownersPage(
       </p>
       ${lotRoster}
       ${addLot}
-    </section>
-    <section class="panel" id="logins">
-      <h2>Users</h2>
-      <p class="muted">Sign-in accounts only. Email, admin access, electronic notice consent, and last login. Lot details stay in Owners and lots above.</p>
-      <p><a href="/a/${esc(association.slug)}/admin/consent.csv">Download consent log (CSV)</a></p>
-      ${loginRows ? `<table><thead><tr><th>Person</th><th>Email</th><th>Access</th><th>Consent</th><th>Last login</th></tr></thead><tbody>${loginRows}</tbody></table>` : empty("No sign-in accounts.")}
     </section>`;
 }
 
@@ -496,11 +467,40 @@ function userLotLinks(slug: string, lots: readonly { id: string; lot_number: str
     .join(", ");
 }
 
-function userSearchText(person: UserRosterPerson, role: string, edit: string): string {
-  return [person.owner.name, person.owner.email, role, edit, ...person.lots.flatMap((lot) => [lot.lot_number, `lot ${lot.lot_number}`])]
+function userSearchText(person: UserRosterPerson, role: string, edit: string, consent: string): string {
+  return [person.owner.name, person.owner.email, role, edit, consent, ...person.lots.flatMap((lot) => [lot.lot_number, `lot ${lot.lot_number}`])]
     .join(" ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function addUserForm(slug: string, lots: readonly { id: string; lot_number: string }[]): string {
+  const lotOptions = [
+    { value: "", label: "No lot" },
+    ...[...lots]
+      .sort((a, b) => a.lot_number.localeCompare(b.lot_number, undefined, { numeric: true, sensitivity: "base" }))
+      .map((lot) => ({ value: lot.id, label: `Lot ${lot.lot_number}` })),
+  ];
+  return `<details class="user-add">
+      <summary class="button">Add user</summary>
+      <form class="fields" method="post" action="/a/${esc(slug)}/admin/users">
+        ${textField("Name", "name")}
+        ${textField("Email", "email", { type: "email", required: true })}
+        ${textField("Phone", "phone")}
+        ${selectField(
+          "Role",
+          "role",
+          [
+            { value: "owner", label: "Owner" },
+            { value: "board", label: "Board member" },
+            { value: "admin", label: "Admin" },
+          ],
+          "owner",
+        )}
+        ${selectField("Lot", "property_id", lotOptions, "")}
+        <button type="submit">Add user</button>
+      </form>
+    </details>`;
 }
 
 function userRoleForm(slug: string, owner: OwnerListRow, next: string): string {
@@ -527,20 +527,24 @@ export function usersPage(
   signInCount: number,
   group: UserListGroup,
   canEdit = true,
+  consentByUser: ReadonlyMap<string, { action: "granted" | "revoked"; created_at: string }> = new Map(),
+  lots: readonly { id: string; lot_number: string }[] = [],
 ): string {
   const next = userListPath(association.slug, group);
   const rows = people
     .map((person) => {
       const role = signInRoleLabel(person.owner);
       const edit = isAdmin(person.owner) ? "Yes" : "No";
+      const consent = consentListLabel(consentByUser.get(person.owner.user_id));
       const owner = person.owner;
-      return `<details class="lot-fold" data-search="${esc(userSearchText(person, role, edit))}">
+      return `<details class="lot-fold" data-search="${esc(userSearchText(person, role, edit, consent))}">
         <summary class="lot-summary" aria-controls="user-detail-${esc(owner.user_id)}">
           <span class="user-name"><span class="lot-kicker">Name</span>${esc(owner.name)}</span>
           <span class="user-email"><span class="lot-kicker">Email</span>${esc(owner.email)}</span>
           <span class="user-lots"><span class="lot-kicker">Lots</span>${userLotLinks(association.slug, person.lots)}</span>
           <span class="user-role"><span class="lot-kicker">Role</span>${esc(role)}</span>
           <span class="user-access"><span class="lot-kicker">Edit access</span>${edit}</span>
+          <span class="user-consent"><span class="lot-kicker">Consent</span>${esc(consent)}</span>
           <span class="user-login"><span class="lot-kicker">Last sign-in</span>${owner.last_login_at ? dateTimeCell(owner.last_login_at, association.timezone) : "Never"}</span>
           <span class="lot-chevron" aria-hidden="true"></span>
         </summary>
@@ -559,7 +563,7 @@ export function usersPage(
   const roster = rows
     ? `<div class="user-roster">
         <label class="lot-search">Search
-          <input type="search" placeholder="Name, email, lot, or role" autocomplete="off">
+          <input type="search" placeholder="Name, email, lot, role, or consent" autocomplete="off">
         </label>
         <div class="lot-head" aria-hidden="true">
           <span>Name</span>
@@ -567,6 +571,7 @@ export function usersPage(
           <span>Lots</span>
           <span>Role</span>
           <span>Edit access</span>
+          <span>Consent</span>
           <span>Last sign-in</span>
           <span></span>
         </div>
@@ -575,10 +580,13 @@ export function usersPage(
       </div>
       <script src="/owners-roster.js"></script>`
     : empty(signInCount === 0 ? "No sign-in accounts." : "No matching people.");
+  const addUser = canEdit ? addUserForm(association.slug, lots) : "";
   return `${adminNav(association.slug, "users", canEdit)}
     <section class="panel" id="users">
       <h1>Users</h1>
       <p class="muted">Everyone who can sign in for this association. Open a row for status and phone. People with edit access can change the role and grant or revoke edit access. Lot links open the ledger for that lot.</p>
+      <p><a href="/a/${esc(association.slug)}/admin/consent.csv">Download consent log (CSV)</a></p>
+      ${addUser}
       <p class="filters">
         ${filter("all", "All", base)}
         ${filter("board", "Board and admins", `${base}?group=board`)}

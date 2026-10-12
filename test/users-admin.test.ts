@@ -7,6 +7,7 @@ import {
   isAdmin,
   isBoardOrAdmin,
   MASTER_ADMIN_EDIT_MESSAGE,
+  membershipForSignInRole,
   signInRoleLabel,
   userListGroup,
 } from "../src/lib/access";
@@ -144,6 +145,11 @@ describe("sign-in role labels", () => {
     expect(signInRoleLabel({ role_id: "board", status: "active", is_admin: 0 })).toBe("Board member");
     expect(signInRoleLabel({ role_id: "board", status: "active", is_admin: 1 })).toBe("Board member");
     expect(signInRoleLabel({ role_id: "officer", status: "active", is_admin: 0 })).toBe("Board member");
+    expect(membershipForSignInRole("owner")).toEqual({ roleId: "homeowner", isAdmin: false });
+    expect(membershipForSignInRole("board")).toEqual({ roleId: "board", isAdmin: false });
+    expect(membershipForSignInRole("admin")).toEqual({ roleId: "homeowner", isAdmin: true });
+    expect(membershipForSignInRole("officer")).toBeNull();
+    expect(signInRoleLabel({ role_id: "homeowner", status: "active", is_admin: membershipForSignInRole("admin")?.isAdmin ? 1 : 0 })).toBe("Admin");
     expect(isAdmin({ role_id: "officer", status: "active", is_admin: 0 })).toBe(true);
     expect(isAdmin({ role_id: "homeowner", status: "active", is_admin: 1 })).toBe(true);
     expect(isBoardOrAdmin({ role_id: "homeowner", status: "active", is_admin: 0 })).toBe(false);
@@ -213,7 +219,12 @@ describe("admin users page", () => {
       expect(html).toContain('class="active" href="/a/tango-mar/admin/users">All');
       expect(html).toContain('href="/a/tango-mar/admin/users?group=board">Board and admins');
       expect(html).toContain('href="/a/tango-mar/admin/users?group=owners">Owners only');
-      expect(html).toContain('placeholder="Name, email, lot, or role"');
+      expect(html).toContain('placeholder="Name, email, lot, role, or consent"');
+      expect(html).toContain('href="/a/tango-mar/admin/consent.csv">Download consent log (CSV)');
+      expect(html).toContain('<summary class="button">Add user</summary>');
+      expect(html).toContain(">No lot<");
+      expect(html).toContain('name="role"');
+      expect(html).toContain(">Consent<");
       expect(html).toContain('src="/owners-roster.js"');
       expect(html).toContain('class="user-roster"');
       expect(html).not.toContain("\u2014");
@@ -228,7 +239,8 @@ describe("admin users page", () => {
       expect(sam.indexOf('href="/a/tango-mar/admin/ledger/prop_3">Lot 3')).toBeLessThan(
         sam.indexOf('href="/a/tango-mar/admin/ledger/prop_14">Lot 14'),
       );
-      expect(sam).toContain('data-search="Sam Rivera sam.rivera@example.com Owner No 3 lot 3 14 lot 14"');
+      expect(sam).toContain('<span class="lot-kicker">Consent</span>No');
+      expect(sam).toContain('data-search="Sam Rivera sam.rivera@example.com Owner No No 3 lot 3 14 lot 14"');
       expect(sam).toContain('action="/a/tango-mar/admin/owners/user_sam/role"');
       expect(sam).toContain('name="is_admin"');
       expect(sam).toContain('name="status" value="active"');
@@ -321,6 +333,9 @@ describe("admin users page", () => {
       expect(fold(html, "user_board")).toContain(">No<");
       expect(html).not.toContain("/role");
       expect(html).not.toContain('name="is_admin"');
+      expect(html).not.toContain(">Add user<");
+      expect(html).not.toContain('name="property_id"');
+      expect(html).toContain('href="/a/tango-mar/admin/consent.csv">Download consent log (CSV)');
       expect(fold(html, "user_sam")).toContain(">Active<");
       expect(fold(html, "user_sam")).not.toContain("<form");
 
@@ -335,6 +350,14 @@ describe("admin users page", () => {
         is_admin: number;
       };
       expect(still).toEqual({ role_id: "homeowner", is_admin: 0 });
+
+      const deniedAdd = await app.request(
+        "http://localhost/a/tango-mar/admin/users",
+        post(board, { name: "Nope", email: "nope@example.com", phone: "", role: "board", property_id: "" }),
+        env,
+      );
+      expect(deniedAdd.status).toBe(403);
+      expect(sqlite.prepare("SELECT id FROM users WHERE email = 'nope@example.com'").get()).toBeUndefined();
     } finally {
       sqlite.close();
     }
@@ -419,6 +442,198 @@ describe("admin users page", () => {
         is_admin: number;
       };
       expect(casey).toEqual({ role_id: "board", is_admin: 0 });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("shows consent wording from the old list and keeps the CSV link", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const revokedAt = "2026-04-02T15:30:00.000Z";
+    sqlite
+      .prepare(
+        `INSERT INTO electronic_notice_consent (
+           id, association_id, user_id, owner_name, lots, email, action, reason, ip, user_agent, session_id, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, '', '', '', '', ?)`,
+      )
+      .run("consent_sam_old", "assoc_tango_mar", "user_sam", "Sam Rivera", "14", "sam.rivera@example.com", "granted", "2026-04-01T15:30:00.000Z");
+    sqlite
+      .prepare(
+        `INSERT INTO electronic_notice_consent (
+           id, association_id, user_id, owner_name, lots, email, action, reason, ip, user_agent, session_id, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, '', '', '', '', ?)`,
+      )
+      .run("consent_sam", "assoc_tango_mar", "user_sam", "Sam Rivera", "14", "sam.rivera@example.com", "revoked", revokedAt);
+    sqlite
+      .prepare(
+        `INSERT INTO electronic_notice_consent (
+           id, association_id, user_id, owner_name, lots, email, action, reason, ip, user_agent, session_id, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, '', '', '', '', ?)`,
+      )
+      .run("consent_jordan", "assoc_tango_mar", "user_jordan", "Jordan Lee", "3", "jordan.lee@example.com", "granted", "2026-04-01T15:30:00.000Z");
+    const jordan = await signIn(sqlite, "user_jordan");
+
+    try {
+      const page = await app.request("http://localhost/a/tango-mar/admin/users", { headers: { Cookie: `tango_session=${jordan}` } }, env);
+      const html = await page.text();
+      const revoked = `Revoked ${formatDateTime(revokedAt, "America/Chicago")}`;
+      const sam = fold(html, "user_sam");
+      expect(sam).toContain(`<span class="lot-kicker">Consent</span>${revoked}`);
+      expect(sam).toContain(`data-search="Sam Rivera sam.rivera@example.com Owner No ${revoked} 14 lot 14"`);
+      const jordanFold = fold(html, "user_jordan");
+      expect(jordanFold).toContain('<span class="lot-kicker">Consent</span>Yes');
+      expect(jordanFold).toContain("data-search=");
+      expect(jordanFold.slice(jordanFold.indexOf("data-search="), jordanFold.indexOf("data-search=") + 180)).toContain("Yes");
+      expect(html).toContain('href="/a/tango-mar/admin/consent.csv">Download consent log (CSV)');
+      expect(html).not.toContain("\u2014");
+      expect(html).not.toContain("\u2013");
+
+      const owners = await app.request("http://localhost/a/tango-mar/admin/owners", { headers: { Cookie: `tango_session=${jordan}` } }, env);
+      const ownersHtml = await owners.text();
+      expect(ownersHtml).toContain("<h1>Owners & lots</h1>");
+      expect(ownersHtml).not.toContain('id="logins"');
+      expect(ownersHtml).not.toContain("<h2>Users</h2>");
+      expect(ownersHtml).not.toContain("Download consent log (CSV)");
+      expect(ownersHtml).not.toContain("#logins");
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("adds a user with or without a lot and leaves an existing login unchanged", async () => {
+    const { sqlite, db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db);
+    const jordan = await signIn(sqlite, "user_jordan");
+    const sam = await signIn(sqlite, "user_sam");
+
+    try {
+      const board = await app.request(
+        "http://localhost/a/tango-mar/admin/users",
+        post(jordan, { name: "Pat Lee", email: " Pat.Lee@Example.com ", phone: "850-555-0177", role: "board", property_id: "" }),
+        env,
+      );
+      expect(board.status).toBe(303);
+      expect(board.headers.get("Location")).toBe("/a/tango-mar/admin/users");
+      expect(flash(board)).toContain("ok:Pat Lee added. They can sign in with a magic link at their email.");
+      const pat = sqlite.prepare("SELECT id, name, phone FROM users WHERE email = 'pat.lee@example.com'").get() as {
+        id: string;
+        name: string;
+        phone: string;
+      };
+      expect(pat).toEqual({ id: pat.id, name: "Pat Lee", phone: "850-555-0177" });
+      expect(sqlite.prepare("SELECT role_id, is_admin, is_master, status FROM memberships WHERE user_id = ?").get(pat.id)).toEqual({
+        role_id: "board",
+        is_admin: 0,
+        is_master: 0,
+        status: "active",
+      });
+      expect(sqlite.prepare("SELECT id FROM property_owners WHERE user_id = ?").get(pat.id)).toBeUndefined();
+      expect(sqlite.prepare("SELECT id FROM magic_links WHERE email = 'pat.lee@example.com'").get()).toBeUndefined();
+
+      const withLot = await app.request(
+        "http://localhost/a/tango-mar/admin/users",
+        post(jordan, { name: "Ada Cole", email: "ada.cole@example.com", phone: "", role: "admin", property_id: "prop_14" }),
+        env,
+      );
+      expect(flash(withLot)).toContain("ok:Ada Cole added as an owner of lot 14. They can sign in with a magic link at their email.");
+      const ada = sqlite.prepare("SELECT id FROM users WHERE email = 'ada.cole@example.com'").get() as { id: string };
+      expect(sqlite.prepare("SELECT role_id, is_admin, status FROM memberships WHERE user_id = ?").get(ada.id)).toEqual({
+        role_id: "homeowner",
+        is_admin: 1,
+        status: "active",
+      });
+      expect(sqlite.prepare("SELECT property_id, is_primary FROM property_owners WHERE user_id = ?").get(ada.id)).toEqual({
+        property_id: "prop_14",
+        is_primary: 0,
+      });
+      expect(sqlite.prepare("SELECT id FROM magic_links WHERE email = 'ada.cole@example.com'").get()).toBeUndefined();
+
+      const owner = await app.request(
+        "http://localhost/a/tango-mar/admin/users",
+        post(jordan, { name: "Riley Chen", email: "riley.chen@example.com", phone: "", role: "owner", property_id: "" }),
+        env,
+      );
+      expect(flash(owner)).toContain("ok:Riley Chen added. They can sign in with a magic link at their email.");
+      const riley = sqlite.prepare("SELECT id FROM users WHERE email = 'riley.chen@example.com'").get() as { id: string };
+      expect(sqlite.prepare("SELECT role_id, is_admin FROM memberships WHERE user_id = ?").get(riley.id)).toEqual({
+        role_id: "homeowner",
+        is_admin: 0,
+      });
+
+      const listed = await app.request("http://localhost/a/tango-mar/admin/users", { headers: { Cookie: `tango_session=${jordan}` } }, env);
+      const listedHtml = await listed.text();
+      expect(fold(listedHtml, pat.id)).toContain(">Board member<");
+      expect(fold(listedHtml, pat.id)).toContain(">None<");
+      expect(fold(listedHtml, ada.id)).toContain(">Admin<");
+      expect(fold(listedHtml, ada.id)).toContain('href="/a/tango-mar/admin/ledger/prop_14">Lot 14');
+      expect(fold(listedHtml, riley.id)).toContain(">Owner<");
+
+      const again = await app.request(
+        "http://localhost/a/tango-mar/admin/users",
+        post(jordan, { name: "Not Sam", email: "SAM.RIVERA@example.com", phone: "850-555-0000", role: "admin", property_id: "" }),
+        env,
+      );
+      expect(flash(again)).toContain("ok:Sam Rivera already has a sign-in.");
+      expect(sqlite.prepare("SELECT name, phone FROM users WHERE id = 'user_sam'").get()).toEqual({
+        name: "Sam Rivera",
+        phone: "850-555-0102",
+      });
+      expect(sqlite.prepare("SELECT role_id, is_admin FROM memberships WHERE user_id = 'user_sam'").get()).toEqual({
+        role_id: "homeowner",
+        is_admin: 0,
+      });
+      expect(sqlite.prepare("SELECT COUNT(*) AS n FROM users WHERE email = 'sam.rivera@example.com'").get()).toEqual({ n: 1 });
+
+      const linked = await app.request(
+        "http://localhost/a/tango-mar/admin/users",
+        post(jordan, { name: "Not Jordan", email: "jordan.lee@example.com", phone: "", role: "owner", property_id: "prop_14" }),
+        env,
+      );
+      expect(flash(linked)).toContain("ok:Jordan Lee added as an owner of lot 14. They can sign in with a magic link at their email.");
+      expect(sqlite.prepare("SELECT role_id, is_admin, is_master FROM memberships WHERE user_id = 'user_jordan'").get()).toEqual({
+        role_id: "board",
+        is_admin: 1,
+        is_master: 1,
+      });
+
+      const duplicateLot = await app.request(
+        "http://localhost/a/tango-mar/admin/users",
+        post(jordan, { name: "Sam Rivera", email: "sam.rivera@example.com", phone: "", role: "owner", property_id: "prop_14" }),
+        env,
+      );
+      expect(flash(duplicateLot)).toContain("ok:Sam Rivera is already an owner of lot 14.");
+
+      const badEmail = await app.request(
+        "http://localhost/a/tango-mar/admin/users",
+        post(jordan, { name: "Nope", email: "not-an-email", phone: "", role: "owner", property_id: "" }),
+        env,
+      );
+      expect(flash(badEmail)).toContain("warn:Enter a valid email.");
+      const badLot = await app.request(
+        "http://localhost/a/tango-mar/admin/users",
+        post(jordan, { name: "Nope", email: "nope-lot@example.com", phone: "", role: "board", property_id: "missing" }),
+        env,
+      );
+      expect(flash(badLot)).toContain("warn:Choose a lot on this association.");
+      expect(sqlite.prepare("SELECT id FROM users WHERE email = 'nope-lot@example.com'").get()).toBeUndefined();
+      const badRole = await app.request(
+        "http://localhost/a/tango-mar/admin/users",
+        post(jordan, { name: "Nope", email: "nope-role@example.com", phone: "", role: "officer", property_id: "" }),
+        env,
+      );
+      expect(flash(badRole)).toContain("warn:Choose a valid role.");
+      expect(sqlite.prepare("SELECT id FROM users WHERE email = 'nope-role@example.com'").get()).toBeUndefined();
+
+      const resident = await app.request(
+        "http://localhost/a/tango-mar/admin/users",
+        post(sam, { name: "Nope", email: "resident-add@example.com", phone: "", role: "admin", property_id: "" }),
+        env,
+      );
+      expect(resident.status).toBe(403);
+      expect(sqlite.prepare("SELECT id FROM users WHERE email = 'resident-add@example.com'").get()).toBeUndefined();
     } finally {
       sqlite.close();
     }

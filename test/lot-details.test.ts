@@ -206,12 +206,9 @@ describe("lot details", () => {
       expect(rosterHtml).toContain("850-555-0102");
       expect(rosterHtml).toContain("850-555-0199");
       expect(rosterHtml).toContain(NOTE);
-      const users = rosterHtml.slice(rosterHtml.indexOf('id="logins"'));
-      expect(users).toContain("<h2>Users</h2>");
-      expect(users).toContain("Last login");
-      expect(users).toContain("jordan.lee@example.com");
-      expect(users).not.toContain(">Balance<");
-      expect(users).not.toContain(NOTE);
+      expect(rosterHtml).not.toContain('id="logins"');
+      expect(rosterHtml).not.toContain("<h2>Users</h2>");
+      expect(rosterHtml).not.toContain("Download consent log (CSV)");
 
       const ledger = await app.request(
         "http://localhost/a/tango-mar/admin/ledger/prop_14",

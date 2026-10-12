@@ -1,4 +1,4 @@
--- Demo association: Tango Mar, a beach neighborhood in Miramar Beach, Walton County, Florida.
+-- Demo association: Tang-O-Mar, a beach neighborhood in Miramar Beach, Walton County, Florida.
 -- People below are fictional. Lot labels are examples, not a statement about who owns a house.
 -- Association mailing address is the published principal address of the Tang-O-Mar POA.
 
@@ -7,8 +7,8 @@ INSERT INTO associations (
 ) VALUES (
   'assoc_tango_mar',
   'tango-mar',
-  'Tango Mar',
-  'Tango Mar Property Owners Association',
+  'Tang-O-Mar',
+  'Tang-O-Mar Property Owners Association',
   '31 Tang O Mar Drive',
   'Miramar Beach',
   'FL',
@@ -45,7 +45,7 @@ INSERT INTO assessments (id, association_id, name, description, amount_cents, du
     'assessment_2026_annual',
     'assoc_tango_mar',
     '2026 annual assessment',
-    'Yearly dues for Tango Mar operating costs.',
+    'Yearly dues for Tang-O-Mar operating costs.',
     120000,
     '2026-03-01',
     '2026-01-10T15:00:00Z'
@@ -140,7 +140,7 @@ INSERT INTO documents (
     'doc_covenants',
     'assoc_tango_mar',
     'covenants',
-    'Tango Mar covenants (sample)',
+    'Tang-O-Mar covenants (sample)',
     'residents',
     'docver_covenants_1',
     '2026-10-01T15:00:00Z'
@@ -205,7 +205,7 @@ INSERT INTO announcements (
     'ann_rip',
     'assoc_tango_mar',
     'emergency',
-    'Sample emergency: high surf on the Tango Mar beach',
+    'Sample emergency: high surf on the Tang-O-Mar beach',
     'This is sample emergency copy for the portal review. Red flags mean stay out of the water. The Walton County beach safety crew posts the live flags.',
     1,
     '2026-10-05T13:00:00Z',
@@ -218,7 +218,7 @@ INSERT INTO announcements (
     'assoc_tango_mar',
     'meeting',
     'Annual members meeting',
-    'The annual members meeting is Sunday, November 8, 2026 at 10:00 a.m. Central Time at the Tango Mar beach pavilion, 31 Tang O Mar Drive, Miramar Beach.',
+    'The annual members meeting is Sunday, November 8, 2026 at 10:00 a.m. Central Time at the Tang-O-Mar beach pavilion, 31 Tang O Mar Drive, Miramar Beach.',
     0,
     '2026-10-03T15:00:00Z',
     NULL,
@@ -234,7 +234,7 @@ INSERT INTO events (
     'assoc_tango_mar',
     'Annual members meeting',
     'Budget review and board elections discussion. This portal does not collect proxies.',
-    'Tango Mar beach pavilion, 31 Tang O Mar Drive, Miramar Beach',
+    'Tang-O-Mar beach pavilion, 31 Tang O Mar Drive, Miramar Beach',
     '2026-11-08T16:00:00Z',
     '2026-11-08T17:30:00Z',
     'meeting',
@@ -259,7 +259,7 @@ INSERT INTO faqs (id, association_id, question, answer, sort_order) VALUES
     'faq_pay',
     'assoc_tango_mar',
     'Where do I pay dues?',
-    'Online card and ACH payments are not part of this portal. Mail a check to Tango Mar Property Owners Association, 31 Tang O Mar Drive, Miramar Beach, FL 32550. The board records the check on your ledger.',
+    'Online card and ACH payments are not part of this portal. Mail a check to Tang-O-Mar Property Owners Association, 31 Tang O Mar Drive, Miramar Beach, FL 32550. The board records the check on your ledger.',
     1
   ),
   (
@@ -325,6 +325,6 @@ INSERT INTO audit_log (id, association_id, actor_user_id, action, entity_type, e
   'seed',
   'association',
   'assoc_tango_mar',
-  'Loaded the Tango Mar demo roster, ledger, and neighborhood content.',
+  'Loaded the Tang-O-Mar demo roster, ledger, and neighborhood content.',
   '2026-10-01T15:00:00Z'
 );

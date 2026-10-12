@@ -41,7 +41,7 @@ describe("legal pages", () => {
     expect(html).toContain("<h1>Privacy Policy</h1>");
     expect(html).toContain("Effective Date: October 6, 2026");
     expect(legalText(html)).toBe(fixture("privacy-policy.txt"));
-    expect(html).toContain("Tango Mar Property Owners Association, Inc.");
+    expect(html).toContain("Tang-O-Mar Property Owners Association, Inc.");
     expect(html).not.toContain("\u2014");
     expect(html).not.toContain("\u2013");
   });
@@ -64,7 +64,7 @@ describe("legal pages", () => {
     expect(homeHtml).toContain('<footer class="home-footer">');
     expect(homeHtml).toContain('href="/privacy">Privacy Policy</a>');
     expect(homeHtml).toContain('href="/terms">Terms of Use</a>');
-    expect(homeHtml).toContain("© 2026 Tango Mar Property Owners Association");
+    expect(homeHtml).toContain("© 2026 Tang-O-Mar Property Owners Association");
     expect(homeHtml).toContain('href="/a/tango-mar/faq">FAQs</a>');
     expect(homeHtml).not.toContain('<footer class="site-footer wrap">');
     expect(homeHtml).not.toContain(">Support</a>");
@@ -74,7 +74,7 @@ describe("legal pages", () => {
     const privacy = await app.request("http://localhost/privacy", {}, env);
     expect(privacy.status).toBe(200);
     const privacyHtml = await privacy.text();
-    expect(privacyHtml).toContain("<title>Privacy Policy · Tango Mar</title>");
+    expect(privacyHtml).toContain("<title>Privacy Policy · Tang-O-Mar</title>");
     expect(legalText(privacyHtml)).toBe(fixture("privacy-policy.txt"));
     expect(privacyHtml).toContain('<footer class="home-footer">');
     expect(privacyHtml).toContain('href="/privacy">Privacy Policy</a>');
@@ -92,7 +92,7 @@ describe("legal pages", () => {
     const terms = await app.request("http://localhost/terms", {}, env);
     expect(terms.status).toBe(200);
     const termsHtml = await terms.text();
-    expect(termsHtml).toContain("<title>Terms of Use · Tango Mar</title>");
+    expect(termsHtml).toContain("<title>Terms of Use · Tang-O-Mar</title>");
     expect(legalText(termsHtml)).toBe(fixture("terms-of-use.txt"));
     const termsNav = termsHtml.slice(termsHtml.indexOf("<nav>"), termsHtml.indexOf("</nav>"));
     expect(termsNav).toContain('href="/">Home</a>');

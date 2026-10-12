@@ -19,10 +19,10 @@ describe("bring this to your HOA", () => {
     const response = await app.request(`http://localhost${PATH}`, {}, env);
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain("<title>Bring This to Your HOA · Tango Mar</title>");
+    expect(html).toContain("<title>Bring This to Your HOA · Tang-O-Mar</title>");
     expect(html).toContain("<h1 id=\"pitch-title\">Bring This to Your HOA</h1>");
     expect(html).toContain("A simple, secure homeowner portal built for real community associations.");
-    expect(html).toContain("This platform powers the Tango Mar homeowner portal you're viewing now.");
+    expect(html).toContain("This platform powers the Tang-O-Mar homeowner portal you're viewing now.");
     expect(html).toContain('href="#features">See Features</a>');
     expect(html).toContain('href="#sample-dashboard"');
     expect(html).toContain("View Sample Dashboard");

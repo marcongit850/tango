@@ -66,13 +66,13 @@ async function portalForUser(c: AppContext): Promise<HomePortal | null> {
 export function registerPublicRoutes(app: Hono<AppBindings>): void {
   app.get("/", async (c) => {
     const portal = await portalForUser(c);
-    return render(c, { title: "Tango Mar", active: "home", body: homePage(showDemo(c), portal), portal });
+    return render(c, { title: "Tang-O-Mar", active: "home", body: homePage(showDemo(c), portal), portal });
   });
 
   app.get("/bring-this-to-your-hoa", async (c) => {
     const intent = parseDemoIntent(c.req.query("intent") ?? "") ?? "demo";
     return render(c, {
-      title: "Bring This to Your HOA · Tango Mar",
+      title: "Bring This to Your HOA · Tang-O-Mar",
       active: "bring",
       marketing: true,
       body: hoaPitchPage({ intent, sent: c.req.query("sent") === "1" }),
@@ -118,9 +118,9 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
 
   app.get("/legal", async (c) => render(c, { title: "Not legal advice", active: "legal", body: legalPage() }));
 
-  app.get("/privacy", async (c) => render(c, { title: "Privacy Policy · Tango Mar", active: "privacy", body: privacyPage() }));
+  app.get("/privacy", async (c) => render(c, { title: "Privacy Policy · Tang-O-Mar", active: "privacy", body: privacyPage() }));
 
-  app.get("/terms", async (c) => render(c, { title: "Terms of Use · Tango Mar", active: "terms", body: termsPage() }));
+  app.get("/terms", async (c) => render(c, { title: "Terms of Use · Tang-O-Mar", active: "terms", body: termsPage() }));
 
   app.get("/join", async (c) => {
     return render(c, { title: "Request to join", active: "join", body: joinRequestPage() });
@@ -339,7 +339,7 @@ function demoValues(fields: FormFields): DemoFormValues {
 
 function pitchResponse(c: AppContext, values: DemoFormValues, error: string, status: number): Promise<Response> {
   return render(c, {
-    title: "Bring This to Your HOA · Tango Mar",
+    title: "Bring This to Your HOA · Tang-O-Mar",
     active: "bring",
     marketing: true,
     status,

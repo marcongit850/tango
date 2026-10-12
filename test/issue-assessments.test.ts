@@ -131,7 +131,7 @@ function openDb(): { sqlite: DatabaseSync; db: D1Database } {
          id, slug, name, legal_name, address_line1, city, state, postal_code, county, timezone
        ) VALUES (?, ?, ?, '', '', '', '', '', '', ?)`,
     )
-    .run("assoc_tango_mar", "tango-mar", "Tango Mar", "America/Chicago");
+    .run("assoc_tango_mar", "tango-mar", "Tang-O-Mar", "America/Chicago");
   return { sqlite, db: new SqliteD1(sqlite) as unknown as D1Database };
 }
 
@@ -528,7 +528,7 @@ describe("daily assessment invoice job", () => {
     const env = {
       DB: db,
       APP_ENV: "production",
-      EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+      EMAIL_FROM: "Tang-O-Mar <donotreply@mytangomar.com>",
       DOCUMENTS: {} as R2Bucket,
     } as Env;
     await worker.scheduled?.(

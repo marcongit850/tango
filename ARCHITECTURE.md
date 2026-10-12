@@ -23,7 +23,7 @@ The Tango Mar POA owner portal. Owners sign in with an email magic link to see b
 ## Secrets and env vars (names only)
 
 - Secret: `RESEND_API_KEY`
-- Vars in `wrangler.jsonc`: `APP_ENV` (`production`), `EMAIL_FROM` (`Tango Mar <donotreply@mytangomar.com>`)
+- Vars in `wrangler.jsonc`: `APP_ENV` (`production`), `EMAIL_FROM` (`Tang-O-Mar <donotreply@mytangomar.com>`)
 - Local only: `.dev.vars` (gitignored, see `.dev.vars.example`).
 
 ## Cron and scheduled jobs

@@ -20,7 +20,7 @@
   // EMAIL_FROM must be a sender Resend will accept. mytangomar.com must be verified in Resend Domains.
   "vars": {
     "APP_ENV": "production",
-    "EMAIL_FROM": "Tango Mar <donotreply@mytangomar.com>"
+    "EMAIL_FROM": "Tang-O-Mar <donotreply@mytangomar.com>"
   },
   // Daily assessment invoices. 06:15 UTC is 12:15 AM Central Standard Time and 1:15 AM Central Daylight Time,
   // so the open date has started in America/Chicago. The next run also catches a missed day.

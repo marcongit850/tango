@@ -323,7 +323,7 @@ export function hoaPitchPage(options: PitchPageOptions = {}): string {
             ${requestLink("demo", "Request a Demo")}
             <a class="button secondary" href="#features">See Features</a>
           </p>
-          <p class="muted">This platform powers the Tango Mar homeowner portal you're viewing now.</p>
+          <p class="muted">This platform powers the Tang-O-Mar homeowner portal you're viewing now.</p>
         </div>
         <div class="pitch-devices">
           <figure class="pitch-laptop">

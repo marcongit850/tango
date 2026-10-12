@@ -89,7 +89,7 @@ function portalEnv(db: D1Database): Env {
   return {
     DB: db,
     APP_ENV: "production",
-    EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+    EMAIL_FROM: "Tang-O-Mar <donotreply@mytangomar.com>",
     DOCUMENTS: {} as R2Bucket,
     RESEND_API_KEY: "",
   } as Env;

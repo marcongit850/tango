@@ -197,8 +197,8 @@ describe("join approval planning", () => {
   });
 
   it("tells the person to use resident login and does not include a magic link", () => {
-    const letter = welcomeEmail({ associationName: "Tango Mar", email: "pat@example.com", name: "Pat Example" });
-    expect(letter.subject).toBe("You are approved for Tango Mar");
+    const letter = welcomeEmail({ associationName: "Tang-O-Mar", email: "pat@example.com", name: "Pat Example" });
+    expect(letter.subject).toBe("You are approved for Tang-O-Mar");
     expect(letter.text).toContain("https://mytangomar.com/login");
     expect(letter.text).toContain("https://mytangomar.com");
     expect(letter.text).toContain("pat@example.com");
@@ -388,8 +388,8 @@ describe("owner login filters", () => {
   const association: Association = {
     id: ASSOCIATION,
     slug: "tango-mar",
-    name: "Tango Mar",
-    legal_name: "Tango Mar Property Owners Association",
+    name: "Tang-O-Mar",
+    legal_name: "Tang-O-Mar Property Owners Association",
     address_line1: "31 Tang O Mar Drive",
     city: "Miramar Beach",
     state: "FL",
@@ -510,8 +510,8 @@ describe("join requests admin page", () => {
   const association: Association = {
     id: ASSOCIATION,
     slug: "tango-mar",
-    name: "Tango Mar",
-    legal_name: "Tango Mar Property Owners Association",
+    name: "Tang-O-Mar",
+    legal_name: "Tang-O-Mar Property Owners Association",
     address_line1: "31 Tang O Mar Drive",
     city: "Miramar Beach",
     state: "FL",
@@ -613,7 +613,7 @@ describe("owner name and phone", () => {
     return {
       DB: db,
       APP_ENV: "production",
-      EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+      EMAIL_FROM: "Tang-O-Mar <donotreply@mytangomar.com>",
       DOCUMENTS: {} as R2Bucket,
     } as Env;
   }
@@ -764,7 +764,7 @@ describe("homeowner edit access", () => {
     return {
       DB: db,
       APP_ENV: "production",
-      EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+      EMAIL_FROM: "Tang-O-Mar <donotreply@mytangomar.com>",
       DOCUMENTS: {} as R2Bucket,
     } as Env;
   }
@@ -911,7 +911,7 @@ describe("delete a person or a lot", () => {
     return {
       DB: db,
       APP_ENV: "production",
-      EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+      EMAIL_FROM: "Tang-O-Mar <donotreply@mytangomar.com>",
       DOCUMENTS: {} as R2Bucket,
     } as Env;
   }
@@ -1192,8 +1192,8 @@ describe("pending join requests and notices", () => {
   const association: Association = {
     id: ASSOCIATION,
     slug: "tango-mar",
-    name: "Tango Mar",
-    legal_name: "Tango Mar Property Owners Association",
+    name: "Tang-O-Mar",
+    legal_name: "Tang-O-Mar Property Owners Association",
     address_line1: "31 Tang O Mar Drive",
     city: "Miramar Beach",
     state: "FL",

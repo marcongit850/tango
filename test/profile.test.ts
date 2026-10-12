@@ -86,7 +86,7 @@ function portalEnv(db: D1Database, apiKey = ""): Env {
   return {
     DB: db,
     APP_ENV: "production",
-    EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+    EMAIL_FROM: "Tang-O-Mar <donotreply@mytangomar.com>",
     DOCUMENTS: {} as R2Bucket,
     RESEND_API_KEY: apiKey,
   } as Env;
@@ -147,16 +147,16 @@ function mockResend(): void {
 describe("email change letters", () => {
   it("confirms at the new address and tells the old address after the change", () => {
     const confirm = emailChangeLetter({
-      associationName: "Tango Mar",
+      associationName: "Tang-O-Mar",
       link: "https://mytangomar.com/auth/verify?token=abc",
       minutes: 20,
     });
-    expect(confirm.subject).toBe("Confirm your email for Tango Mar");
+    expect(confirm.subject).toBe("Confirm your email for Tang-O-Mar");
     expect(confirm.text).toContain("https://mytangomar.com/auth/verify?token=abc");
     expect(confirm.text).toContain("Your login stays the same until you open the link.");
     expect(confirm.text).not.toContain("\u2014");
     expect(confirm.text).not.toContain("\u2013");
-    const notice = emailChangedLetter({ associationName: "Tango Mar", newEmail: "sam.new@example.com" });
+    const notice = emailChangedLetter({ associationName: "Tang-O-Mar", newEmail: "sam.new@example.com" });
     expect(notice.text).toContain("sam.new@example.com");
     expect(notice.text).toContain("If you did not ask for this, contact the board.");
     expect(notice.text).not.toContain("\u2014");

@@ -78,7 +78,7 @@ function portalEnv(db: D1Database): Env {
   return {
     DB: db,
     APP_ENV: "production",
-    EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+    EMAIL_FROM: "Tang-O-Mar <donotreply@mytangomar.com>",
     DOCUMENTS: bucket as unknown as R2Bucket,
   } as Env;
 }
@@ -400,7 +400,7 @@ describe("signed-in documents page", () => {
       expect(split).toBeGreaterThan(boardHtml.indexOf("<h1>Documents</h1>"));
       const resident = boardHtml.slice(0, split);
       const board = boardHtml.slice(split);
-      expect(resident).toContain("Tango Mar covenants (sample)");
+      expect(resident).toContain("Tang-O-Mar covenants (sample)");
       expect(resident).toContain("Budgets");
       expect(resident).not.toContain("2026 budget (sample)");
       expect(resident).not.toContain("Closed session");
@@ -418,7 +418,7 @@ describe("signed-in documents page", () => {
       const ownerPage = await app.request("http://localhost/a/tango-mar/documents", { headers: { Cookie: `tango_session=${sam}` } }, env);
       expect(ownerPage.status).toBe(200);
       const ownerHtml = await ownerPage.text();
-      expect(ownerHtml).toContain("Tango Mar covenants (sample)");
+      expect(ownerHtml).toContain("Tang-O-Mar covenants (sample)");
       expect(ownerHtml).not.toContain("Board only");
       expect(ownerHtml).not.toContain("Private to board members.");
       expect(ownerHtml).not.toContain("2026 budget (sample)");

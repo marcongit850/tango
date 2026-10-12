@@ -5,7 +5,7 @@ interface __BaseEnv_Env {
 	DOCUMENTS: R2Bucket;
 	DB: D1Database;
 	APP_ENV: "production";
-	EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>";
+	EMAIL_FROM: "Tang-O-Mar <donotreply@mytangomar.com>";
 }
 declare namespace Cloudflare {
 	interface GlobalProps {

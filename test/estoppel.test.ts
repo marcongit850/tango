@@ -55,7 +55,7 @@ function portalEnv(db: D1Database, apiKey = "re_test"): Env {
   return {
     DB: db,
     APP_ENV: "production",
-    EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+    EMAIL_FROM: "Tang-O-Mar <donotreply@mytangomar.com>",
     DOCUMENTS: {} as R2Bucket,
     RESEND_API_KEY: apiKey,
   } as Env;
@@ -119,7 +119,7 @@ describe("estoppel requests", () => {
     );
     expect(html).toContain("The association will respond to estoppel certificate requests within 10 business days, as required by Florida law.");
     expect(html).not.toContain("An estoppel certificate may be completed");
-    expect(html).toContain("Tango Mar<br>Attn: Board of Directors<br>31 Tang O Mar Drive, Miramar Beach, FL 32550");
+    expect(html).toContain("Tang-O-Mar<br>Attn: Board of Directors<br>31 Tang O Mar Drive, Miramar Beach, FL 32550");
     expect(html).toContain("Requests may be mailed to the address above or submitted with the form below.");
     expect(html).toContain('action="/a/tango-mar/estoppel"');
     expect(html).not.toContain("Resident login</h1>");
@@ -160,7 +160,7 @@ describe("estoppel requests", () => {
       expect(calls).toHaveLength(1);
       expect(calls[0]?.url).toBe("https://api.resend.com/emails");
       expect(calls[0]?.body).toMatchObject({
-        from: "Tango Mar <donotreply@mytangomar.com>",
+        from: "Tang-O-Mar <donotreply@mytangomar.com>",
         to: [ESTOPPEL_INBOX],
         reply_to: "pat@example.com",
         subject: "Estoppel request: Lot 14",

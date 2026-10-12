@@ -43,6 +43,20 @@ export function signInRoleLabel(membership: AccessMembership): "Owner" | "Board 
   return "Owner";
 }
 
+/**
+ * Maps the Add user role list onto the membership fields the role route writes.
+ * Owner is a homeowner without edit access.
+ * Board member is the board role without edit access.
+ * Admin is a homeowner with edit access.
+ * That is the same split the users list uses for its Role column.
+ */
+export function membershipForSignInRole(value: string): { roleId: "homeowner" | "board"; isAdmin: boolean } | null {
+  if (value === "owner") return { roleId: "homeowner", isAdmin: false };
+  if (value === "board") return { roleId: "board", isAdmin: false };
+  if (value === "admin") return { roleId: "homeowner", isAdmin: true };
+  return null;
+}
+
 /** Board members and anyone with edit access. Owners without edit access are the other group. */
 export function isBoardOrAdmin(membership: AccessMembership): boolean {
   return isBoardMember(membership) || isAdmin(membership);

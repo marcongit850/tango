@@ -469,7 +469,7 @@ Production:
 npx wrangler secret put RESEND_API_KEY
 ```
 
-`EMAIL_FROM` is a normal var: `Tango Mar <donotreply@mytangomar.com>`. mytangomar.com must be verified in Resend Domains before those messages can send.
+`EMAIL_FROM` is a normal var: `Tang-O-Mar <donotreply@mytangomar.com>`. mytangomar.com must be verified in Resend Domains before those messages can send.
 
 Local secrets, if you want to send real mail from `wrangler dev`, go in `.dev.vars` (gitignored):
 

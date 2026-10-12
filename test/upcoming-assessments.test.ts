@@ -16,8 +16,8 @@ import { dashboardPage, invoiceDetailPage } from "../src/views/resident";
 const association: Association = {
   id: "assoc_tango_mar",
   slug: "tango-mar",
-  name: "Tango Mar",
-  legal_name: "Tango Mar Property Owners Association",
+  name: "Tang-O-Mar",
+  legal_name: "Tang-O-Mar Property Owners Association",
   address_line1: "31 Tang O Mar Drive",
   city: "Miramar Beach",
   state: "FL",
@@ -690,7 +690,7 @@ describe("assign flash", () => {
     const env = {
       DB: db,
       APP_ENV: "production",
-      EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+      EMAIL_FROM: "Tang-O-Mar <donotreply@mytangomar.com>",
       DOCUMENTS: {} as R2Bucket,
       RESEND_API_KEY: "",
     } as Env;

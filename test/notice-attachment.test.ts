@@ -13,8 +13,8 @@ import { dashboardPage, noticesPage } from "../src/views/resident";
 const association: Association = {
   id: "assoc_tango_mar",
   slug: "tango-mar",
-  name: "Tango Mar",
-  legal_name: "Tango Mar Property Owners Association",
+  name: "Tang-O-Mar",
+  legal_name: "Tang-O-Mar Property Owners Association",
   address_line1: "31 Tang O Mar Drive",
   city: "Miramar Beach",
   state: "FL",
@@ -145,14 +145,14 @@ describe("portal notice files", () => {
 
   it("links the portal and says the file is attached to the email", () => {
     const letter = ownerNoticeEmail({
-      associationName: "Tango Mar",
+      associationName: "Tang-O-Mar",
       slug: "tango-mar",
       kind: "account",
       title: "Gate\ncode",
       summary: "The new code is inside.",
       attachmentName: "gate.pdf",
     });
-    expect(letter.subject).toBe("Tango Mar: Gate code");
+    expect(letter.subject).toBe("Tang-O-Mar: Gate code");
     expect(letter.href).toBe("https://mytangomar.com/a/tango-mar/notices");
     expect(letter.text).toContain(letter.href);
     expect(letter.text).toContain("Attached file: gate.pdf");
@@ -160,7 +160,7 @@ describe("portal notice files", () => {
     expect(letter.text).not.toContain("\u2014");
 
     const bare = ownerNoticeEmail({
-      associationName: "Tango Mar",
+      associationName: "Tang-O-Mar",
       slug: "tango-mar",
       kind: "account",
       title: "Hello",

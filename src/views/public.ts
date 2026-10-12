@@ -68,7 +68,7 @@ function homeBelow(): string {
       <div class="wrap">
         <h2 id="home-need-title">Everything You Need, All in One Place</h2>
         <span class="rule" aria-hidden="true"></span>
-        <p class="home-lead">Whether you're looking for association documents, the latest neighborhood updates, account information, or a way to contact the association, the Tango Mar homeowner portal makes it easy to find what you need.</p>
+        <p class="home-lead">Whether you're looking for association documents, the latest neighborhood updates, account information, or a way to contact the association, the Tang-O-Mar homeowner portal makes it easy to find what you need.</p>
         <div class="home-cards">${cards}</div>
       </div>
     </section>
@@ -76,11 +76,11 @@ function homeBelow(): string {
       <div class="wrap home-welcome-inner">
         <div class="home-welcome-copy">
           <p class="home-kicker">Welcome Home</p>
-          <h2 id="home-welcome-title">Tango Mar</h2>
-          <p>This website serves as the central online resource for Tango Mar property owners, providing convenient access to association information, community documents, neighborhood updates, and homeowner resources.</p>
+          <h2 id="home-welcome-title">Tang-O-Mar</h2>
+          <p>This website serves as the central online resource for Tang-O-Mar property owners, providing convenient access to association information, community documents, neighborhood updates, and homeowner resources.</p>
         </div>
         <div class="home-beach-frame">
-          <img class="home-beach" src="/tango-mar-dunes.webp" alt="Sea oats and a dune fence above the gulf at Tango Mar" width="832" height="428">
+          <img class="home-beach" src="/tango-mar-dunes.webp" alt="Sea oats and a dune fence above the gulf at Tang-O-Mar" width="832" height="428">
         </div>
       </div>
     </section>`;
@@ -103,9 +103,9 @@ export function homePage(showDemo: boolean, portal: HomePortal | null = null): s
       <div class="shore-scrim" aria-hidden="true"></div>
       <div class="shore-inner">
         <div class="shore-copy">
-          <img class="mark" src="/tango-mar-mark.png" alt="Tango Mar Property Owners Association" width="1143" height="789">
+          <img class="mark" src="/tango-mar-mark.webp" alt="Tang-O-Mar Property Owners Association" width="1200" height="779">
           <span class="rule" aria-hidden="true"></span>
-          <h1>Welcome to Tango Mar</h1>
+          <h1>Welcome to Tang-O-Mar</h1>
           <p class="blurb">Your neighborhood portal for association information, documents, announcements, account details, and community resources.</p>
           <p class="actions">
             ${
@@ -119,7 +119,7 @@ export function homePage(showDemo: boolean, portal: HomePortal | null = null): s
           </p>
         </div>
         <figure class="shore-video">
-          <video controls playsinline preload="metadata" poster="/welcome-intro-poster.jpg" width="1080" height="1920" title="Welcome to the Tango Mar owner portal" aria-label="Welcome to the Tango Mar owner portal">
+          <video controls playsinline preload="metadata" poster="/welcome-intro-poster.jpg" width="1080" height="1920" title="Welcome to the Tang-O-Mar owner portal" aria-label="Welcome to the Tang-O-Mar owner portal">
             <source src="/welcome-intro.mp4" type="video/mp4">
           </video>
         </figure>
@@ -202,11 +202,11 @@ export function joinReceivedPage(): string {
 export function legalPage(): string {
   return `<section class="panel">
     <h1>Not legal advice</h1>
-    ${paragraphs(`Tango Mar Neighborhood OS stores and shows records an association chooses to publish: rosters, assessments, recorded payments, documents, news, and private messages to the board.
+    ${paragraphs(`Tang-O-Mar Neighborhood OS stores and shows records an association chooses to publish: rosters, assessments, recorded payments, documents, news, and private messages to the board.
 
 It does not interpret covenants, decide violations, or replace the board. A later assistant that answers questions from an association's own documents will use this same limit: the answer is not legal advice, and the board still decides.
 
-Demo covenant text shipped with the first association is a placeholder, not the recorded covenants of Tango Mar.`)}
+Demo covenant text shipped with the first association is a placeholder, not the recorded covenants of Tang-O-Mar.`)}
   </section>`;
 }
 

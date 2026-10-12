@@ -919,7 +919,7 @@ export function siteFooter(): string {
   return `<footer class="home-footer">
     <div class="home-footer-inner">
       <a class="home-footer-brand" href="/">
-        <img src="/tango-mar-mark.png" alt="Tango Mar" width="1143" height="789">
+        <img src="/tango-mar-mark.webp" alt="Tang-O-Mar" width="1200" height="779">
         <span>Miramar Beach, Florida</span>
       </a>
       <nav aria-label="Footer">
@@ -933,7 +933,7 @@ export function siteFooter(): string {
       </nav>
       <div class="home-footer-end">
         <p><a href="/privacy">Privacy Policy</a> | <a href="/terms">Terms of Use</a></p>
-        <p>© 2026 Tango Mar Property Owners Association</p>
+        <p>© 2026 Tang-O-Mar Property Owners Association</p>
       </div>
     </div>
   </footer>`;
@@ -962,7 +962,7 @@ function askPortalWidget(): string {
   return `<details class="ask-portal">
     <summary>Ask the portal</summary>
     <div class="ask-panel">
-      <p class="kicker">Tango Mar</p>
+      <p class="kicker">Tang-O-Mar</p>
       <h2>Ask the portal</h2>
       <p>Questions about covenants, bylaws, and your lot.</p>
       <div class="ask-thread">
@@ -1026,7 +1026,7 @@ function shell(options: {
 <body>
   <a class="skip" href="#content">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="${esc(options.brandHref)}"><img src="/tango-mar-logo.png" alt="Tango Mar Property Owners Association" width="1536" height="1024"></a>
+    <a class="brand" href="${esc(options.brandHref)}"><img src="/tango-mar-logo.webp" alt="Tang-O-Mar Property Owners Association" width="480" height="312"></a>
     <nav>${options.nav}</nav>
     <div class="account">${options.account}</div>
   </header>
@@ -1039,7 +1039,7 @@ function shell(options: {
 
 export function setupResponse(): Response {
   const body = shell({
-    title: "Set up Tango Mar",
+    title: "Set up Tang-O-Mar",
     brandHref: "/",
     nav: `<a href="/">Home</a>`,
     account: "",

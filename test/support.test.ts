@@ -11,8 +11,8 @@ import { siteFooter } from "../src/views/layout";
 const association: Association = {
   id: "assoc_tango_mar",
   slug: "tango-mar",
-  name: "Tango Mar",
-  legal_name: "Tango Mar Property Owners Association",
+  name: "Tang-O-Mar",
+  legal_name: "Tang-O-Mar Property Owners Association",
   address_line1: "31 Tang O Mar Drive",
   city: "Miramar Beach",
   state: "FL",
@@ -75,7 +75,7 @@ function portalEnv(db: D1Database, apiKey = ""): Env {
   return {
     DB: db,
     APP_ENV: "production",
-    EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+    EMAIL_FROM: "Tang-O-Mar <donotreply@mytangomar.com>",
     DOCUMENTS: {} as R2Bucket,
     RESEND_API_KEY: apiKey,
   } as Env;
@@ -102,7 +102,7 @@ describe("site footer", () => {
     expect(html).toContain('href="/bring-this-to-your-hoa">Bring This to Your HOA</a>');
     expect(html).toContain('href="/privacy">Privacy Policy</a>');
     expect(html).toContain('href="/terms">Terms of Use</a>');
-    expect(html).toContain("© 2026 Tango Mar Property Owners Association");
+    expect(html).toContain("© 2026 Tang-O-Mar Property Owners Association");
     expect(html).toContain("Miramar Beach, Florida");
     expect(html).not.toContain(">Support</a>");
     expect(html).not.toContain("site-footer");
@@ -157,10 +157,10 @@ describe("support email", () => {
     let payload: unknown;
     const sent = await sendResendEmail({
       apiKey: "test",
-      from: "Tango Mar <donotreply@mytangomar.com>",
+      from: "Tang-O-Mar <donotreply@mytangomar.com>",
       to: SUPPORT_INBOX,
       replyTo: "jordan.lee@example.com",
-      subject: "[Tango Mar support] Feature request: Gate codes",
+      subject: "[Tang-O-Mar support] Feature request: Gate codes",
       text: supportEmailText({
         name: "Jordan Lee",
         email: "jordan.lee@example.com",
@@ -176,9 +176,9 @@ describe("support email", () => {
     });
     expect(sent).toBe(true);
     expect(payload).toEqual({
-      from: "Tango Mar <donotreply@mytangomar.com>",
+      from: "Tang-O-Mar <donotreply@mytangomar.com>",
       to: ["marc@whpinc.com"],
-      subject: "[Tango Mar support] Feature request: Gate codes",
+      subject: "[Tang-O-Mar support] Feature request: Gate codes",
       text: "Name: Jordan Lee\nEmail: jordan.lee@example.com\nRole: Board member, edit access\nPage: /a/tango-mar/admin/support\nTime: 2026-10-08T02:16:00.000Z\n\nThe gate code is not working.",
       reply_to: "jordan.lee@example.com",
     });
@@ -291,10 +291,10 @@ describe("support access", () => {
       expect(decodeURIComponent(sent.headers.get("Set-Cookie") ?? "")).toContain("ok:Thanks. Your message was sent.");
       const body = calls[0]?.body as { text: string; subject: string; reply_to: string; to: string[]; from: string };
       expect(calls[0]?.url).toBe("https://api.resend.com/emails");
-      expect(body.from).toBe("Tango Mar <donotreply@mytangomar.com>");
+      expect(body.from).toBe("Tang-O-Mar <donotreply@mytangomar.com>");
       expect(body.to).toEqual(["marc@whpinc.com"]);
       expect(body.reply_to).toBe("jordan.lee@example.com");
-      expect(body.subject).toBe("[Tango Mar support] Feature request: Gate codes");
+      expect(body.subject).toBe("[Tang-O-Mar support] Feature request: Gate codes");
       expect(body.text).toContain("Role: Board member, edit access");
       expect(body.text).toContain("Page: /a/tango-mar/admin/support");
       expect(body.text).toContain("The gate code is not working.");
@@ -324,7 +324,7 @@ describe("support access", () => {
       );
       expect(viewerSent.status).toBe(303);
       expect(calls[0]?.body).toMatchObject({
-        subject: "[Tango Mar support] Question: Hours",
+        subject: "[Tang-O-Mar support] Question: Hours",
         reply_to: "board.viewer@example.com",
         text: expect.stringContaining("Role: Board member"),
       });

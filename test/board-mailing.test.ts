@@ -101,7 +101,7 @@ function portalEnv(db: D1Database): Env {
   return {
     DB: db,
     APP_ENV: "production",
-    EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+    EMAIL_FROM: "Tang-O-Mar <donotreply@mytangomar.com>",
     DOCUMENTS: {} as R2Bucket,
   } as Env;
 }
@@ -123,9 +123,9 @@ function post(token: string, body: Record<string, string>, origin = "http://loca
   return { method: "POST", headers, body: new URLSearchParams(body) };
 }
 
-const SEEDED_LINE = "Tango Mar Property Owners Association · 31 Tang O Mar Drive, Miramar Beach, FL, 32550";
+const SEEDED_LINE = "Tang-O-Mar Property Owners Association · 31 Tang O Mar Drive, Miramar Beach, FL, 32550";
 const SEEDED_ROW = {
-  legal_name: "Tango Mar Property Owners Association",
+  legal_name: "Tang-O-Mar Property Owners Association",
   address_line1: "31 Tang O Mar Drive",
   city: "Miramar Beach",
   state: "FL",
@@ -160,7 +160,7 @@ describe("board mailing address", () => {
       expect(adminHtml).toContain('<summary class="button secondary">Edit</summary>');
       expect(adminHtml).toContain('action="/a/tango-mar/board"');
       expect(adminHtml).toContain('name="legal_name"');
-      expect(adminHtml).toContain('value="Tango Mar Property Owners Association"');
+      expect(adminHtml).toContain('value="Tang-O-Mar Property Owners Association"');
       expect(adminHtml).toContain('name="address_line1"');
       expect(adminHtml).toContain('value="31 Tang O Mar Drive"');
       expect(adminHtml).toContain('value="Miramar Beach"');

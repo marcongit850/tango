@@ -21,7 +21,7 @@ function legalDocument(title: string, blocks: LegalBlock[]): string {
 
 export function privacyPage(): string {
   return legalDocument("Privacy Policy", [
-    `Tango Mar Property Owners Association, Inc. ("Association," "we," "us," or "our") respects the privacy of its members and other authorized users of this website and owner portal.`,
+    `Tang-O-Mar Property Owners Association, Inc. ("Association," "we," "us," or "our") respects the privacy of its members and other authorized users of this website and owner portal.`,
     "This Privacy Policy explains what information we may collect, how we use it, and how access to member, property, and account information is handled.",
     { heading: "Information We Collect" },
     "We may collect and maintain information associated with Association membership and use of the portal, including:",
@@ -116,7 +116,7 @@ export function privacyPage(): string {
 
 export function termsPage(): string {
   return legalDocument("Terms of Use", [
-    "These Terms of Use govern access to and use of the Tango Mar Property Owners Association website and owner portal.",
+    "These Terms of Use govern access to and use of the Tang-O-Mar Property Owners Association website and owner portal.",
     "By using the website or portal, you agree to these Terms of Use.",
     { heading: "Authorized Use" },
     "The owner portal is intended for Association members, property owners, authorized representatives, Association administrators, and other persons authorized by the Association.",

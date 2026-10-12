@@ -12,8 +12,8 @@ const ASSOCIATION = "assoc_tango_mar";
 const association: Association = {
   id: ASSOCIATION,
   slug: "tango-mar",
-  name: "Tango Mar",
-  legal_name: "Tango Mar Property Owners Association",
+  name: "Tang-O-Mar",
+  legal_name: "Tang-O-Mar Property Owners Association",
   address_line1: "31 Tang O Mar Drive",
   city: "Miramar Beach",
   state: "FL",
@@ -119,7 +119,7 @@ function portalEnv(db: D1Database, bucket: MemoryBucket): Env {
   return {
     DB: db,
     APP_ENV: "production",
-    EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+    EMAIL_FROM: "Tang-O-Mar <donotreply@mytangomar.com>",
     DOCUMENTS: bucket as unknown as R2Bucket,
   } as Env;
 }

@@ -1,13 +1,13 @@
 const COVENANTS = `SAMPLE PLACEHOLDER — NOT THE RECORDED COVENANTS
 
-Tango Mar
+Tang-O-Mar
 Miramar Beach, Walton County, Florida
 
 This file is demo content so the portal can show document versions.
 Replace it with the association's recorded covenants.
 
 1. Lots
-Lots in Tango Mar are for residential use.
+Lots in Tang-O-Mar are for residential use.
 
 2. Dunes and beach
 Do not cut dune vegetation or place private structures on the beach.
@@ -21,7 +21,7 @@ This text is not legal advice.
 
 const BUDGET = `SAMPLE PLACEHOLDER — NOT THE ADOPTED BUDGET
 
-Tango Mar 2026 budget sketch
+Tang-O-Mar 2026 budget sketch
 Miramar Beach, Walton County, Florida
 
 Annual assessment (illustrative)    $1,200 per lot
@@ -38,11 +38,19 @@ const SEED_FILES = [
   { key: "seed/tango-mar/budget-2026.txt", body: BUDGET },
 ] as const;
 
+const PREVIOUS_DISPLAY_NAMES = ["Tango Mar", "TANGO MAR"];
+
 export async function ensureSeedFiles(bucket: R2Bucket, db: D1Database): Promise<void> {
   for (const file of SEED_FILES) {
     const bytes = new TextEncoder().encode(file.body);
     const existing = await bucket.head(file.key);
-    if (!existing) {
+    let write = !existing;
+    if (existing) {
+      const object = await bucket.get(file.key);
+      const text = object ? await object.text() : "";
+      write = PREVIOUS_DISPLAY_NAMES.some((name) => text.includes(name));
+    }
+    if (write) {
       await bucket.put(file.key, bytes, {
         httpMetadata: { contentType: "text/plain; charset=utf-8" },
       });

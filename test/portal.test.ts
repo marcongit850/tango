@@ -108,8 +108,8 @@ describe("owner csv", () => {
     const association = {
       id: "assoc_tango_mar",
       slug: "tango-mar",
-      name: "Tango Mar",
-      legal_name: "Tango Mar Property Owners Association",
+      name: "Tang-O-Mar",
+      legal_name: "Tang-O-Mar Property Owners Association",
       address_line1: "",
       city: "Miramar Beach",
       state: "FL",
@@ -548,13 +548,13 @@ describe("public home", () => {
     expect(html).not.toContain("/a/tango-mar/login");
     expect(html).toContain("Request access");
     expect(html).toContain('href="/join"');
-    expect(html).toContain("Welcome to Tango Mar");
+    expect(html).toContain("Welcome to Tang-O-Mar");
     expect(html).not.toContain("A private beach neighborhood in Miramar Beach, Walton County, Florida.");
     expect(html).not.toContain("A beach neighborhood in Miramar Beach, Walton County, Florida.");
     expect(html).toContain("Your neighborhood portal for association information, documents, announcements, account details, and community resources.");
     expect(html).toContain("Everything You Need, All in One Place");
     expect(html).toContain(
-      "Whether you're looking for association documents, the latest neighborhood updates, account information, or a way to contact the association, the Tango Mar homeowner portal makes it easy to find what you need.",
+      "Whether you're looking for association documents, the latest neighborhood updates, account information, or a way to contact the association, the Tang-O-Mar homeowner portal makes it easy to find what you need.",
     );
     expect(html).toContain("COMMUNITY UPDATES");
     expect(html).toContain("Stay up to date on neighborhood announcements, meetings, projects, and important notices.");
@@ -573,14 +573,14 @@ describe("public home", () => {
     expect(html).toContain('href="/a/tango-mar/messages"');
     expect(html).toContain("Contact Us");
     expect(html).toContain("Welcome Home");
-    expect(html).toContain("This website serves as the central online resource for Tango Mar property owners, providing convenient access to association information, community documents, neighborhood updates, and homeowner resources.");
+    expect(html).toContain("This website serves as the central online resource for Tang-O-Mar property owners, providing convenient access to association information, community documents, neighborhood updates, and homeowner resources.");
     expect(html).toContain('class="home-beach" src="/tango-mar-dunes.webp"');
     expect(html).not.toContain("\u2013");
     expect(html).toContain('src="/tango-mar-boardwalk.png"');
-    expect(html).toContain('src="/tango-mar-mark.png"');
+    expect(html).toContain('src="/tango-mar-mark.webp"');
     expect(html).toContain('src="/welcome-intro.mp4"');
     expect(html).toContain('poster="/welcome-intro-poster.jpg"');
-    expect(html).toContain('aria-label="Welcome to the Tango Mar owner portal"');
+    expect(html).toContain('aria-label="Welcome to the Tang-O-Mar owner portal"');
     expect(html).toContain("controls");
     expect(html).toContain("playsinline");
     expect(html).not.toContain("autoplay");
@@ -590,7 +590,7 @@ describe("public home", () => {
     expect(html).not.toContain("Welcome to your neighborhood dashboard");
     expect(html).not.toContain("\u2014");
     expect(html).not.toContain("Open portal");
-    expect(html).not.toContain("Enter Tango Mar");
+    expect(html).not.toContain("Enter Tang-O-Mar");
     expect(html).not.toContain("Associations");
     expect(html).not.toContain("/legal");
     expect(html).not.toContain("Local demo roster");
@@ -607,8 +607,8 @@ describe("public home", () => {
     const association: Association = {
       id: "assoc_tango_mar",
       slug: "tango-mar",
-      name: "Tango Mar",
-      legal_name: "Tango Mar Property Owners Association",
+      name: "Tang-O-Mar",
+      legal_name: "Tang-O-Mar Property Owners Association",
       address_line1: "31 Tang O Mar Drive",
       city: "Miramar Beach",
       state: "FL",
@@ -617,7 +617,7 @@ describe("public home", () => {
       timezone: "America/Chicago",
     };
     const login = loginPage(association, "/a/tango-mar/dashboard");
-    expect(login).toContain("Sign in to Tango Mar Dashboard");
+    expect(login).toContain("Sign in to Tang-O-Mar Dashboard");
     expect(login).toContain(
       "Enter the email address associated with your association account. We'll send you a secure, one-time login link. No password required.",
     );
@@ -626,7 +626,7 @@ describe("public home", () => {
     expect(invalidLinkPage()).toContain('href="/login"');
     const check = checkEmailPage(association.name, null);
     expect(check).toContain(
-      "If your email is on the Tango Mar roster, your secure sign-in link is on the way. The link expires in 20 minutes and can only be used once. After you sign in, you’ll stay logged in on this device for up to 30 days.",
+      "If your email is on the Tang-O-Mar roster, your secure sign-in link is on the way. The link expires in 20 minutes and can only be used once. After you sign in, you’ll stay logged in on this device for up to 30 days.",
     );
     expect(check).not.toContain("a sign-in link is on its way");
   });
@@ -682,8 +682,8 @@ describe("public home", () => {
     const association: Association = {
       id: "assoc_tango_mar",
       slug: "tango-mar",
-      name: "Tango Mar",
-      legal_name: "Tango Mar Property Owners Association",
+      name: "Tang-O-Mar",
+      legal_name: "Tang-O-Mar Property Owners Association",
       address_line1: "31 Tang O Mar Drive",
       city: "Miramar Beach",
       state: "FL",
@@ -723,8 +723,8 @@ describe("signed-in header", () => {
   const association: Association = {
     id: "assoc_tango_mar",
     slug: "tango-mar",
-    name: "Tango Mar",
-    legal_name: "Tango Mar Property Owners Association",
+    name: "Tang-O-Mar",
+    legal_name: "Tang-O-Mar Property Owners Association",
     address_line1: "31 Tang O Mar Drive",
     city: "Miramar Beach",
     state: "FL",
@@ -864,8 +864,8 @@ describe("owner dashboard", () => {
   const association: Association = {
     id: "assoc_tango_mar",
     slug: "tango-mar",
-    name: "Tango Mar",
-    legal_name: "Tango Mar Property Owners Association",
+    name: "Tang-O-Mar",
+    legal_name: "Tang-O-Mar Property Owners Association",
     address_line1: "31 Tang O Mar Drive",
     city: "Miramar Beach",
     state: "FL",
@@ -964,8 +964,8 @@ describe("admin overview", () => {
   const association: Association = {
     id: "assoc_tango_mar",
     slug: "tango-mar",
-    name: "Tango Mar",
-    legal_name: "Tango Mar Property Owners Association",
+    name: "Tang-O-Mar",
+    legal_name: "Tang-O-Mar Property Owners Association",
     address_line1: "31 Tang O Mar Drive",
     city: "Miramar Beach",
     state: "FL",
@@ -1030,8 +1030,8 @@ describe("news admin", () => {
   const association: Association = {
     id: "assoc_tango_mar",
     slug: "tango-mar",
-    name: "Tango Mar",
-    legal_name: "Tango Mar Property Owners Association",
+    name: "Tang-O-Mar",
+    legal_name: "Tang-O-Mar Property Owners Association",
     address_line1: "31 Tang O Mar Drive",
     city: "Miramar Beach",
     state: "FL",
@@ -1148,8 +1148,8 @@ describe("personal notices", () => {
   const association: Association = {
     id: "assoc_tango_mar",
     slug: "tango-mar",
-    name: "Tango Mar",
-    legal_name: "Tango Mar Property Owners Association",
+    name: "Tang-O-Mar",
+    legal_name: "Tang-O-Mar Property Owners Association",
     address_line1: "31 Tang O Mar Drive",
     city: "Miramar Beach",
     state: "FL",
@@ -1250,8 +1250,8 @@ describe("document viewing", () => {
   const association: Association = {
     id: "assoc_tango_mar",
     slug: "tango-mar",
-    name: "Tango Mar",
-    legal_name: "Tango Mar Property Owners Association",
+    name: "Tang-O-Mar",
+    legal_name: "Tang-O-Mar Property Owners Association",
     address_line1: "31 Tang O Mar Drive",
     city: "Miramar Beach",
     state: "FL",
@@ -1697,8 +1697,8 @@ describe("email owners", () => {
   const association: Association = {
     id: "assoc_tango_mar",
     slug: "tango-mar",
-    name: "Tango Mar",
-    legal_name: "Tango Mar Property Owners Association",
+    name: "Tang-O-Mar",
+    legal_name: "Tang-O-Mar Property Owners Association",
     address_line1: "31 Tang O Mar Drive",
     city: "Miramar Beach",
     state: "FL",
@@ -1846,14 +1846,14 @@ describe("email owners", () => {
 
   it("writes a short portal link and does not attach a file", () => {
     const letter = ownerNoticeEmail({
-      associationName: "Tango Mar",
+      associationName: "Tang-O-Mar",
       slug: "tango-mar",
       kind: "announcement",
       title: "Beach\ncleanup",
       summary: "Bring bags.",
       itemId: "ann-1",
     });
-    expect(letter.subject).toBe("Tango Mar: Beach cleanup");
+    expect(letter.subject).toBe("Tang-O-Mar: Beach cleanup");
     expect(letter.subject).not.toContain("\n");
     expect(letter.text).toContain("Bring bags.");
     expect(letter.href).toBe("https://mytangomar.com/a/tango-mar/news/ann-1");
@@ -1862,7 +1862,7 @@ describe("email owners", () => {
 
     expect(
       ownerNoticeEmail({
-        associationName: "Tango Mar",
+        associationName: "Tang-O-Mar",
         slug: "tango-mar",
         kind: "event",
         title: "Board meeting",
@@ -1871,7 +1871,7 @@ describe("email owners", () => {
     ).toBe("https://mytangomar.com/a/tango-mar/calendar");
 
     const doc = ownerNoticeEmail({
-      associationName: "Tango Mar",
+      associationName: "Tang-O-Mar",
       slug: "tango-mar",
       kind: "document",
       title: "Covenants",
@@ -1882,23 +1882,23 @@ describe("email owners", () => {
     expect(doc.text).not.toContain("\u2014");
 
     const notice = ownerNoticeEmail({
-      associationName: "Tango Mar",
+      associationName: "Tang-O-Mar",
       slug: "tango-mar",
       kind: "account",
       title: "Gate\ncode",
       summary: "The new code is 1234.",
       attachmentName: "rules.pdf",
     });
-    expect(notice.subject).toBe("Tango Mar: Gate code");
+    expect(notice.subject).toBe("Tang-O-Mar: Gate code");
     expect(notice.href).toBe("https://mytangomar.com/a/tango-mar/notices");
-    expect(notice.text).toContain("Tango Mar posted a notice.");
+    expect(notice.text).toContain("Tang-O-Mar posted a notice.");
     expect(notice.text).toContain("The new code is 1234.");
     expect(notice.text).toContain("Attached file: rules.pdf");
     expect(notice.text).toContain(notice.href);
     expect(notice.text).not.toContain("\u2014");
     expect(
       ownerNoticeEmail({
-        associationName: "Tango Mar",
+        associationName: "Tang-O-Mar",
         slug: "tango-mar",
         kind: "account",
         title: "Gate code",
@@ -1921,9 +1921,9 @@ describe("email owners", () => {
     const bodies: { to: string[]; attachments?: { filename: string; content: string; content_type: string }[]; html?: unknown; text: string }[] = [];
     const delivery = await deliverOwnerEmails({
       apiKey: "test-key",
-      from: "Tango Mar <donotreply@mytangomar.com>",
+      from: "Tang-O-Mar <donotreply@mytangomar.com>",
       recipients: [{ email: "sam.rivera@example.com" }],
-      subject: "Tango Mar: Gate code",
+      subject: "Tang-O-Mar: Gate code",
       text: "Open notices\nhttps://mytangomar.com/a/tango-mar/notices",
       attachments: attachment ? [attachment] : undefined,
       fetchImpl: async (_url, init) => {
@@ -2005,9 +2005,9 @@ describe("email owners", () => {
     const bodies: { to: string[]; attachments?: unknown; html?: unknown; text: string }[] = [];
     const delivery = await deliverOwnerEmails({
       apiKey: "test-key",
-      from: "Tango Mar <donotreply@mytangomar.com>",
+      from: "Tang-O-Mar <donotreply@mytangomar.com>",
       recipients: [{ email: "a@example.com" }, { email: "b@example.com" }],
-      subject: "Tango Mar: Covenants",
+      subject: "Tang-O-Mar: Covenants",
       text: "Open documents\nhttps://mytangomar.com/a/tango-mar/documents",
       fetchImpl: async (_url, init) => {
         const body = JSON.parse(String(init?.body)) as { to: string[]; attachments?: unknown; html?: unknown; text: string };
@@ -2024,7 +2024,7 @@ describe("email owners", () => {
     ).toBe("Document published. Emailed 1 of 2 owners.");
 
     const skipped = await deliverOwnerEmails({
-      from: "Tango Mar <donotreply@mytangomar.com>",
+      from: "Tang-O-Mar <donotreply@mytangomar.com>",
       recipients: [{ email: "a@example.com" }],
       subject: "Hi",
       text: "Hi",
@@ -2106,8 +2106,8 @@ describe("ledger payment invoices", () => {
   const association: Association = {
     id: "assoc_tango_mar",
     slug: "tango-mar",
-    name: "Tango Mar",
-    legal_name: "Tango Mar Property Owners Association",
+    name: "Tang-O-Mar",
+    legal_name: "Tang-O-Mar Property Owners Association",
     address_line1: "31 Tang O Mar Drive",
     city: "Miramar Beach",
     state: "FL",

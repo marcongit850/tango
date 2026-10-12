@@ -7,7 +7,7 @@ const PATH = "/bring-this-to-your-hoa";
 function demoEnv(apiKey = "re_test"): Env {
   return {
     APP_ENV: "production",
-    EMAIL_FROM: "Tango Mar <donotreply@mytangomar.com>",
+    EMAIL_FROM: "Tang-O-Mar <donotreply@mytangomar.com>",
     RESEND_API_KEY: apiKey,
   } as unknown as Env;
 }
@@ -67,7 +67,7 @@ describe("demo request", () => {
         {
           url: "https://api.resend.com/emails",
           body: {
-            from: "Tango Mar <donotreply@mytangomar.com>",
+            from: "Tang-O-Mar <donotreply@mytangomar.com>",
             to: [DEMO_INBOX],
             reply_to: "pat@example.com",
             subject: "Demo request: Cedar Court HOA",

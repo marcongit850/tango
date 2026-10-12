@@ -577,7 +577,7 @@ describe("public home", () => {
     expect(html).toContain('class="home-beach" src="/tango-mar-dunes.webp"');
     expect(html).not.toContain("\u2013");
     expect(html).toContain('src="/tango-mar-boardwalk.png"');
-    expect(html).toContain('src="/tango-mar-mark.png"');
+    expect(html).toContain('src="/tango-mar-mark.webp"');
     expect(html).toContain('src="/welcome-intro.mp4"');
     expect(html).toContain('poster="/welcome-intro-poster.jpg"');
     expect(html).toContain('aria-label="Welcome to the Tang-O-Mar owner portal"');

@@ -103,7 +103,7 @@ export function homePage(showDemo: boolean, portal: HomePortal | null = null): s
       <div class="shore-scrim" aria-hidden="true"></div>
       <div class="shore-inner">
         <div class="shore-copy">
-          <img class="mark" src="/tango-mar-mark.png" alt="Tang-O-Mar Property Owners Association" width="1143" height="789">
+          <img class="mark" src="/tango-mar-mark.webp" alt="Tang-O-Mar Property Owners Association" width="1200" height="779">
           <span class="rule" aria-hidden="true"></span>
           <h1>Welcome to Tang-O-Mar</h1>
           <p class="blurb">Your neighborhood portal for association information, documents, announcements, account details, and community resources.</p>

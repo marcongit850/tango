@@ -919,7 +919,7 @@ export function siteFooter(): string {
   return `<footer class="home-footer">
     <div class="home-footer-inner">
       <a class="home-footer-brand" href="/">
-        <img src="/tango-mar-mark.png" alt="Tang-O-Mar" width="1143" height="789">
+        <img src="/tango-mar-mark.webp" alt="Tang-O-Mar" width="1200" height="779">
         <span>Miramar Beach, Florida</span>
       </a>
       <nav aria-label="Footer">
@@ -1026,7 +1026,7 @@ function shell(options: {
 <body>
   <a class="skip" href="#content">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="${esc(options.brandHref)}"><img src="/tango-mar-logo.png" alt="Tang-O-Mar Property Owners Association" width="1536" height="1024"></a>
+    <a class="brand" href="${esc(options.brandHref)}"><img src="/tango-mar-logo.webp" alt="Tang-O-Mar Property Owners Association" width="480" height="312"></a>
     <nav>${options.nav}</nav>
     <div class="account">${options.account}</div>
   </header>

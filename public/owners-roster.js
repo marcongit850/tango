@@ -7,8 +7,7 @@
     window.location.assign(link.href);
   }
 
-  function installOwnersRoster(doc) {
-    var root = doc.querySelector(".lot-roster");
+  function installRoster(root) {
     if (!root || root.getAttribute("data-roster-ready") === "1") return;
     root.setAttribute("data-roster-ready", "1");
 
@@ -66,6 +65,11 @@
       });
       if (empty) empty.hidden = shown !== 0;
     });
+  }
+
+  function installOwnersRoster(doc) {
+    var roots = doc.querySelectorAll(".lot-roster, .user-roster");
+    Array.prototype.forEach.call(roots, installRoster);
   }
 
   if (typeof document !== "undefined") installOwnersRoster(document);

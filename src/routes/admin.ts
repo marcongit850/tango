@@ -58,7 +58,7 @@ import {
   versionById,
   writeAudit,
 } from "../db";
-import { activeAdminContacts, isAdmin, keepsAnAdmin, MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE, masterKeepsAdminWrites } from "../lib/access";
+import { activeAdminContacts, isAdmin, isBoardOrAdmin, keepsAnAdmin, MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE, masterKeepsAdminWrites, userListGroup } from "../lib/access";
 import { changeLoginEmail } from "../lib/login-email";
 import {
   categoryLabel,
@@ -117,7 +117,9 @@ import {
   newsAdminPage,
   ownerDetailPage,
   ownersPage,
+  usersPage,
   type NewsEdit,
+  type UserRosterPerson,
 } from "../views/admin";
 import { roleLabel } from "../views/bits";
 import { render } from "../views/layout";
@@ -334,6 +336,42 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     });
   });
 
+  app.get("/a/:slug/admin/users", async (c) => {
+    const { association, membership } = requireStaff(c);
+    const group = userListGroup(c.req.query("group"));
+    const [owners, links, properties] = await Promise.all([
+      listOwners(c.env.DB, association.id),
+      listLotOwners(c.env.DB, association.id),
+      listProperties(c.env.DB, association.id),
+    ]);
+    const lotNumber = new Map(properties.map((property) => [property.id, property.lot_number]));
+    const lotsByUser = new Map<string, { id: string; lot_number: string }[]>();
+    for (const link of links) {
+      const number = lotNumber.get(link.property_id);
+      if (!number) continue;
+      const list = lotsByUser.get(link.user_id) ?? [];
+      if (!list.some((lot) => lot.id === link.property_id)) list.push({ id: link.property_id, lot_number: number });
+      lotsByUser.set(link.user_id, list);
+    }
+    for (const lots of lotsByUser.values()) {
+      lots.sort((a, b) => a.lot_number.localeCompare(b.lot_number, undefined, { numeric: true, sensitivity: "base" }));
+    }
+    const seen = new Set<string>();
+    const people: UserRosterPerson[] = [];
+    for (const owner of owners) {
+      if (seen.has(owner.user_id)) continue;
+      if (owner.status !== "active" && owner.status !== "invited") continue;
+      seen.add(owner.user_id);
+      people.push({ owner, lots: lotsByUser.get(owner.user_id) ?? [] });
+    }
+    const shown = group === "all" ? people : people.filter((person) => (group === "board" ? isBoardOrAdmin(person.owner) : !isBoardOrAdmin(person.owner)));
+    return render(c, {
+      title: "Users",
+      active: "admin",
+      body: usersPage(association, shown, people.length, group, canEditAdmin(membership)),
+    });
+  });
+
   app.post("/a/:slug/admin/owners/:userId/role", async (c) => {
     const { association, user } = requireEditor(c);
     const fields = await readForm(c);
@@ -341,16 +379,17 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const status = textValue(fields, "status", 20);
     const owner = (await listOwners(c.env.DB, association.id)).find((row) => row.user_id === c.req.param("userId"));
     if (!owner) throw new NotFoundError();
+    const back = usersListReturn(association.slug, textValue(fields, "next", 200)) ?? ownerPath(association.slug, owner.user_id);
     if (!ROLES.has(role as MembershipRole) || !STATUSES.has(status as MembershipStatus)) {
-      return redirectTo(c, ownerPath(association.slug, owner.user_id), "Choose a valid role and status.", "warn");
+      return redirectTo(c, back, "Choose a valid role and status.", "warn");
     }
     const nextAdmin = fields.is_admin === "1";
     const currentlyAdmin = owner.is_admin === 1 && owner.status === "active";
     if (!masterKeepsAdminWrites({ isMaster: owner.is_master === 1, nextIsAdmin: nextAdmin, nextStatus: status, nextRole: role })) {
-      return redirectTo(c, ownerPath(association.slug, owner.user_id), MASTER_ADMIN_EDIT_MESSAGE, "warn");
+      return redirectTo(c, back, MASTER_ADMIN_EDIT_MESSAGE, "warn");
     }
     if (!keepsAnAdmin({ activeAdminCount: await countActiveAdmins(c.env.DB, association.id), currentlyAdmin, nextAdmin: nextAdmin && status === "active" })) {
-      return redirectTo(c, ownerPath(association.slug, owner.user_id), "Keep at least one person with edit access.", "warn");
+      return redirectTo(c, back, "Keep at least one person with edit access.", "warn");
     }
     try {
       await c.env.DB
@@ -359,7 +398,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         .run();
     } catch (error) {
       if (isMissingColumn(error)) {
-        return redirectTo(c, ownerPath(association.slug, owner.user_id), "Apply the admin migration in D1, then try again. The steps are in the README under Admin improvements.", "warn");
+        return redirectTo(c, back, "Apply the admin migration in D1, then try again. The steps are in the README under Admin improvements.", "warn");
       }
       throw error;
     }
@@ -371,7 +410,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       entityId: owner.user_id,
       detail: `${role}${nextAdmin ? " admin" : ""} / ${status}`,
     });
-    return redirectTo(c, ownerPath(association.slug, owner.user_id), "Role saved.");
+    return redirectTo(c, back, "Role saved.");
   });
 
   app.post("/a/:slug/admin/owners/:userId/email", async (c) => {
@@ -2697,6 +2736,17 @@ function lotReturnPath(slug: string, propertyId: string, returnTo: string): stri
 
 function ownerPath(slug: string, userId: string): string {
   return `/a/${slug}/admin/owners/${userId}`;
+}
+
+/** Return path for the users list. Anything else stays on the person page. */
+function usersListReturn(slug: string, value: string): string | null {
+  const path = `/a/${slug}/admin/users`;
+  if (value === path) return path;
+  const prefix = `${path}?group=`;
+  if (!value.startsWith(prefix)) return null;
+  const group = value.slice(prefix.length);
+  if (group === "board" || group === "owners") return value;
+  return null;
 }
 
 function ledgerPropertyPath(slug: string, propertyId: string): string {

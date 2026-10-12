@@ -2,7 +2,7 @@ import { DOCUMENT_CATEGORIES } from "../lib/categories";
 import { DOCUMENT_FILE_ACCEPT } from "../lib/files";
 import { formatDateTime, zonedIsoDate } from "../lib/dates";
 import { assessmentDisplayName, compareDuesRows, DUES_SCHEDULE_OPTIONS, duesAmountFieldLabel, latestDuesPrefill, lotTypeLabel, type DuesSchedule } from "../lib/dues";
-import { MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE } from "../lib/access";
+import { isAdmin, MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE, signInRoleLabel, type UserListGroup } from "../lib/access";
 import { esc, paragraphs } from "../lib/html";
 import { formatDollarsPlain, formatMoney } from "../lib/money";
 import type { Association, DocumentCategory } from "../types";
@@ -52,6 +52,7 @@ function adminNav(slug: string, current: string, canEdit = true): string {
   const links = [
     ["overview", "Overview"],
     ["owners", "Owners & lots"],
+    ["users", "Users"],
     ["import", "CSV import"],
     ["ledger", "Ledger"],
     ["documents", "Documents"],
@@ -468,6 +469,122 @@ export function ownersPage(
       <p class="muted">Sign-in accounts only. Email, admin access, electronic notice consent, and last login. Lot details stay in Owners and lots above.</p>
       <p><a href="/a/${esc(association.slug)}/admin/consent.csv">Download consent log (CSV)</a></p>
       ${loginRows ? `<table><thead><tr><th>Person</th><th>Email</th><th>Access</th><th>Consent</th><th>Last login</th></tr></thead><tbody>${loginRows}</tbody></table>` : empty("No sign-in accounts.")}
+    </section>`;
+}
+
+export type UserRosterPerson = {
+  owner: OwnerListRow;
+  lots: { id: string; lot_number: string }[];
+};
+
+function userListPath(slug: string, group: UserListGroup): string {
+  const base = `/a/${slug}/admin/users`;
+  return group === "all" ? base : `${base}?group=${group}`;
+}
+
+function userStatusLabel(status: string): string {
+  if (status === "active") return "Active";
+  if (status === "invited") return "Invited";
+  if (status === "inactive") return "Inactive";
+  return status;
+}
+
+function userLotLinks(slug: string, lots: readonly { id: string; lot_number: string }[]): string {
+  if (lots.length === 0) return "None";
+  return lots
+    .map((lot) => `<a href="/a/${esc(slug)}/admin/ledger/${esc(lot.id)}">Lot ${esc(lot.lot_number)}</a>`)
+    .join(", ");
+}
+
+function userSearchText(person: UserRosterPerson, role: string, edit: string): string {
+  return [person.owner.name, person.owner.email, role, edit, ...person.lots.flatMap((lot) => [lot.lot_number, `lot ${lot.lot_number}`])]
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function userRoleForm(slug: string, owner: OwnerListRow, next: string): string {
+  return `<form class="fields" method="post" action="/a/${esc(slug)}/admin/owners/${esc(owner.user_id)}/role">
+      <input type="hidden" name="next" value="${esc(next)}">
+      <input type="hidden" name="status" value="${esc(owner.status)}">
+      ${selectField(
+        "Role",
+        "role_id",
+        [
+          { value: "homeowner", label: "Homeowner" },
+          { value: "board", label: "Board member" },
+        ],
+        owner.role_id === "board" ? "board" : "homeowner",
+      )}
+      ${editAccessField(owner)}
+      <button type="submit">Save role</button>
+    </form>`;
+}
+
+export function usersPage(
+  association: Association,
+  people: UserRosterPerson[],
+  signInCount: number,
+  group: UserListGroup,
+  canEdit = true,
+): string {
+  const next = userListPath(association.slug, group);
+  const rows = people
+    .map((person) => {
+      const role = signInRoleLabel(person.owner);
+      const edit = isAdmin(person.owner) ? "Yes" : "No";
+      const owner = person.owner;
+      return `<details class="lot-fold" data-search="${esc(userSearchText(person, role, edit))}">
+        <summary class="lot-summary" aria-controls="user-detail-${esc(owner.user_id)}">
+          <span class="user-name"><span class="lot-kicker">Name</span>${esc(owner.name)}</span>
+          <span class="user-email"><span class="lot-kicker">Email</span>${esc(owner.email)}</span>
+          <span class="user-lots"><span class="lot-kicker">Lots</span>${userLotLinks(association.slug, person.lots)}</span>
+          <span class="user-role"><span class="lot-kicker">Role</span>${esc(role)}</span>
+          <span class="user-access"><span class="lot-kicker">Edit access</span>${edit}</span>
+          <span class="user-login"><span class="lot-kicker">Last sign-in</span>${owner.last_login_at ? dateTimeCell(owner.last_login_at, association.timezone) : "Never"}</span>
+          <span class="lot-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="lot-detail" id="user-detail-${esc(owner.user_id)}">
+          <p><span class="muted">Status</span><br>${esc(userStatusLabel(owner.status))}</p>
+          ${owner.phone ? `<p><span class="muted">Phone</span><br>${esc(owner.phone)}</p>` : ""}
+          ${owner.is_master === 1 ? `<p class="muted">Master admin</p>` : ""}
+          ${canEdit ? userRoleForm(association.slug, owner, next) : ""}
+        </div>
+      </details>`;
+    })
+    .join("");
+  const base = `/a/${esc(association.slug)}/admin/users`;
+  const filter = (id: UserListGroup, label: string, href: string) =>
+    `<a ${group === id ? `class="active"` : ""} href="${href}">${label}</a>`;
+  const roster = rows
+    ? `<div class="user-roster">
+        <label class="lot-search">Search
+          <input type="search" placeholder="Name, email, lot, or role" autocomplete="off">
+        </label>
+        <div class="lot-head" aria-hidden="true">
+          <span>Name</span>
+          <span>Email</span>
+          <span>Lots</span>
+          <span>Role</span>
+          <span>Edit access</span>
+          <span>Last sign-in</span>
+          <span></span>
+        </div>
+        ${rows}
+        <p class="lot-search-empty muted" hidden>No matching people.</p>
+      </div>
+      <script src="/owners-roster.js"></script>`
+    : empty(signInCount === 0 ? "No sign-in accounts." : "No matching people.");
+  return `${adminNav(association.slug, "users", canEdit)}
+    <section class="panel" id="users">
+      <h1>Users</h1>
+      <p class="muted">Everyone who can sign in for this association. Open a row for status and phone. People with edit access can change the role and grant or revoke edit access. Lot links open the ledger for that lot.</p>
+      <p class="filters">
+        ${filter("all", "All", base)}
+        ${filter("board", "Board and admins", `${base}?group=board`)}
+        ${filter("owners", "Owners only", `${base}?group=owners`)}
+      </p>
+      ${roster}
     </section>`;
 }
 

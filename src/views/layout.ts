@@ -233,7 +233,8 @@ form.email-prefs h2 { margin: 0.75rem 0 0; font-size: 1.05rem; }
     minmax(7rem, 1.25fr)
     1.15rem;
 }
-.user-name, .user-email, .user-lots, .user-role, .user-access, .user-login { min-width: 0; overflow-wrap: anywhere; }
+.user-name, .user-email, .user-lots { min-width: 0; overflow-wrap: anywhere; }
+.user-role, .user-access, .user-login { min-width: 0; }
 .user-roster .lot-detail form.fields { max-width: 36rem; }
 @media (max-width: 720px) {
   main.wrap:has(#lots) { grid-template-columns: minmax(0, 1fr); }
@@ -276,7 +277,8 @@ form.email-prefs h2 { margin: 0.75rem 0 0; font-size: 1.05rem; }
       "name chevron"
       "email email"
       "lots lots"
-      "role access"
+      "role role"
+      "access access"
       "login login";
     row-gap: 0.35rem;
     width: 100%;
@@ -292,7 +294,7 @@ form.email-prefs h2 { margin: 0.75rem 0 0; font-size: 1.05rem; }
   .user-roster .user-email { grid-area: email; }
   .user-roster .user-lots { grid-area: lots; }
   .user-roster .user-role { grid-area: role; }
-  .user-roster .user-access { grid-area: access; justify-self: end; align-self: end; }
+  .user-roster .user-access { grid-area: access; }
   .user-roster .user-login { grid-area: login; }
 }
 .devbox { border: 1px dashed var(--gulf); border-radius: 0; padding: 0.8rem 1rem; background: #f3faf8; }

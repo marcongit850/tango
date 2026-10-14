@@ -13,7 +13,7 @@ The Tango Mar POA owner portal. Owners sign in with an email magic link to see b
 - Product host: `myhoadashboard.com` and `www.myhoadashboard.com`. `/` is the MyHOADashboard marketing page. A neighborhood code sends the browser to `/<vanity_slug>`, which is that association's public landing and login.
 - Tang-O-Mar public address: `/tangomar` (vanity slug). The older path `/a/tango-mar/...` still works. Login, dashboard, documents, and the other association routes under `/tangomar/...` use those same handlers.
 - Legacy host: `mytangomar.com` and `www.mytangomar.com`. While `LEGACY_HOST_REDIRECT` is `0` (the default), this host keeps serving Tang-O-Mar as it does today. Set the var to `1` only after the product host is checked. Then each request 301s to the matching `https://myhoadashboard.com/tangomar...` URL and keeps the path and query (magic links, email confirm links, and document links).
-- Custom domains in `wrangler.jsonc`: `myhoadashboard.com`, `www.myhoadashboard.com`. `mytangomar.com` and `www.mytangomar.com` stay attached in the dashboard.
+- Custom domains in `wrangler.jsonc` (all four must stay in that file): `myhoadashboard.com`, `www.myhoadashboard.com`, `mytangomar.com`, and `www.mytangomar.com`. Deploy replaces the Worker route list, so a domain attached only in the dashboard is removed.
 - Zone settings on mytangomar.com: Always Use HTTPS on, minimum TLS 1.2, SSL mode Full, HSTS max age 15552000 (no subdomains, no preload).
 
 ## MyHOADashboard

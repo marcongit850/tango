@@ -26,11 +26,13 @@
     "LEGACY_HOST_REDIRECT": "0",
     "PLATFORM_ADMIN_EMAILS": "marc@whpinc.com"
   },
-  // Custom domains for the product host. The zone must already be in this account.
-  // Deploy creates the DNS records. mytangomar.com stays attached in the dashboard.
+  // Custom domains. Deploy replaces this list, so every hostname for this Worker stays here.
+  // Zones must already be in this account. Wrangler creates the proxied DNS records.
   "routes": [
     { "pattern": "myhoadashboard.com", "custom_domain": true },
-    { "pattern": "www.myhoadashboard.com", "custom_domain": true }
+    { "pattern": "www.myhoadashboard.com", "custom_domain": true },
+    { "pattern": "mytangomar.com", "custom_domain": true },
+    { "pattern": "www.mytangomar.com", "custom_domain": true }
   ],
   // Daily assessment invoices. 06:15 UTC is 12:15 AM Central Standard Time and 1:15 AM Central Daylight Time,
   // so the open date has started in America/Chicago. The next run also catches a missed day.

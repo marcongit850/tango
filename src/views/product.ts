@@ -144,6 +144,7 @@ export function productPage(state: ProductPageState = {}): string {
           <a href="#how">How it works</a>
           <a href="#features">Features</a>
           <a href="/demo">See the demo</a>
+          <a class="product-nav-cta" href="/bring-this-to-your-hoa">Bring this to your HOA</a>
         </nav>
       </div>
     </header>
@@ -163,6 +164,7 @@ export function productPage(state: ProductPageState = {}): string {
           <div class="code-actions">
             <button type="submit">Continue</button>
             <a class="button secondary" href="/demo">See the demo</a>
+            <a class="button product-bring" href="/bring-this-to-your-hoa">Bring this to your HOA</a>
           </div>
         </form>
         ${contactForm(state)}
@@ -200,12 +202,46 @@ export function productPage(state: ProductPageState = {}): string {
         <div class="product-cards">${features}</div>
       </div>
     </section>
+    <section class="product-band" aria-labelledby="bring-title">
+      <div class="wrap">
+        <h2 id="bring-title">Bring this to your HOA</h2>
+        <p>Show your board the pricing, the sample dashboard, and what is included today. You can request a demo from that page.</p>
+        <a class="button" href="/bring-this-to-your-hoa">Bring this to your HOA</a>
+      </div>
+    </section>
     <footer class="product-footer">
       <div class="wrap product-footer-inner">
         <a href="/">MyHOADashboard</a>
         <nav aria-label="Footer">
           <a href="/demo">See the demo</a>
+          <a href="/bring-this-to-your-hoa">Bring this to your HOA</a>
           <a href="#contact">Contact</a>
+          <a href="/privacy">Privacy Policy</a>
+          <a href="/terms">Terms of Use</a>
+        </nav>
+      </div>
+    </footer>`;
+}
+
+export function productPitchChrome(body: string): string {
+  return `<header class="product-header">
+      <div class="product-header-inner">
+        <a class="product-wordmark" href="/">MyHOADashboard</a>
+        <nav aria-label="Product">
+          <a href="/">Home</a>
+          <a href="/demo">See the demo</a>
+          <a class="product-nav-cta" href="/bring-this-to-your-hoa" aria-current="page">Bring this to your HOA</a>
+        </nav>
+      </div>
+    </header>
+    <div class="pitch product-pitch">${body}</div>
+    <footer class="product-footer">
+      <div class="wrap product-footer-inner">
+        <a href="/">MyHOADashboard</a>
+        <nav aria-label="Footer">
+          <a href="/">Home</a>
+          <a href="/demo">See the demo</a>
+          <a href="/bring-this-to-your-hoa">Bring this to your HOA</a>
           <a href="/privacy">Privacy Policy</a>
           <a href="/terms">Terms of Use</a>
         </nav>

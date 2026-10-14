@@ -9,6 +9,7 @@ export type PitchPageOptions = {
   intent?: DemoIntent;
   sent?: boolean;
   error?: string;
+  product?: boolean;
   values?: {
     name?: string;
     email?: string;
@@ -323,7 +324,7 @@ export function hoaPitchPage(options: PitchPageOptions = {}): string {
             ${requestLink("demo", "Request a Demo")}
             <a class="button secondary" href="#features">See Features</a>
           </p>
-          <p class="muted">This platform powers the Tang-O-Mar homeowner portal you're viewing now.</p>
+          <p class="muted">${options.product ? "The same portal a neighborhood opens after you enter its code." : "This platform powers the Tang-O-Mar homeowner portal you're viewing now."}</p>
         </div>
         <div class="pitch-devices">
           <figure class="pitch-laptop">

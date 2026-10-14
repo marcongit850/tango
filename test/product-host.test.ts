@@ -105,6 +105,8 @@ describe("MyHOADashboard host", () => {
     expect(html).toContain('href="/brand/icon-512.png"');
     expect(html).toContain("Why use us");
     expect(html).toContain("How it works");
+    expect(html).toContain('href="/bring-this-to-your-hoa">Bring this to your HOA</a>');
+    expect(html).toContain('class="product-band"');
     expect(html).toContain("Enter code");
     expect(html).toContain("Manage your HOA");
     expect(html).toContain("Owner portal");
@@ -126,6 +128,17 @@ describe("MyHOADashboard host", () => {
     const www = await app.request("https://www.myhoadashboard.com/", {}, env);
     expect(www.status).toBe(200);
     expect(await www.text()).toContain("Enter your neighborhood code");
+
+    const bring = await app.request(`${PRODUCT}/bring-this-to-your-hoa`, {}, env);
+    expect(bring.status).toBe(200);
+    const bringHtml = await bring.text();
+    expect(bringHtml).toContain("<title>Bring This to Your HOA · MyHOADashboard</title>");
+    expect(bringHtml).toContain('class="pitch product-pitch"');
+    expect(bringHtml).toContain("The same portal a neighborhood opens after you enter its code.");
+    expect(bringHtml).toContain("$99/month");
+    expect(bringHtml).not.toContain("you're viewing now");
+    expect(bringHtml).not.toContain("tango-mar-logo");
+    expect(bringHtml).not.toMatch(/\u2013|\u2014/);
   });
 
   it("redirects code 850 to /tangomar and rejects a bad code", async () => {

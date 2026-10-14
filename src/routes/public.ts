@@ -60,7 +60,7 @@ import { performLogin, showAssociationLogin } from "./auth";
 import { render } from "../views/layout";
 import { privacyPage, termsPage } from "../views/legal";
 import { hoaPitchPage } from "../views/pitch";
-import { productPage, type ProductPageState } from "../views/product";
+import { productPage, productPitchChrome, type ProductPageState } from "../views/product";
 import { estoppelPage, homePage, joinReceivedPage, joinRequestPage, legalPage, loginPage, type HomePortal } from "../views/public";
 import { readForm, redirectTo, requireAssociation, textValue, type AppContext, type FormFields } from "./common";
 
@@ -200,12 +200,7 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
 
   app.get("/bring-this-to-your-hoa", async (c) => {
     const intent = parseDemoIntent(c.req.query("intent") ?? "") ?? "demo";
-    return render(c, {
-      title: "Bring This to Your HOA · Tang-O-Mar",
-      active: "bring",
-      marketing: true,
-      body: hoaPitchPage({ intent, sent: c.req.query("sent") === "1" }),
-    });
+    return pitchPageResponse(c, { intent, sent: c.req.query("sent") === "1" });
   });
 
   app.post("/bring-this-to-your-hoa", async (c) => {
@@ -546,16 +541,35 @@ function demoValues(fields: FormFields): DemoFormValues {
   };
 }
 
-function pitchResponse(c: AppContext, values: DemoFormValues, error: string, status: number): Promise<Response> {
+function pitchPageResponse(c: AppContext, options: Parameters<typeof hoaPitchPage>[0], status = 200): Promise<Response> {
+  const product = isProductHost(new URL(c.req.url).hostname);
+  const body = hoaPitchPage({ ...options, product });
+  if (product) {
+    return render(c, {
+      title: "Bring This to Your HOA · MyHOADashboard",
+      product: true,
+      icon: "product",
+      status,
+      body: productPitchChrome(body),
+    });
+  }
   return render(c, {
     title: "Bring This to Your HOA · Tang-O-Mar",
     active: "bring",
     marketing: true,
     status,
-    body: hoaPitchPage({
+    body,
+  });
+}
+
+function pitchResponse(c: AppContext, values: DemoFormValues, error: string, status: number): Promise<Response> {
+  return pitchPageResponse(
+    c,
+    {
       intent: parseDemoIntent(values.intent) ?? "demo",
       error,
       values,
-    }),
-  });
+    },
+    status,
+  );
 }

@@ -945,6 +945,14 @@ body.product main { background: #f4f7fb; padding: 0; }
 .product-header nav { display: flex; flex-wrap: wrap; gap: 0.65rem 1.15rem; margin-left: auto; }
 .product-header nav a { color: #0b2a5b; text-decoration: none; font-weight: 650; }
 .product-header nav a:hover { color: #1d6fe0; }
+.product-header nav a.product-nav-cta {
+  background: #1d6fe0;
+  color: #fff;
+  border-radius: 0.55rem;
+  padding: 0.45rem 0.85rem;
+  font-weight: 700;
+}
+.product-header nav a.product-nav-cta:hover { background: #185fbf; color: #fff; }
 .product-hero, .product-section { background: #f4f7fb; }
 .product-hero { padding: 2.25rem 0 2.75rem; text-align: center; }
 .product-logo { display: block; width: min(100%, 22rem); margin: 0 auto 1.15rem; line-height: 0; }
@@ -960,7 +968,7 @@ body.product main { background: #f4f7fb; padding: 0; }
 .product-hero .rule, .product-section .rule { margin: 0.85rem auto 1rem; }
 .product-hero .home-lead { margin-bottom: 1.6rem; }
 .code-box {
-  max-width: 34rem;
+  max-width: 40rem;
   margin: 0 auto;
   text-align: left;
   background: #fff;
@@ -998,6 +1006,27 @@ body.product .code-actions .button.secondary {
   font-weight: 700;
 }
 body.product .code-actions .button.secondary:hover { border-color: #1d6fe0; color: #1d6fe0; }
+body.product .code-actions a.product-bring {
+  background: #0b2a5b;
+  color: #fff;
+  border: 0;
+  border-radius: 0.55rem;
+  padding: 0.7rem 1.2rem;
+  font-weight: 700;
+}
+body.product .code-actions a.product-bring:hover { background: #081f44; color: #fff; }
+.product-band { background: #0b2a5b; color: #fff; text-align: center; padding: 2.8rem 0; }
+.product-band h2 { color: #fff; font-size: clamp(2rem, 4vw, 2.7rem); margin: 0; }
+.product-band p { max-width: 38rem; margin: 0.75rem auto 1.25rem; color: #d7e4f5; }
+.product-band .button {
+  background: #1d6fe0;
+  color: #fff;
+  border: 0;
+  border-radius: 0.55rem;
+  padding: 0.7rem 1.2rem;
+  font-weight: 700;
+}
+.product-band .button:hover { background: #185fbf; color: #fff; }
 .contact-panel { max-width: 34rem; margin: 1rem auto 0; text-align: center; }
 .contact-panel > summary {
   display: list-item;
@@ -1118,7 +1147,101 @@ body.product .contact-panel button {
   .product-steps, .why-list, .product-cards { grid-template-columns: 1fr; }
   .code-actions { flex-direction: column; }
   body.product .code-actions button,
-  body.product .code-actions .button.secondary { text-align: center; }
+  body.product .code-actions .button.secondary,
+  body.product .code-actions a.product-bring { text-align: center; }
+  .product-band .button { display: inline-block; }
+}
+body.product .product-pitch { color: #1c3558; }
+body.product .product-pitch h1,
+body.product .product-pitch h2 { color: #0b2a5b; }
+body.product .product-pitch .pitch-jump a:not(.button) { color: #0b2a5b; }
+body.product .product-pitch .pitch-jump a:not(.button):hover { color: #1d6fe0; }
+body.product .product-pitch .kicker { color: #1d6fe0; }
+body.product .product-pitch .button,
+body.product .product-pitch button {
+  background: #1d6fe0;
+  color: #fff;
+  border: 0;
+  border-radius: 0.55rem;
+  font-weight: 700;
+}
+body.product .product-pitch .button:hover,
+body.product .product-pitch button:hover { background: #185fbf; color: #fff; }
+body.product .product-pitch .button.secondary,
+body.product .product-pitch button.secondary {
+  background: #fff;
+  color: #0b2a5b;
+  border: 1px solid #c5d4e4;
+}
+body.product .product-pitch .button.secondary:hover,
+body.product .product-pitch button.secondary:hover { border-color: #1d6fe0; color: #1d6fe0; background: #fff; }
+body.product .product-pitch .home-card h3,
+body.product .product-pitch .pitch-board h3,
+body.product .product-pitch .pitch-price h3,
+body.product .product-pitch .pitch-soon h3 {
+  font-family: var(--sans);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-size: 1.05rem;
+  line-height: 1.25;
+  color: #0b2a5b;
+}
+body.product .product-pitch .pitch-board {
+  background: #f4f7fb;
+  color: #1c3558;
+}
+body.product .product-pitch .pitch-board h2,
+body.product .product-pitch .pitch-board h3 { color: #0b2a5b; }
+body.product .product-pitch .pitch-board .pitch-sub,
+body.product .product-pitch .pitch-board p { color: #4e5c66; }
+body.product .product-pitch .pitch-board-grid article,
+body.product .product-pitch .pitch-price,
+body.product .product-pitch .pitch-soon article,
+body.product .product-pitch .pitch-form,
+body.product .product-pitch details.faq.panel,
+body.product .product-pitch .pitch-table-wrap {
+  background: #fff;
+  border: 0;
+  border-radius: 0.85rem;
+  box-shadow: 0 8px 22px rgba(11, 42, 91, 0.07);
+}
+body.product .product-pitch .pitch-board-grid article,
+body.product .product-pitch .pitch-soon article { padding: 1.5rem 1.15rem 1.35rem; }
+body.product .product-pitch .pitch-board-icon,
+body.product .product-pitch .pitch-soon-icon {
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  margin: 0 0 0.9rem;
+  color: #0b2a5b;
+  background: #d7e8fb;
+}
+body.product .product-pitch .pitch-board-icon svg,
+body.product .product-pitch .pitch-soon-icon svg { width: 2rem; height: 2rem; }
+body.product .product-pitch .pitch-board-grid article:nth-child(2) .pitch-board-icon,
+body.product .product-pitch .pitch-soon article:nth-child(2) .pitch-soon-icon { background: #dff3e4; }
+body.product .product-pitch .pitch-board-grid article:nth-child(3) .pitch-board-icon,
+body.product .product-pitch .pitch-soon article:nth-child(3) .pitch-soon-icon { background: #fde8d4; }
+body.product .product-pitch .pitch-board-grid article:nth-child(4) .pitch-board-icon,
+body.product .product-pitch .pitch-soon article:nth-child(4) .pitch-soon-icon { background: #e8e4f8; }
+body.product .product-pitch .pitch-price.popular { outline: 2px solid #1d6fe0; }
+body.product .product-pitch .pitch-popular { color: #1d6fe0; }
+body.product .product-pitch .pitch-amount { color: #0b2a5b; }
+body.product .product-pitch .pitch-table-wrap { padding: 0.35rem 0.85rem 0.6rem; }
+body.product .product-pitch input,
+body.product .product-pitch textarea {
+  border: 1px solid #d3dfeb;
+  border-radius: 0.55rem;
+  color: #0b2a5b;
+}
+body.product .product-pitch .pitch-shot {
+  border: 0;
+  border-radius: 0.85rem;
+  overflow: hidden;
+  box-shadow: 0 8px 22px rgba(11, 42, 91, 0.07);
 }
 `;
 

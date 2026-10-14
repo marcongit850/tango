@@ -1,5 +1,6 @@
 import { canViewAdmin } from "../lib/access";
 import { findAssociationBySlug, findMembership, unreadCount } from "../db";
+import { isPlatformAdmin, isProductHost } from "../lib/hosts";
 import { DEMO_BANNER, isDemoAssociation, type DemoRole } from "../lib/demo";
 import { esc, htmlResponse, isHttps } from "../lib/html";
 import type { AppBindings, Association, Membership } from "../types";
@@ -928,6 +929,58 @@ body:has(.ask-portal) main { padding-bottom: 5rem; }
 @media (max-width: 560px) {
   .pitch .home-cards, .pitch-board-grid { grid-template-columns: 1fr; }
 }
+body.product { background: #fff; }
+body.product main { background: #fff; padding: 0 0 2.5rem; }
+.product-header, .product-hero, .product-section, .product-footer { background: #fff; }
+.product-header {
+  width: min(1080px, calc(100% - 2rem));
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  align-items: center;
+  padding: 1rem 0 0.5rem;
+}
+.product-logo { display: block; line-height: 0; background: #fff; }
+.product-logo img { display: block; height: 72px; width: auto; max-width: min(100%, 28rem); background: #fff; }
+.product-header nav { display: flex; flex-wrap: wrap; gap: 0.75rem 1.1rem; margin-left: auto; }
+.product-header nav a { color: #1a2744; text-decoration: none; font-weight: 650; }
+.product-hero { padding: 1.5rem 0 2rem; text-align: center; }
+.product-hero h1 { font-size: clamp(2.4rem, 6vw, 3.6rem); color: #1a2744; }
+.product-hero .rule { margin-left: auto; margin-right: auto; }
+.code-box {
+  max-width: 28rem;
+  margin: 0 auto 1.25rem;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #d5e3ea;
+  padding: 1.1rem 1.15rem 1.2rem;
+}
+.code-box h2 { font-size: 1.45rem; margin-bottom: 0.7rem; }
+.product-actions { justify-content: center; }
+.contact-panel { max-width: 28rem; margin: 0.5rem auto 0; text-align: left; }
+.contact-panel > summary { list-style: none; cursor: pointer; }
+.contact-panel > summary::-webkit-details-marker { display: none; }
+.contact-panel > summary::marker { content: ""; }
+.contact-panel form { margin-top: 0.9rem; }
+.product-section { padding: 1.5rem 0 2rem; text-align: center; }
+.product-section h2 { font-size: clamp(2rem, 4vw, 2.6rem); color: #1a2744; }
+.product-section .rule { margin-left: auto; margin-right: auto; }
+.why-list { max-width: 40rem; margin: 0 auto; text-align: left; padding-left: 1.2rem; }
+.why-list li { margin: 0.45rem 0; }
+.product-features { text-align: center; }
+.product .home-card, body.product .home-card { background: #fff; border: 1px solid #e4d9c8; box-shadow: none; }
+.product-footer { color: #5d6c74; padding: 1rem 0 2rem; }
+.product-footer-inner { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; align-items: center; justify-content: space-between; }
+.product-footer a { color: #1a2744; text-decoration: none; }
+.home-signin { padding: 0 0 2.5rem; }
+.home-signin .panel { max-width: 36rem; margin: 0 auto; }
+.platform-row { border-top: 1px solid var(--line); padding-top: 1rem; }
+@media (max-width: 700px) {
+  .product-logo img { height: 52px; }
+  .product-header nav { margin-left: 0; }
+  .product-features, body.product .home-cards { grid-template-columns: 1fr; }
+}
 `;
 
 const HOME_SLUG = "tango-mar";
@@ -996,6 +1049,18 @@ function askPortalWidget(): string {
   </details>`;
 }
 
+function iconLinks(kind: "product" | "tango"): string {
+  if (kind === "product") {
+    return `<link rel="icon" href="/brand/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" type="image/png" sizes="192x192" href="/brand/icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="/brand/icon-512.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/brand/apple-touch-icon.png">`;
+  }
+  return `<link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">`;
+}
+
 function shell(options: {
   title: string;
   brandHref: string;
@@ -1005,7 +1070,28 @@ function shell(options: {
   landing?: boolean;
   marketing?: boolean;
   askPortal?: boolean;
+  product?: boolean;
+  icon?: "product" | "tango";
 }): string {
+  const icons = iconLinks(options.icon ?? "tango");
+  if (options.product) {
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>${esc(options.title)}</title>
+  ${icons}
+  ${FONTS}
+  <style>${STYLES}</style>
+</head>
+<body class="product">
+  <a class="skip" href="#content">Skip to content</a>
+  <main id="content">${options.body}</main>
+</body>
+</html>`;
+  }
   if (options.landing) {
     const topbar = options.account ? `<div class="topbar"><div class="account">${options.account}</div></div>` : "";
     return `<!doctype html>
@@ -1015,9 +1101,7 @@ function shell(options: {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
   <title>${esc(options.title)}</title>
-  <link rel="icon" href="/favicon.ico" sizes="any">
-  <link rel="icon" href="/favicon.png" type="image/png">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  ${icons}
   ${FONTS}
   <style>${STYLES}</style>
 </head>
@@ -1036,9 +1120,7 @@ function shell(options: {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
   <title>${esc(options.title)}</title>
-  <link rel="icon" href="/favicon.ico" sizes="any">
-  <link rel="icon" href="/favicon.png" type="image/png">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  ${icons}
   ${FONTS}
   <style>${STYLES}</style>
 </head>
@@ -1109,11 +1191,14 @@ export async function render(
     status?: number;
     marketing?: boolean;
     portal?: { dashboardHref: string; adminHref: string | null } | null;
+    product?: boolean;
+    landing?: boolean;
+    icon?: "product" | "tango";
   },
 ): Promise<Response> {
   const user = c.get("user");
   const pathAssociation = c.get("association");
-  const onPublicHome = !pathAssociation && options.active === "home";
+  const onPublicHome = options.landing ?? (!pathAssociation && options.active === "home");
   const home = !pathAssociation && user && !onPublicHome ? await lookupHomeMembership(c) : null;
   let association = pathAssociation;
   let membership = c.get("membership");
@@ -1170,24 +1255,34 @@ export async function render(
   const displayName = user ? esc(user.name || user.email) : "";
   const profileHref = resident ? `${base}/profile` : "";
   const nameHtml = profileHref ? `<a class="account-name" href="${esc(profileHref)}">${displayName}</a>` : displayName;
+  const neighborhoods =
+    user && isPlatformAdmin(c.env, user) ? `<a href="/platform/associations">Neighborhoods</a>` : "";
   const account = user
     ? onPublicHome
-      ? landingAccount(user.name || user.email, options.portal ?? null)
+      ? `${landingAccount(user.name || user.email, options.portal ?? null)}${neighborhoods}`
       : onDemo
         ? `${adminLink}${nameHtml} <a href="/demo/leave">Leave demo</a>`
-        : `${adminLink}${nameHtml} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`
+        : `${adminLink}${neighborhoods}${nameHtml} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`
     : "";
-  const body = shell({
+  const host = new URL(c.req.url).hostname;
+  const icon =
+    options.icon ??
+    (association?.slug === "tango-mar" ? "tango" : association ? "product" : isProductHost(host) ? "product" : "tango");
+  let html = shell({
     title: options.title,
     brandHref: "/",
-    nav: onPublicHome ? "" : nav,
+    nav: onPublicHome || options.product ? "" : nav,
     account,
-    landing: onPublicHome,
+    landing: onPublicHome && !options.product,
     marketing: options.marketing,
-    askPortal: resident,
+    product: options.product,
+    icon,
+    askPortal: resident && !options.product,
     body: `${banner}${flashHtml}${options.body}`,
   });
-  const response = htmlResponse(body, options.status ?? 200);
+  const publicBase = typeof c.req.header === "function" ? c.req.header("x-hoa-public-base") : null;
+  if (publicBase && association?.slug) html = html.replaceAll(`/a/${association.slug}`, publicBase);
+  const response = htmlResponse(html, options.status ?? 200);
   for (const cookie of c.res.headers.getSetCookie()) response.headers.append("Set-Cookie", cookie);
   if (flash) {
     const secure = isHttps(c.req.url) ? "; Secure" : "";

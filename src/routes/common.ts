@@ -21,7 +21,11 @@ export function requireMember(c: AppContext): { association: Association; user: 
   const membership = c.get("membership");
   if (!user || !membership || membership.status === "inactive") {
     const path = new URL(c.req.url).pathname;
-    throw new RedirectError(`/login?next=${encodeURIComponent(path)}`);
+    const base = c.req.header("x-hoa-public-base");
+    const prefix = `/a/${association.slug}`;
+    const next = base && (path === prefix || path.startsWith(`${prefix}/`)) ? `${base}${path.slice(prefix.length)}` || base : path;
+    const login = base ? `${base}/login` : "/login";
+    throw new RedirectError(`${login}?next=${encodeURIComponent(next || base || "/")}`);
   }
   return { association, user, membership };
 }

@@ -28,6 +28,10 @@ export type Association = {
   postal_code: string;
   county: string;
   timezone: string;
+  /** Digits owners type on the product home page. Empty until the migration is applied. */
+  neighborhood_code?: string;
+  /** Public address, such as tangomar. Empty until the migration is applied. */
+  vanity_slug?: string;
 };
 
 export type User = {

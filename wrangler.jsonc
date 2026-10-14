@@ -20,8 +20,18 @@
   // EMAIL_FROM must be a sender Resend will accept. mytangomar.com must be verified in Resend Domains.
   "vars": {
     "APP_ENV": "production",
-    "EMAIL_FROM": "Tang-O-Mar <donotreply@mytangomar.com>"
+    "EMAIL_FROM": "Tang-O-Mar <donotreply@mytangomar.com>",
+    // Keep this 0 until myhoadashboard.com answers and old links are checked.
+    // Set it to 1 to 301 mytangomar.com and www.mytangomar.com onto /tangomar.
+    "LEGACY_HOST_REDIRECT": "0",
+    "PLATFORM_ADMIN_EMAILS": "marc@whpinc.com"
   },
+  // Custom domains for the product host. The zone must already be in this account.
+  // Deploy creates the DNS records. mytangomar.com stays attached in the dashboard.
+  "routes": [
+    { "pattern": "myhoadashboard.com", "custom_domain": true },
+    { "pattern": "www.myhoadashboard.com", "custom_domain": true }
+  ],
   // Daily assessment invoices. 06:15 UTC is 12:15 AM Central Standard Time and 1:15 AM Central Daylight Time,
   // so the open date has started in America/Chicago. The next run also catches a missed day.
   // Deploy replaces dashboard cron triggers with this list. Confirm it under Settings, Triggers.

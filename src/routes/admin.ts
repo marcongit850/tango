@@ -93,6 +93,7 @@ import {
   type OwnerNoticeKind,
   type ResendAttachment,
 } from "../lib/email";
+import { associationCanonicalBase, canonicalPortalUrl } from "../lib/hosts";
 import { approvalSummary, approveJoinRequest, welcomeEmail } from "../lib/join-approve";
 import { applyDocumentResponseHeaders, contentTypeForUpload, deleteStoredFiles, MAX_CSV_BYTES, MAX_DOCUMENT_BYTES, noticeFileProblem, safeFilename } from "../lib/files";
 import { ensureHomeownerAccount, isValidEmail, linkLotOwner, unlinkLotOwner } from "../lib/homeowner-account";
@@ -2256,7 +2257,13 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       return redirectTo(c, back, message, "warn");
     }
 
-    const letter = welcomeEmail({ associationName: association.name, email: result.email, name: result.name });
+    const letter = welcomeEmail({
+      associationName: association.name,
+      email: result.email,
+      name: result.name,
+      loginUrl: canonicalPortalUrl(association, "/login"),
+      homeUrl: canonicalPortalUrl(association, "/"),
+    });
     const apiKey = resendApiKey(c.env);
     let emailSent = false;
     if (apiKey) {
@@ -2609,6 +2616,7 @@ async function maybeEmailOneOwner(
       title: input.title,
       summary: input.summary,
       attachmentName: input.attachment?.filename,
+      canonicalBase: associationCanonicalBase(input.association) ?? undefined,
     });
     const delivery = await deliverOwnerEmails({
       apiKey: resendApiKey(c.env),
@@ -2664,6 +2672,7 @@ async function maybeEmailOwners(
       title: input.title,
       summary: input.summary,
       itemId: input.itemId,
+      canonicalBase: associationCanonicalBase(input.association) ?? undefined,
     });
     const delivery = await deliverOwnerEmails({
       apiKey: resendApiKey(c.env),

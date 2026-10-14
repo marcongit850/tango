@@ -107,11 +107,13 @@ export function ownerNoticeEmail(input: {
   summary: string;
   itemId?: string;
   attachmentName?: string;
+  /** https://myhoadashboard.com/<vanity> when the association has a public address. */
+  canonicalBase?: string;
 }): { subject: string; text: string; href: string } {
   const associationName = oneLine(input.associationName) || "The association";
   const title = oneLine(input.title) || "Update";
   const summary = briefPlain(input.summary);
-  const href = ownerNoticeHref(input.slug, input.kind, input.itemId);
+  const href = ownerNoticeHref(input.slug, input.kind, input.itemId, input.canonicalBase);
   const intro =
     input.kind === "announcement"
       ? `${associationName} posted an announcement.`
@@ -131,11 +133,11 @@ export function ownerNoticeEmail(input: {
   return { subject: `${associationName}: ${title}`, text: lines.join("\n"), href };
 }
 
-function ownerNoticeHref(slug: string, kind: OwnerNoticeKind, itemId?: string): string {
-  if (kind === "announcement" && itemId) return `${PORTAL_ORIGIN}/a/${slug}/news/${itemId}`;
-  if (kind === "event") return `${PORTAL_ORIGIN}/a/${slug}/calendar`;
-  if (kind === "account") return `${PORTAL_ORIGIN}/a/${slug}/notices`;
-  return `${PORTAL_ORIGIN}/a/${slug}/documents`;
+function ownerNoticeHref(slug: string, kind: OwnerNoticeKind, itemId?: string, canonicalBase?: string): string {
+  const tail =
+    kind === "announcement" && itemId ? `/news/${itemId}` : kind === "event" ? "/calendar" : kind === "account" ? "/notices" : "/documents";
+  if (canonicalBase) return `${canonicalBase}${tail}`;
+  return `${PORTAL_ORIGIN}/a/${slug}${tail}`;
 }
 
 /** Turns an uploaded notice file into a Resend attachment. Empty or disallowed files are skipped. */

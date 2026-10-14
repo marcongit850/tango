@@ -55,6 +55,13 @@ function whyItem(title: string, text: string, name: keyof typeof ICONS, tone: (t
     </li>`;
 }
 
+function faqItem(question: string, answer: string): string {
+  return `<details class="product-faq-item">
+      <summary>${question}</summary>
+      <div class="product-faq-answer">${answer}</div>
+    </details>`;
+}
+
 function step(n: string, title: string, text: string, tone: (typeof TONES)[number]): string {
   return `<li>
       <span class="product-step product-icon-${tone}">${n}</span>
@@ -143,6 +150,7 @@ export function productPage(state: ProductPageState = {}): string {
           <a href="#why">Why use us</a>
           <a href="#how">How it works</a>
           <a href="#features">Features</a>
+          <a href="#faq">FAQ</a>
           <a href="/demo">See the demo</a>
           <a class="product-nav-cta" href="/bring-this-to-your-hoa">Bring this to your HOA</a>
         </nav>
@@ -200,6 +208,42 @@ export function productPage(state: ProductPageState = {}): string {
         <span class="rule" aria-hidden="true"></span>
         <p class="home-lead">These are the tools in the portal today.</p>
         <div class="product-cards">${features}</div>
+      </div>
+    </section>
+    <section id="faq" class="product-section" aria-labelledby="faq-title">
+      <div class="wrap">
+        <h2 id="faq-title">FAQ</h2>
+        <span class="rule" aria-hidden="true"></span>
+        <div class="product-faq">
+          ${faqItem(
+            "How do owners sign in?",
+            "<p>Owners enter the email on their association account. The site sends a one-time link. Open that link to sign in. There is no password.</p>",
+          )}
+          ${faqItem(
+            "What is the neighborhood code?",
+            "<p>It is a code of 3 to 12 digits from your association. Enter it on this page to open that neighborhood's portal.</p>",
+          )}
+          ${faqItem(
+            "How are dues paid?",
+            "<p>The board records checks, cash, and ACH payments against invoices. Owners can see balances, invoices, and those recorded payments. The portal does not charge a card. Card numbers are not stored. Bank account numbers are not stored.</p>",
+          )}
+          ${faqItem(
+            "Does each HOA keep its own records?",
+            "<p>Yes. Each association's roster, ledger, and files stay with that association.</p>",
+          )}
+          ${faqItem(
+            "Is there a demo?",
+            '<p>Yes. The demo is read only and uses sample data. <a href="/demo">See the demo</a> before you take the portal to your board.</p>',
+          )}
+          ${faqItem(
+            "How do I bring this to my HOA?",
+            '<p>Open <a href="/bring-this-to-your-hoa">Bring this to your HOA</a>. That page shows pricing, a sample dashboard, and a form to request a demo.</p>',
+          )}
+          ${faqItem(
+            "How does electronic notice consent work?",
+            "<p>Owners choose announcement email and can agree to electronic notice. Each choice is saved in a consent log with the time and the login.</p>",
+          )}
+        </div>
       </div>
     </section>
     <section class="product-band" aria-labelledby="bring-title">

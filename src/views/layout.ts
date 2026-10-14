@@ -1015,6 +1015,48 @@ body.product .code-actions a.product-bring {
   font-weight: 700;
 }
 body.product .code-actions a.product-bring:hover { background: #081f44; color: #fff; }
+.product-faq { max-width: 44rem; margin: 0 auto; display: grid; gap: 0.75rem; text-align: left; }
+.product-faq details {
+  background: #fff;
+  border-radius: 0.85rem;
+  box-shadow: 0 8px 22px rgba(11, 42, 91, 0.07);
+}
+.product-faq summary {
+  display: list-item;
+  list-style: none;
+  cursor: pointer;
+  position: relative;
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 1.05rem;
+  line-height: 1.35;
+  color: #0b2a5b;
+  padding: 1.05rem 2.5rem 1.05rem 1.15rem;
+}
+.product-faq summary::-webkit-details-marker { display: none; }
+.product-faq summary::marker { content: ""; }
+.product-faq summary::after {
+  content: "";
+  position: absolute;
+  right: 1.2rem;
+  top: 1.35rem;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid #1d6fe0;
+  border-bottom: 2px solid #1d6fe0;
+  transform: rotate(45deg);
+}
+.product-faq details[open] summary::after { transform: rotate(-135deg); top: 1.5rem; }
+.product-faq summary:focus-visible { outline: 2px solid #1d6fe0; outline-offset: 3px; }
+.product-faq-answer { padding: 0 1.15rem 1.1rem; color: #4e5c66; }
+.product-faq-answer p { margin: 0; }
+.product-faq-answer a {
+  color: #0b2a5b;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+.product-faq-answer a:hover { color: #1d6fe0; }
 .product-band { background: #0b2a5b; color: #fff; text-align: center; padding: 2.8rem 0; }
 .product-band h2 { color: #fff; font-size: clamp(2rem, 4vw, 2.7rem); margin: 0; }
 .product-band p { max-width: 38rem; margin: 0.75rem auto 1.25rem; color: #d7e4f5; }

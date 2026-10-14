@@ -107,6 +107,10 @@ describe("MyHOADashboard host", () => {
     expect(html).toContain("How it works");
     expect(html).toContain('href="/bring-this-to-your-hoa">Bring this to your HOA</a>');
     expect(html).toContain('class="product-band"');
+    expect(html).toContain('href="#faq">FAQ</a>');
+    expect(html).toContain("How do owners sign in?");
+    expect(html).toContain("How are dues paid?");
+    expect(html).toContain("How does electronic notice consent work?");
     expect(html).toContain("Enter code");
     expect(html).toContain("Manage your HOA");
     expect(html).toContain("Owner portal");

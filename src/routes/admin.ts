@@ -98,6 +98,7 @@ import { applyDocumentResponseHeaders, contentTypeForUpload, deleteStoredFiles, 
 import { ensureHomeownerAccount, isValidEmail, linkLotOwner, unlinkLotOwner } from "../lib/homeowner-account";
 import { importOwners } from "../lib/import-owners";
 import { csvText, formatDollarsPlain, formatMoney, parseMoneyToCents } from "../lib/money";
+import { demoFileResponse, isDemoAssociation } from "../lib/demo";
 import { ensureSeedFiles } from "../lib/seed-files";
 import { isCheckConstraint, isMissingColumn, isMissingTable, NotFoundError } from "../lib/errors";
 import { logError, logInfo } from "../lib/log";
@@ -1614,7 +1615,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
 
   app.get("/a/:slug/admin/documents", async (c) => {
     const { association, membership } = requireStaff(c);
-    await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
+    if (!isDemoAssociation(association)) await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
     const documents = await listDocuments(c.env.DB, association.id, true);
     return render(c, { title: "Documents", active: "admin", body: documentsAdminPage(association, documents, canEditAdmin(membership)) });
   });
@@ -1672,7 +1673,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
 
   app.get("/a/:slug/admin/documents/:documentId", async (c) => {
     const { association, membership } = requireStaff(c);
-    await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
+    if (!isDemoAssociation(association)) await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
     const document = await loadDocument(c, association.id, c.req.param("documentId"));
     const versions = await documentVersions(c.env.DB, association.id, document.id);
     return render(c, { title: document.title, active: "admin", body: documentDetailPage(association, document, versions, canEditAdmin(membership)) });
@@ -1826,6 +1827,11 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const document = await loadDocument(c, association.id, c.req.param("documentId"));
     const version = await versionById(c.env.DB, association.id, c.req.param("versionId"));
     if (!version || version.document_id !== document.id) throw new NotFoundError();
+    if (isDemoAssociation(association)) {
+      const response = demoFileResponse(version.r2_key, c.req.query("download") === "1");
+      if (!response) throw new NotFoundError();
+      return response;
+    }
     await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
     const object = await c.env.DOCUMENTS.get(version.r2_key);
     if (!object) throw new NotFoundError();

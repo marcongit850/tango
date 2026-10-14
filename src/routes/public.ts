@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { deleteCookie, setCookie } from "hono/cookie";
 import {
   findAssociationBySlug,
   findMembership,
@@ -11,6 +12,8 @@ import {
   writeAudit,
 } from "../db";
 import { canViewAdmin, safeNextPath } from "../lib/access";
+import { DEMO_ASSOCIATION_ID, DEMO_COOKIE, DEMO_SLUG, isDemoAssociation, type DemoRole } from "../lib/demo";
+import { isHttps } from "../lib/html";
 import {
   DEMO_INBOX,
   allowDemoRequest,
@@ -63,7 +66,38 @@ async function portalForUser(c: AppContext): Promise<HomePortal | null> {
   };
 }
 
+function setDemoCookie(c: AppContext, role: DemoRole): void {
+  setCookie(c, DEMO_COOKIE, role, {
+    path: "/",
+    httpOnly: true,
+    sameSite: "Lax",
+    secure: isHttps(c.req.url),
+    maxAge: 60 * 60 * 24 * 14,
+  });
+}
+
+async function enterDemo(c: AppContext, role: DemoRole): Promise<Response> {
+  const association = await findAssociationBySlug(c.env.DB, DEMO_SLUG);
+  if (!association || association.id !== DEMO_ASSOCIATION_ID) {
+    return render(c, {
+      title: "Demo",
+      body: `<section class="panel"><h1>Demo is not ready</h1><p>Apply the D1 migrations, then reload.</p></section>`,
+    });
+  }
+  setDemoCookie(c, role);
+  const destination = role === "admin" ? `/a/${DEMO_SLUG}/admin` : `/a/${DEMO_SLUG}/dashboard`;
+  return c.redirect(destination, 303);
+}
+
 export function registerPublicRoutes(app: Hono<AppBindings>): void {
+  app.get("/demo", (c) => enterDemo(c, "owner"));
+  app.get("/demo/owner", (c) => enterDemo(c, "owner"));
+  app.get("/demo/admin", (c) => enterDemo(c, "admin"));
+  app.get("/demo/leave", (c) => {
+    deleteCookie(c, DEMO_COOKIE, { path: "/" });
+    return c.redirect("/", 303);
+  });
+
   app.get("/", async (c) => {
     const portal = await portalForUser(c);
     return render(c, { title: "Tang-O-Mar", active: "home", body: homePage(showDemo(c), portal), portal });
@@ -279,7 +313,8 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/a/:slug", (c) => {
-    requireAssociation(c);
+    const association = requireAssociation(c);
+    if (isDemoAssociation(association)) return c.redirect(`/a/${association.slug}/dashboard`, 302);
     return c.redirect("/", 302);
   });
 

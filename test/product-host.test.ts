@@ -104,6 +104,9 @@ describe("MyHOADashboard host", () => {
     expect(html).toContain('href="/brand/icon-192.png"');
     expect(html).toContain('href="/brand/icon-512.png"');
     expect(html).toContain("Why use us");
+    expect(html).toContain("How it works");
+    expect(html).toContain("Enter code");
+    expect(html).toContain("Manage your HOA");
     expect(html).toContain("Owner portal");
     expect(html).toContain("Estoppel requests");
     expect(html).toContain("Card numbers are not stored");

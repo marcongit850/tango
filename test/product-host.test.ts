@@ -121,6 +121,13 @@ describe("MyHOADashboard host", () => {
     expect(html).not.toMatch(/\u2013|\u2014/);
     expect(html).not.toMatch(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/);
     expect(html).not.toMatch(/background-image/i);
+    const footer = html.slice(html.indexOf('<footer class="product-footer">'));
+    expect(footer).not.toContain(">MyHOADashboard</a>");
+    expect(footer).toContain('href="/demo">See the demo</a>');
+    expect(footer).toContain('href="/bring-this-to-your-hoa">Bring this to your HOA</a>');
+    expect(footer).toContain('href="#contact">Contact</a>');
+    expect(footer).toContain('href="/privacy">Privacy Policy</a>');
+    expect(footer).toContain('href="/terms">Terms of Use</a>');
 
     const legacy = await app.request("https://mytangomar.com/", {}, env);
     expect(legacy.status).toBe(200);
@@ -142,6 +149,9 @@ describe("MyHOADashboard host", () => {
     expect(bringHtml).toContain("$99/month");
     expect(bringHtml).not.toContain("you're viewing now");
     expect(bringHtml).not.toContain("tango-mar-logo");
+    const bringFooter = bringHtml.slice(bringHtml.indexOf('<footer class="product-footer">'));
+    expect(bringFooter).not.toContain(">MyHOADashboard</a>");
+    expect(bringFooter).toContain('href="/demo">See the demo</a>');
     expect(bringHtml).not.toMatch(/\u2013|\u2014/);
   });
 

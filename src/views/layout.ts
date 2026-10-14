@@ -1173,7 +1173,8 @@ body.product .contact-panel button {
 }
 .product-card a:hover { color: #1d6fe0; }
 .product-footer { background: #fff; color: #5d6c74; padding: 1.15rem 0 1.4rem; border-top: 1px solid #e6eef6; }
-.product-footer-inner { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; align-items: center; justify-content: space-between; }
+.product-footer-inner { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; align-items: center; justify-content: center; }
+.product-footer nav { justify-content: center; }
 .product-footer a { color: #0b2a5b; text-decoration: none; font-weight: 650; }
 .product-footer a:hover { color: #1d6fe0; }
 .home-signin { padding: 0 0 2.5rem; }

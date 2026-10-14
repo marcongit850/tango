@@ -255,7 +255,6 @@ export function productPage(state: ProductPageState = {}): string {
     </section>
     <footer class="product-footer">
       <div class="wrap product-footer-inner">
-        <a href="/">MyHOADashboard</a>
         <nav aria-label="Footer">
           <a href="/demo">See the demo</a>
           <a href="/bring-this-to-your-hoa">Bring this to your HOA</a>
@@ -281,7 +280,6 @@ export function productPitchChrome(body: string): string {
     <div class="pitch product-pitch">${body}</div>
     <footer class="product-footer">
       <div class="wrap product-footer-inner">
-        <a href="/">MyHOADashboard</a>
         <nav aria-label="Footer">
           <a href="/">Home</a>
           <a href="/demo">See the demo</a>

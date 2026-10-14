@@ -425,6 +425,32 @@ Until this file runs, My profile still saves a name, phone, mailing address, and
 
 Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0013` is already on the remote database.
 
+## Public read-only demo (paste this before merge)
+
+`migrations/0016_seed_seaside_demo.sql` adds the fictional Seaside Demo HOA used by Try the demo on the public home page. Paste it in the Cloudflare dashboard before you merge the pull request. Marc does not need a terminal. Deploy does not apply it.
+
+What it does:
+
+- Inserts one association, slug `seaside-demo`, plus sample owners, lots, dues, documents, announcements, notices, and a join request.
+- Does not read or update Tang-O-Mar rows.
+- Safe to paste again. An id that already exists is skipped.
+
+Dashboard steps:
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database**.
+2. Select the database named **tango**.
+3. Open **Console**.
+4. Paste the full contents of `migrations/0016_seed_seaside_demo.sql`.
+5. Select **Execute**.
+
+Run that file once, after `0015`. If the console says a column does not exist, apply the earlier files first. If it only reports that a row already exists, this file was already applied.
+
+Until this file runs, Try the demo says the demo is not ready. It does not open Tang-O-Mar.
+
+Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0015` is already on the remote database.
+
+The demo is read only. Saves, uploads, payments, invites, and email from those pages are refused with "Demo only, changes are not saved".
+
 ## Second owner on a lot
 
 No D1 migration. Marc does not paste SQL for this change. A lot can already have more than one row in `property_owners`.

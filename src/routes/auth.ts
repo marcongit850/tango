@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { findAssociationBySlug, findMembership, findUserByEmail, findUserById, notifyStaff, recordEmailChangeConsent, writeAudit } from "../db";
 import { shouldRevealMagicLink, safeNextPath } from "../lib/access";
+import { DEMO_ASSOCIATION_ID, isDemoUserId } from "../lib/demo";
 import { formatPlace } from "../lib/dates";
 import { resendApiKey, sendResendEmail } from "../lib/email";
 import { isHttps } from "../lib/html";
@@ -42,9 +43,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>): void {
     }
 
     const user = await findUserByEmail(c.env.DB, email);
-    const membership = user ? await findMembership(c.env.DB, association.id, user.id) : null;
+    const membership = user && !isDemoUserId(user.id) ? await findMembership(c.env.DB, association.id, user.id) : null;
     let devLink: string | null = null;
-    if (user && membership && membership.status !== "inactive") {
+    if (user && !isDemoUserId(user.id) && membership && membership.status !== "inactive") {
       devLink = await issueMagicLink(c, {
         email,
         associationId: association.id,
@@ -83,6 +84,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>): void {
         used_at: string | null;
       }>();
     if (!link || link.used_at || link.expires_at <= now) return renderInvalid(c);
+    if (link.association_id === DEMO_ASSOCIATION_ID) return renderInvalid(c);
 
     const consumed = await c.env.DB
       .prepare("UPDATE magic_links SET used_at = ? WHERE id = ? AND used_at IS NULL")
@@ -91,6 +93,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>): void {
     if ((consumed.meta.changes ?? 0) === 0) return renderInvalid(c);
 
     const emailChangeUserId = parseEmailChangeUserId(link.redirect_path);
+    if (emailChangeUserId && isDemoUserId(emailChangeUserId)) return renderInvalid(c);
     if (emailChangeUserId) {
       const applied = await applyEmailChange(c, { userId: emailChangeUserId, newEmail: link.email, associationId: link.association_id });
       if (!applied) return renderInvalid(c);
@@ -100,7 +103,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>): void {
     }
 
     const user = await findUserByEmail(c.env.DB, link.email);
-    if (!user) return renderInvalid(c);
+    if (!user || isDemoUserId(user.id)) return renderInvalid(c);
     await c.env.DB.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").bind(now, user.id).run();
 
     let destination = "/";

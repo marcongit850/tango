@@ -52,6 +52,8 @@ export type AppVariables = {
   membership: Membership | null;
   flash: string | null;
   flashTone: "ok" | "warn";
+  /** Set only while the request is inside the public read-only demo association. */
+  demoRole: "owner" | "admin" | null;
 };
 
 export type AppBindings = {

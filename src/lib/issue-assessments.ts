@@ -1,5 +1,6 @@
 import { issueOpenAssessmentInvoices, listAssociations, writeAudit } from "../db";
 import { todayIso } from "./dates";
+import { isDemoAssociationId } from "./demo";
 import { assessmentDisplayName } from "./dues";
 import { logError, logInfo } from "./log";
 
@@ -9,6 +10,7 @@ export async function runDueAssessmentInvoices(db: D1Database, now: Date): Promi
   let created = 0;
   const failures: string[] = [];
   for (const association of associations) {
+    if (isDemoAssociationId(association.id)) continue;
     try {
       const today = todayIso(association.timezone, now);
       const issued = await issueOpenAssessmentInvoices(db, { associationId: association.id, today });

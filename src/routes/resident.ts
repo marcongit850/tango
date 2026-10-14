@@ -5,6 +5,7 @@ import { timeZoneLabel, todayIso } from "../lib/dates";
 import { ForbiddenError, isMissingColumn, isMissingTable, NotFoundError } from "../lib/errors";
 import { logInfo } from "../lib/log";
 import { isValidEmail, normalizeEmail } from "../lib/homeowner-account";
+import { demoFileResponse, isDemoAssociation } from "../lib/demo";
 import { ensureSeedFiles } from "../lib/seed-files";
 import { sha256Hex } from "../lib/tokens";
 import { issueEmailChangeLink } from "./auth";
@@ -507,7 +508,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
 
   app.get("/a/:slug/documents", async (c) => {
     const { association, membership } = requireMember(c);
-    await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
+    if (!isDemoAssociation(association)) await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
     const documents = await listDocuments(c.env.DB, association.id, canViewAdmin(membership));
     return render(c, { title: "Documents", active: "documents", body: documentsPage(association, documents) });
   });
@@ -922,6 +923,11 @@ async function streamCurrent(c: AppContext, association: Association, membership
   if (document.visibility === "board" && !canViewAdmin(membership)) throw new ForbiddenError();
   const version = await versionById(c.env.DB, association.id, document.current_version_id);
   if (!version || version.document_id !== document.id) throw new NotFoundError();
+  if (isDemoAssociation(association)) {
+    const response = demoFileResponse(version.r2_key, c.req.query("download") === "1");
+    if (!response) throw new NotFoundError();
+    return response;
+  }
   await ensureSeedFiles(c.env.DOCUMENTS, c.env.DB);
   const object = await c.env.DOCUMENTS.get(version.r2_key);
   if (!object) throw new NotFoundError();

@@ -1,5 +1,6 @@
 import { canViewAdmin } from "../lib/access";
 import { findAssociationBySlug, findMembership, unreadCount } from "../db";
+import { DEMO_BANNER, isDemoAssociation, type DemoRole } from "../lib/demo";
 import { esc, htmlResponse, isHttps } from "../lib/html";
 import type { AppBindings, Association, Membership } from "../types";
 import type { Context } from "hono";
@@ -534,6 +535,24 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
 .shore .place { margin: 0 0 0.4rem; font-size: 1rem; }
 .shore .blurb { max-width: 34rem; margin: 0 auto 0.85rem; font-size: 0.98rem; }
 .shore .actions { justify-content: center; }
+.shore .home-try { margin: 0.55rem 0 0; font-size: 0.82rem; }
+.shore .home-try a { color: #1c3558; font-weight: 600; }
+.demo-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.9rem;
+  background: #fff4e5;
+  color: var(--warn);
+  border: 1px solid #efd7b0;
+}
+.demo-banner p { margin: 0; }
+.demo-switch { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.demo-switch a { color: var(--gulf-dark); text-decoration: none; }
+.demo-switch a.active { font-weight: 700; box-shadow: inset 0 -2px 0 var(--gulf); }
 .shore .button {
   background: #1c3558;
   color: white;
@@ -1060,6 +1079,16 @@ export function loggedOutNav(active?: string): { id: string; href: string; label
   return items;
 }
 
+function demoBanner(role: DemoRole): string {
+  return `<div class="demo-banner" role="status">
+      <p>${esc(DEMO_BANNER)}</p>
+      <p class="demo-switch">
+        <a class="${role === "owner" ? "active" : ""}" href="/demo/owner">View as Owner</a>
+        <a class="${role === "admin" ? "active" : ""}" href="/demo/admin">View as Board admin</a>
+      </p>
+    </div>`;
+}
+
 export function landingAccount(name: string, portal: { dashboardHref: string; adminHref: string | null } | null): string {
   const enter = portal
     ? `<a class="button" href="${esc(portal.dashboardHref)}">Open dashboard</a>${
@@ -1130,6 +1159,10 @@ export async function render(
   const flash = c.get("flash");
   const tone = c.get("flashTone");
   const flashHtml = flash ? `<div class="flash ${tone === "warn" ? "warn" : ""}">${esc(flash)}</div>` : "";
+  const rawDemoRole = c.get("demoRole");
+  const demoRole: DemoRole | null = rawDemoRole === "admin" || rawDemoRole === "owner" ? rawDemoRole : null;
+  const onDemo = isDemoAssociation(association);
+  const banner = onDemo ? demoBanner(demoRole ?? "owner") : "";
   const adminLink =
     resident && canViewAdmin(membership)
       ? `<a class="account-admin${options.active === "admin" ? " active" : ""}" href="${esc(`${base}/admin`)}">Admin</a>`
@@ -1140,7 +1173,9 @@ export async function render(
   const account = user
     ? onPublicHome
       ? landingAccount(user.name || user.email, options.portal ?? null)
-      : `${adminLink}${nameHtml} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`
+      : onDemo
+        ? `${adminLink}${nameHtml} <a href="/demo/leave">Leave demo</a>`
+        : `${adminLink}${nameHtml} <form method="post" action="/logout"><button class="linkish" type="submit">Log out</button></form>`
     : "";
   const body = shell({
     title: options.title,
@@ -1150,7 +1185,7 @@ export async function render(
     landing: onPublicHome,
     marketing: options.marketing,
     askPortal: resident,
-    body: `${flashHtml}${options.body}`,
+    body: `${banner}${flashHtml}${options.body}`,
   });
   const response = htmlResponse(body, options.status ?? 200);
   for (const cookie of c.res.headers.getSetCookie()) response.headers.append("Set-Cookie", cookie);

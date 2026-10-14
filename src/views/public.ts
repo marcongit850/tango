@@ -117,6 +117,7 @@ export function homePage(showDemo: boolean, portal: HomePortal | null = null): s
             <a class="button secondary" href="/join">Request access</a>`
             }
           </p>
+          <p class="home-try"><a href="/demo">Try the demo</a></p>
         </div>
         <figure class="shore-video">
           <video controls playsinline preload="metadata" poster="/welcome-intro-poster.jpg" width="1080" height="1920" title="Welcome to the Tang-O-Mar owner portal" aria-label="Welcome to the Tang-O-Mar owner portal">

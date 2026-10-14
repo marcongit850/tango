@@ -21,9 +21,9 @@
   "vars": {
     "APP_ENV": "production",
     "EMAIL_FROM": "Tang-O-Mar <donotreply@mytangomar.com>",
-    // Keep this 0 until myhoadashboard.com answers and old links are checked.
-    // Set it to 1 to 301 mytangomar.com and www.mytangomar.com onto /tangomar.
-    "LEGACY_HOST_REDIRECT": "0",
+    // 301 mytangomar.com and www.mytangomar.com onto https://myhoadashboard.com/tangomar.
+    // The path and query are kept. Both mytangomar hosts stay in routes below.
+    "LEGACY_HOST_REDIRECT": "1",
     "PLATFORM_ADMIN_EMAILS": "marc@whpinc.com"
   },
   // Custom domains. Deploy replaces this list, so every hostname for this Worker stays here.

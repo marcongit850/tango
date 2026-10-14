@@ -219,12 +219,12 @@ describe("support access", () => {
 
       const login = await app.request("http://localhost/login", {}, env);
       const loggedOutLogin = await login.text();
-      expect(loggedOutLogin).toContain(siteFooter());
+      expect(loggedOutLogin).toContain(siteFooter("/a/tango-mar"));
       expect(loggedOutLogin).not.toContain(">Support</a>");
 
       const residentLogin = await app.request("http://localhost/login", { headers: { Cookie: `tango_session=${token}` } }, env);
       const loginHtml = await residentLogin.text();
-      expect(loginHtml).toContain(siteFooter());
+      expect(loginHtml).toContain(siteFooter("/a/tango-mar"));
       expect(loginHtml).not.toContain(">Support</a>");
 
       const homeowner = await app.request("http://localhost/a/tango-mar/admin/support", { headers: { Cookie: `tango_session=${token}` } }, env);
@@ -237,7 +237,7 @@ describe("support access", () => {
       const html = await page.text();
       const footer = html.slice(html.indexOf("<footer"));
       const nav = html.slice(html.indexOf("<nav>"), html.indexOf("</nav>"));
-      expect(footer).toContain(siteFooter());
+      expect(footer).toContain(siteFooter("/a/tango-mar"));
       expect(footer).not.toContain(">Support</a>");
       expect(nav).not.toContain("Support");
       expect(html).toContain('href="/a/tango-mar/admin/support">Support</a>');
@@ -249,7 +249,7 @@ describe("support access", () => {
         expect(legal.status).toBe(200);
         const legalHtml = await legal.text();
         const legalFooter = legalHtml.slice(legalHtml.indexOf("<footer"));
-        expect(legalFooter).toContain(siteFooter());
+        expect(legalFooter).toContain(siteFooter("/a/tango-mar"));
         expect(legalHtml).toContain(path === "/privacy" ? "<h1>Privacy Policy</h1>" : "<h1>Terms of Use</h1>");
       }
       expect(html).toContain("Jordan Lee");

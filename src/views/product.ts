@@ -22,22 +22,21 @@ function feature(
 
 function contactForm(state: ProductPageState): string {
   const values = state.contactValues ?? { name: "", email: "", neighborhood: "", message: "" };
-  const open = state.contactOpen || state.contactError ? " open" : "";
+  const open = state.contactOpen || state.contactError || state.contactSent ? " open" : "";
   const error = state.contactError ? `<p class="flash warn">${esc(state.contactError)}</p>` : "";
   const sent = state.contactSent ? `<p class="flash">Your message was sent.</p>` : "";
-  return `<details class="contact-panel" id="contact"${open}>
-      <summary class="button secondary">Contact</summary>
-      <form class="fields" method="post" action="/contact">
-        ${sent}
-        ${error}
-        <label class="hp">Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
-        <label>Name<input type="text" name="name" autocomplete="name" maxlength="120" required value="${esc(values.name)}"></label>
-        <label>Email<input type="email" name="email" autocomplete="email" maxlength="200" required value="${esc(values.email)}"></label>
-        <label>Association, optional<input type="text" name="neighborhood" maxlength="160" value="${esc(values.neighborhood)}"></label>
-        <label>Message<textarea name="message" maxlength="2000" required>${esc(values.message)}</textarea></label>
-        <button type="submit">Send message</button>
-      </form>
-    </details>`;
+  return `<p class="actions product-actions"><a class="button secondary" href="#contact">Contact</a></p>
+    <form id="contact" class="fields contact-form${open}" method="post" action="/contact">
+      <h2>Contact</h2>
+      ${sent}
+      ${error}
+      <label class="hp">Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+      <label>Name<input type="text" name="name" autocomplete="name" maxlength="120" required value="${esc(values.name)}"></label>
+      <label>Email<input type="email" name="email" autocomplete="email" maxlength="200" required value="${esc(values.email)}"></label>
+      <label>Association, optional<input type="text" name="neighborhood" maxlength="160" value="${esc(values.neighborhood)}"></label>
+      <label>Message<textarea name="message" maxlength="2000" required>${esc(values.message)}</textarea></label>
+      <button type="submit">Send message</button>
+    </form>`;
 }
 
 export function productPage(state: ProductPageState = {}): string {

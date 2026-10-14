@@ -12,15 +12,15 @@ The Tango Mar POA owner portal. Owners sign in with an email magic link to see b
 - Cloudflare account: `f1c59948520f1ec39473238b621c7e24`
 - Product host: `myhoadashboard.com` and `www.myhoadashboard.com`. `/` is the MyHOADashboard marketing page. A neighborhood code sends the browser to `/<vanity_slug>`, which is that association's public landing and login.
 - Tang-O-Mar public address: `/tangomar` (vanity slug). The older path `/a/tango-mar/...` still works. Login, dashboard, documents, and the other association routes under `/tangomar/...` use those same handlers.
-- Legacy host: `mytangomar.com` and `www.mytangomar.com`. While `LEGACY_HOST_REDIRECT` is `0` (the default), this host keeps serving Tang-O-Mar as it does today. Set the var to `1` only after the product host is checked. Then each request 301s to the matching `https://myhoadashboard.com/tangomar...` URL and keeps the path and query (magic links, email confirm links, and document links).
+- Legacy host: `mytangomar.com` and `www.mytangomar.com`. `LEGACY_HOST_REDIRECT` is `1`, so each request 301s to the matching `https://myhoadashboard.com/tangomar...` URL and keeps the path and query (magic links, email confirm links, and document links).
 - Custom domains in `wrangler.jsonc` (all four must stay in that file): `myhoadashboard.com`, `www.myhoadashboard.com`, `mytangomar.com`, and `www.mytangomar.com`. Deploy replaces the Worker route list, so a domain attached only in the dashboard is removed.
 - Zone settings on mytangomar.com: Always Use HTTPS on, minimum TLS 1.2, SSL mode Full, HSTS max age 15552000 (no subdomains, no preload).
 
 ## MyHOADashboard
 
-- Marketing page on the product host only. Localhost and mytangomar.com still open the Tang-O-Mar home at `/`.
+- Marketing page on the product host only. Localhost still opens the Tang-O-Mar home at `/`. `mytangomar.com` redirects to `/tangomar`.
 - Neighborhood code form posts to `/neighborhood`. Tang-O-Mar's code is `850`. The demo code is `100`. A bad code shows an error. Eight lookups per IP in ten minutes, kept in Worker memory.
-- Contact button opens a form. The inbox address is not shown on the page.
+- Contact opens the form on the page. The Contact control and the footer Contact link both use `#contact`. The inbox address is not shown on the page. Sending uses the `RESEND_API_KEY` secret.
 - Product favicon and apple touch icon live in `public/brand/`. Tang-O-Mar pages keep `public/favicon.ico`, `public/favicon.png`, and `public/apple-touch-icon.png`. Other associations use the product icons.
 - Session cookie `tango_session` is host-only (`Path=/`, `HttpOnly`, `SameSite=Lax`, `Secure` on HTTPS). It is not pinned to mytangomar.com, so a sign-in on myhoadashboard.com works for `/tangomar` and `/a/tango-mar` on that host.
 - Email links use the association canonical base once `vanity_slug` is set: `https://myhoadashboard.com/tangomar/...`. Until the migration is applied, Tang-O-Mar links stay on `https://mytangomar.com`. Localhost still prints a localhost link when email is not sent.
@@ -32,10 +32,9 @@ Do these in the dashboard or on deploy. Deploy does not apply D1 migrations.
 
 1. Confirm the zone `myhoadashboard.com` is on account `f1c59948520f1ec39473238b621c7e24` (the same account as Worker `tango`).
 2. Deploy (`npx wrangler deploy`) so the custom domains in `wrangler.jsonc` attach. Wrangler creates proxied DNS for the apex and `www`. SSL is issued for those custom domains.
-3. Open `https://myhoadashboard.com/` and `https://myhoadashboard.com/tangomar/login` before changing the legacy flag.
-4. Paste `migrations/0017_neighborhood_codes.sql` into the D1 console for database `tango` (after `0016`), or run `npm run db:migrate:remote`. Until this runs, codes do not resolve and new email links stay on mytangomar.com.
-5. After the new host is checked, set `LEGACY_HOST_REDIRECT` to `1` in `wrangler.jsonc` and deploy again. Leave it at `0` until then.
-6. `EMAIL_FROM` stays `Tang-O-Mar <donotreply@mytangomar.com>` until a sender on myhoadashboard.com is verified in Resend. The link in the message can already point at myhoadashboard.com.
+3. `LEGACY_HOST_REDIRECT` is `1`. `mytangomar.com` and `www.mytangomar.com` 301 to `https://myhoadashboard.com/tangomar` and keep the path and query.
+4. Paste `migrations/0017_neighborhood_codes.sql` into the D1 console for database `tango` (after `0016`), or run `npm run db:migrate:remote`. Until this runs, codes do not resolve and new email links stay on mytangomar.com. Those old links still 301 onto `/tangomar` once the flag is on.
+5. `EMAIL_FROM` stays `Tang-O-Mar <donotreply@mytangomar.com>` until a sender on myhoadashboard.com is verified in Resend. The link in the message can already point at myhoadashboard.com.
 
 ## Data and images
 
@@ -48,7 +47,7 @@ Do these in the dashboard or on deploy. Deploy does not apply D1 migrations.
 ## Secrets and env vars (names only)
 
 - Secret: `RESEND_API_KEY`
-- Vars in `wrangler.jsonc`: `APP_ENV` (`production`), `EMAIL_FROM` (`Tang-O-Mar <donotreply@mytangomar.com>`), `LEGACY_HOST_REDIRECT` (`0` until the product host is checked, then `1`), `PLATFORM_ADMIN_EMAILS` (`marc@whpinc.com`)
+- Vars in `wrangler.jsonc`: `APP_ENV` (`production`), `EMAIL_FROM` (`Tang-O-Mar <donotreply@mytangomar.com>`), `LEGACY_HOST_REDIRECT` (`1`), `PLATFORM_ADMIN_EMAILS` (`marc@whpinc.com`)
 - Local only: `.dev.vars` (gitignored, see `.dev.vars.example`).
 
 ## Cron and scheduled jobs

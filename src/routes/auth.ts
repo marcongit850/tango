@@ -28,6 +28,7 @@ const LINK_MINUTES = 20;
 const SESSION_SECONDS = 60 * 60 * 24 * 30;
 
 export async function showAssociationLogin(c: AppContext, association: Association, action = "/login"): Promise<Response> {
+  c.set("association", association);
   const nextPath = loginNextPath(association, c.req.query("next") ?? "");
   return render(c, {
     title: `Sign in · ${association.name}`,
@@ -38,6 +39,7 @@ export async function showAssociationLogin(c: AppContext, association: Associati
 }
 
 export async function performLogin(c: AppContext, association: Association, action = "/login"): Promise<Response> {
+  c.set("association", association);
   const fields = await readForm(c);
   const email = textValue(fields, "email", 200).toLowerCase();
   const nextPath = loginNextPath(association, textValue(fields, "next", 300));

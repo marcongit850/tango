@@ -252,10 +252,15 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
   app.get("/terms", async (c) => render(c, { title: "Terms of Use · Tang-O-Mar", active: "terms", body: termsPage() }));
 
   app.get("/join", async (c) => {
+    const association = await findAssociationBySlug(c.env.DB, HOME_SLUG);
+    if (association) c.set("association", association);
     return render(c, { title: "Request to join", active: "join", body: joinRequestPage() });
   });
 
   app.post("/join", async (c) => {
+    const association = await findAssociationBySlug(c.env.DB, HOME_SLUG);
+    if (!association) throw new NotFoundError();
+    c.set("association", association);
     const fields = await readForm(c);
     if (textValue(fields, "company", 200)) return redirectTo(c, "/join/received");
     const name = textValue(fields, "name", 120);
@@ -271,9 +276,6 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
         body: joinRequestPage("Enter your name and a valid email.", values),
       });
     }
-
-    const association = await findAssociationBySlug(c.env.DB, HOME_SLUG);
-    if (!association) throw new NotFoundError();
 
     try {
       const id = await insertJoinRequest(c.env.DB, {
@@ -346,7 +348,10 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/join/received", async (c) => {
-    return render(c, { title: "Request received", active: "join", body: joinReceivedPage() });
+    const association = await findAssociationBySlug(c.env.DB, HOME_SLUG);
+    if (association) c.set("association", association);
+    const home = association ? associationPublicPath(association) : "/";
+    return render(c, { title: "Request received", active: "join", body: joinReceivedPage(home) });
   });
 
   app.get("/a/:slug/estoppel", async (c) => {
@@ -443,6 +448,7 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
   app.get("/:vanity/join", async (c) => {
     const association = await vanityAssociation(c);
     if (!association) return c.notFound();
+    c.set("association", association);
     return render(c, {
       title: "Request to join",
       active: "join",
@@ -455,6 +461,7 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
     const association = await vanityAssociation(c);
     if (!association) return c.notFound();
     if (isDemoAssociation(association)) return c.redirect(associationPublicPath(association, "/dashboard"), 302);
+    c.set("association", association);
     const portal = await portalForUser(c, association.slug);
     const base = associationPublicPath(association);
     const body =

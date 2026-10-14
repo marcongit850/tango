@@ -200,12 +200,12 @@ export function estoppelPage(
     </section>`;
 }
 
-export function joinReceivedPage(): string {
+export function joinReceivedPage(homeHref = "/"): string {
   return `<section class="panel">
       <h1>Request received</h1>
       <p>Your message has been sent to the Board. A Board member will follow up with you by email.</p>
       <p>Submitting this form does not create a homeowner login or account.</p>
-      <p><a class="button secondary" href="/">Back to home</a></p>
+      <p><a class="button secondary" href="${esc(homeHref)}">Back to home</a></p>
     </section>`;
 }
 

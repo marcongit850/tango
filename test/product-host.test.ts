@@ -97,7 +97,8 @@ describe("MyHOADashboard host", () => {
     expect(html).toContain("MyHOADashboard");
     expect(html).toContain("Enter your neighborhood code");
     expect(html).toContain('href="/demo">See the demo</a>');
-    expect(html).toContain(">Contact</summary>");
+    expect(html).toContain('href="#contact">Contact</a>');
+    expect(html).toContain('id="contact" class="fields contact-form"');
     expect(html).toContain('src="/brand/myhoadashboard-logo.png"');
     expect(html).toContain('href="/brand/favicon.ico"');
     expect(html).toContain('href="/brand/apple-touch-icon.png"');
@@ -231,6 +232,7 @@ describe("MyHOADashboard host", () => {
 
   it("uses the association canonical base in email links", () => {
     expect(canonicalPortalUrl({ slug: "tango-mar", vanity_slug: "tangomar" }, "/documents")).toBe(`${PRODUCT}/tangomar/documents`);
+    expect(canonicalPortalUrl({ slug: "tango-mar", vanity_slug: "tangomar" }, "/invoices")).toBe(`${PRODUCT}/tangomar/invoices`);
     expect(canonicalPortalUrl({ slug: "tango-mar", vanity_slug: "tangomar" }, "/auth/verify?token=abc")).toBe(
       `${PRODUCT}/tangomar/auth/verify?token=abc`,
     );
@@ -318,10 +320,59 @@ describe("MyHOADashboard host", () => {
       });
       expect(sent.status).toBe(303);
       expect(calls[0]?.body.to).toEqual([CONTACT_INBOX]);
-      const again = await app.request(`${PRODUCT}/?sent=1`, {}, env);
-      expect(await again.text()).not.toContain(CONTACT_INBOX);
+      const again = await app.request(`${PRODUCT}/?sent=1#contact`, {}, env);
+      const sentHtml = await again.text();
+      expect(sentHtml).toContain("Your message was sent.");
+      expect(sentHtml).toContain('id="contact" class="fields contact-form open"');
+      expect(sentHtml).not.toContain(CONTACT_INBOX);
     } finally {
       globalThis.fetch = original;
     }
+  });
+
+  it("points each association logo at that association, and the dashboard when signed in", async () => {
+    const { sqlite, db } = openPortal();
+    sqlite.exec(
+      "INSERT INTO associations (id, slug, name, legal_name, neighborhood_code, vanity_slug) VALUES ('assoc_other', 'other-shore', 'Other Shore', 'Other Shore HOA', '222', 'othershore')",
+    );
+    const app = createApp();
+    const env = portalEnv(db, { APP_ENV: "development" });
+
+    const login = await app.request(`${PRODUCT}/tangomar/login`, {}, env);
+    expect(login.status).toBe(200);
+    const loginHtml = await login.text();
+    expect(loginHtml).toContain('<a class="brand" href="/tangomar">');
+    expect(loginHtml).toContain('<a class="home-footer-brand" href="/tangomar">');
+    expect(loginHtml).toContain('href="/tangomar">Home</a>');
+    expect(loginHtml).not.toContain('<a class="brand" href="/">');
+
+    const other = await app.request(`${PRODUCT}/othershore/login`, {}, env);
+    expect(other.status).toBe(200);
+    expect(await other.text()).toContain('<a class="brand" href="/othershore">');
+
+    const posted = await post(app, env, "/tangomar/login", { email: "sam.rivera@example.com" });
+    const link = (await posted.text()).match(/href="(https:\/\/myhoadashboard\.com\/tangomar\/auth\/verify\?token=[a-f0-9]+)"/);
+    const verified = await app.request(link?.[1] ?? "", {}, env);
+    const token = (verified.headers.get("set-cookie") ?? "").split("tango_session=")[1]?.split(";")[0] ?? "";
+    const dashboard = await app.request(`${PRODUCT}/tangomar/dashboard`, { headers: { Cookie: `tango_session=${token}` } }, env);
+    expect(dashboard.status).toBe(200);
+    const dashHtml = await dashboard.text();
+    expect(dashHtml).toContain('<a class="brand" href="/tangomar/dashboard">');
+    expect(dashHtml).not.toContain('<a class="brand" href="/">');
+  });
+
+  it("still accepts a magic link that was emailed on mytangomar.com", async () => {
+    const { db } = openPortal();
+    const app = createApp();
+    const env = portalEnv(db, { APP_ENV: "development", LEGACY_HOST_REDIRECT: "1" });
+    const posted = await post(app, env, "/tangomar/login", { email: "sam.rivera@example.com" });
+    const token = ((await posted.text()).match(/token=([a-f0-9]{64})/) ?? [])[1] ?? "";
+    expect(token).toMatch(/^[a-f0-9]{64}$/);
+    const legacy = await app.request(`https://www.mytangomar.com/auth/verify?token=${token}`, {}, env);
+    expect(legacy.status).toBe(301);
+    expect(legacy.headers.get("Location")).toBe(`${PRODUCT}/tangomar/auth/verify?token=${token}`);
+    const verified = await app.request(legacy.headers.get("Location") ?? "", {}, env);
+    expect(verified.status).toBe(303);
+    expect(verified.headers.get("set-cookie") ?? "").toContain("tango_session=");
   });
 });

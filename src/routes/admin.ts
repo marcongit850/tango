@@ -646,7 +646,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
           from: c.env.EMAIL_FROM,
           to: owner.email,
           subject: `${association.name} balance reminder`,
-          text: body,
+          text: `${body}\n\nInvoices: ${canonicalPortalUrl(association, "/invoices")}`,
         })
       : false;
     await writeAudit(c.env.DB, {

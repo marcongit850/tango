@@ -1,7 +1,8 @@
 import type { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { findAssociationBySlug, findMembership, findUserByEmail, findUserById, notifyStaff, recordEmailChangeConsent, writeAudit } from "../db";
+import { findAssociationById, findAssociationBySlug, findMembership, findUserByEmail, findUserById, notifyStaff, recordEmailChangeConsent, writeAudit } from "../db";
 import { shouldRevealMagicLink, safeNextPath } from "../lib/access";
+import { loginNextPath, portalUrl, publicizePath } from "../lib/hosts";
 import { DEMO_ASSOCIATION_ID, isDemoUserId } from "../lib/demo";
 import { formatPlace } from "../lib/dates";
 import { resendApiKey, sendResendEmail } from "../lib/email";
@@ -16,7 +17,7 @@ import {
   parseEmailChangeUserId,
 } from "../lib/login-email";
 import { randomToken, sha256Hex } from "../lib/tokens";
-import type { AppBindings } from "../types";
+import type { AppBindings, Association } from "../types";
 import { render } from "../views/layout";
 import { checkEmailPage, emailChangeBlockedPage, invalidLinkPage, loginPage } from "../views/public";
 import { readForm, redirectTo, textValue, type AppContext } from "./common";
@@ -26,42 +27,58 @@ const HOME_SLUG = "tango-mar";
 const LINK_MINUTES = 20;
 const SESSION_SECONDS = 60 * 60 * 24 * 30;
 
+export async function showAssociationLogin(c: AppContext, association: Association, action = "/login"): Promise<Response> {
+  const nextPath = loginNextPath(association, c.req.query("next") ?? "");
+  return render(c, {
+    title: `Sign in · ${association.name}`,
+    active: "login",
+    icon: association.slug === HOME_SLUG ? "tango" : "product",
+    body: loginPage(association, nextPath, "", action),
+  });
+}
+
+export async function performLogin(c: AppContext, association: Association, action = "/login"): Promise<Response> {
+  const fields = await readForm(c);
+  const email = textValue(fields, "email", 200).toLowerCase();
+  const nextPath = loginNextPath(association, textValue(fields, "next", 300));
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return render(c, {
+      title: `Sign in · ${association.name}`,
+      active: "login",
+      status: 400,
+      icon: association.slug === HOME_SLUG ? "tango" : "product",
+      body: loginPage(association, nextPath, "Enter the email address on the roster.", action),
+    });
+  }
+
+  const user = await findUserByEmail(c.env.DB, email);
+  const membership = user && !isDemoUserId(user.id) ? await findMembership(c.env.DB, association.id, user.id) : null;
+  let devLink: string | null = null;
+  if (user && !isDemoUserId(user.id) && membership && membership.status !== "inactive") {
+    devLink = await issueMagicLink(c, {
+      email,
+      associationId: association.id,
+      associationName: association.name,
+      place: formatPlace(association),
+      redirectPath: nextPath,
+    });
+  } else {
+    await sha256Hex(email);
+  }
+
+  return render(c, {
+    title: "Check your email",
+    active: "login",
+    icon: association.slug === HOME_SLUG ? "tango" : "product",
+    body: checkEmailPage(association.name, devLink),
+  });
+}
+
 export function registerAuthRoutes(app: Hono<AppBindings>): void {
   app.post("/login", async (c) => {
     const association = await findAssociationBySlug(c.env.DB, HOME_SLUG);
     if (!association) throw new NotFoundError();
-    const fields = await readForm(c);
-    const email = textValue(fields, "email", 200).toLowerCase();
-    const nextPath = safeNextPath(association.slug, textValue(fields, "next", 300));
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return render(c, {
-        title: `Sign in · ${association.name}`,
-        active: "login",
-        status: 400,
-        body: loginPage(association, nextPath, "Enter the email address on the roster."),
-      });
-    }
-
-    const user = await findUserByEmail(c.env.DB, email);
-    const membership = user && !isDemoUserId(user.id) ? await findMembership(c.env.DB, association.id, user.id) : null;
-    let devLink: string | null = null;
-    if (user && !isDemoUserId(user.id) && membership && membership.status !== "inactive") {
-      devLink = await issueMagicLink(c, {
-        email,
-        associationId: association.id,
-        associationName: association.name,
-        place: formatPlace(association),
-        redirectPath: nextPath,
-      });
-    } else {
-      await sha256Hex(email);
-    }
-
-    return render(c, {
-      title: "Check your email",
-      active: "login",
-      body: checkEmailPage(association.name, devLink),
-    });
+    return performLogin(c, association, "/login");
   });
 
   app.get("/auth/verify", async (c) => {
@@ -120,9 +137,13 @@ export function registerAuthRoutes(app: Hono<AppBindings>): void {
           )
           .bind(association.id, user.id)
           .run();
-        destination = emailChangeUserId
+        const internal = emailChangeUserId
           ? `/a/${association.slug}/profile`
-          : safeNextPath(association.slug, link.redirect_path || `/a/${association.slug}/dashboard`);
+          : link.redirect_path === "/platform/associations"
+            ? "/platform/associations"
+            : safeNextPath(association.slug, link.redirect_path || `/a/${association.slug}/dashboard`);
+        const loaded = await findAssociationById(c.env.DB, association.id);
+        destination = publicizePath(internal, loaded ?? { slug: association.slug }, c.req.header("x-hoa-public-base") ?? null);
         await writeAudit(c.env.DB, {
           associationId: association.id,
           actorUserId: user.id,
@@ -230,7 +251,9 @@ async function storeMagicLink(
     )
     .bind(crypto.randomUUID(), input.email, input.associationId, await sha256Hex(token), input.redirectPath, expires, now.toISOString())
     .run();
-  return `${new URL(c.req.url).origin}/auth/verify?token=${token}`;
+  const association = await findAssociationById(c.env.DB, input.associationId);
+  if (!association) return `${new URL(c.req.url).origin}/auth/verify?token=${token}`;
+  return portalUrl(c.req.url, association, `/auth/verify?token=${token}`);
 }
 
 async function deliverMagicLink(

@@ -8,13 +8,38 @@ The Tango Mar POA owner portal. Owners sign in with an email magic link to see b
 
 ## Domains and Worker
 
-- Worker: `tango`
-- Custom domains (attached in the Cloudflare dashboard): `mytangomar.com`, `www.mytangomar.com`
+- Worker: `tango` (one Worker, not a second app)
+- Cloudflare account: `f1c59948520f1ec39473238b621c7e24`
+- Product host: `myhoadashboard.com` and `www.myhoadashboard.com`. `/` is the MyHOADashboard marketing page. A neighborhood code sends the browser to `/<vanity_slug>`, which is that association's public landing and login.
+- Tang-O-Mar public address: `/tangomar` (vanity slug). The older path `/a/tango-mar/...` still works. Login, dashboard, documents, and the other association routes under `/tangomar/...` use those same handlers.
+- Legacy host: `mytangomar.com` and `www.mytangomar.com`. While `LEGACY_HOST_REDIRECT` is `0` (the default), this host keeps serving Tang-O-Mar as it does today. Set the var to `1` only after the product host is checked. Then each request 301s to the matching `https://myhoadashboard.com/tangomar...` URL and keeps the path and query (magic links, email confirm links, and document links).
+- Custom domains in `wrangler.jsonc`: `myhoadashboard.com`, `www.myhoadashboard.com`. `mytangomar.com` and `www.mytangomar.com` stay attached in the dashboard.
 - Zone settings on mytangomar.com: Always Use HTTPS on, minimum TLS 1.2, SSL mode Full, HSTS max age 15552000 (no subdomains, no preload).
+
+## MyHOADashboard
+
+- Marketing page on the product host only. Localhost and mytangomar.com still open the Tang-O-Mar home at `/`.
+- Neighborhood code form posts to `/neighborhood`. Tang-O-Mar's code is `850`. The demo code is `100`. A bad code shows an error. Eight lookups per IP in ten minutes, kept in Worker memory.
+- Contact button opens a form. The inbox address is not shown on the page.
+- Product favicon and apple touch icon live in `public/brand/`. Tang-O-Mar pages keep `public/favicon.ico`, `public/favicon.png`, and `public/apple-touch-icon.png`. Other associations use the product icons.
+- Session cookie `tango_session` is host-only (`Path=/`, `HttpOnly`, `SameSite=Lax`, `Secure` on HTTPS). It is not pinned to mytangomar.com, so a sign-in on myhoadashboard.com works for `/tangomar` and `/a/tango-mar` on that host.
+- Email links use the association canonical base once `vanity_slug` is set: `https://myhoadashboard.com/tangomar/...`. Until the migration is applied, Tang-O-Mar links stay on `https://mytangomar.com`. Localhost still prints a localhost link when email is not sent.
+- Platform admin page: `/platform/associations`. `PLATFORM_ADMIN_EMAILS` defaults to `marc@whpinc.com`. That page edits each association's neighborhood code and public slug.
+
+## Cloudflare steps for this change
+
+Do these in the dashboard or on deploy. Deploy does not apply D1 migrations.
+
+1. Confirm the zone `myhoadashboard.com` is on account `f1c59948520f1ec39473238b621c7e24` (the same account as Worker `tango`).
+2. Deploy (`npx wrangler deploy`) so the custom domains in `wrangler.jsonc` attach. Wrangler creates proxied DNS for the apex and `www`. SSL is issued for those custom domains.
+3. Open `https://myhoadashboard.com/` and `https://myhoadashboard.com/tangomar/login` before changing the legacy flag.
+4. Paste `migrations/0017_neighborhood_codes.sql` into the D1 console for database `tango` (after `0016`), or run `npm run db:migrate:remote`. Until this runs, codes do not resolve and new email links stay on mytangomar.com.
+5. After the new host is checked, set `LEGACY_HOST_REDIRECT` to `1` in `wrangler.jsonc` and deploy again. Leave it at `0` until then.
+6. `EMAIL_FROM` stays `Tang-O-Mar <donotreply@mytangomar.com>` until a sender on myhoadashboard.com is verified in Resend. The link in the message can already point at myhoadashboard.com.
 
 ## Data and images
 
-- Database: D1 `tango` (id `d3f6cfd2-cae0-42ef-843f-b5465efebd2b`), binding `DB`. Schema is in `migrations/` (0001 to 0016 so far). `0016_seed_seaside_demo.sql` adds the public demo association only. It does not read or update Tang-O-Mar rows.
+- Database: D1 `tango` (id `d3f6cfd2-cae0-42ef-843f-b5465efebd2b`), binding `DB`. Schema is in `migrations/` (0001 to 0017 so far). `0016_seed_seaside_demo.sql` adds the public demo association only. It does not read or update Tang-O-Mar rows. `0017_neighborhood_codes.sql` adds unique `neighborhood_code` and `vanity_slug` on `associations`, sets Tang-O-Mar to code `850` and slug `tangomar`, and sets the demo to code `100` and slug `seaside`.
 - Document files: R2 bucket `tango-documents`, binding `DOCUMENTS`. D1 stores version metadata and the object key.
 - Logo, images, video, and small browser scripts: `public/`, served as static assets (matching URLs are served before the Worker runs).
 - Email: Resend (`https://api.resend.com/emails`).
@@ -23,7 +48,7 @@ The Tango Mar POA owner portal. Owners sign in with an email magic link to see b
 ## Secrets and env vars (names only)
 
 - Secret: `RESEND_API_KEY`
-- Vars in `wrangler.jsonc`: `APP_ENV` (`production`), `EMAIL_FROM` (`Tang-O-Mar <donotreply@mytangomar.com>`)
+- Vars in `wrangler.jsonc`: `APP_ENV` (`production`), `EMAIL_FROM` (`Tang-O-Mar <donotreply@mytangomar.com>`), `LEGACY_HOST_REDIRECT` (`0` until the product host is checked, then `1`), `PLATFORM_ADMIN_EMAILS` (`marc@whpinc.com`)
 - Local only: `.dev.vars` (gitignored, see `.dev.vars.example`).
 
 ## Cron and scheduled jobs
@@ -39,7 +64,7 @@ The Tango Mar POA owner portal. Owners sign in with an email magic link to see b
 
 Anyone can open a fictional association from the public home page without a magic link. The link is "Try the demo". The same resident and admin routes render it.
 
-- Slug `seaside-demo`, id `assoc_seaside_demo`, display name Seaside Demo HOA. People, lots, documents, announcements, dues, notices, and messages are seeded by `migrations/0016_seed_seaside_demo.sql`. That file must be applied by hand before the pages have data. Deploy does not apply it.
+- Slug `seaside-demo`, id `assoc_seaside_demo`, display name Seaside Demo HOA. Neighborhood code `100`, public slug `seaside` (from `0017`). People, lots, documents, announcements, dues, notices, and messages are seeded by `migrations/0016_seed_seaside_demo.sql`. That file must be applied by hand before the pages have data. Deploy does not apply it.
 - Cookie `tango_demo` is `owner` or `admin`. It is not a row in `sessions`. `/demo` and `/demo/owner` set `owner` and open the sample dashboard. `/demo/admin` sets `admin` and opens admin. `/demo/leave` clears the cookie.
 - On `/a/seaside-demo`, the Worker ignores `tango_session` and loads only the seeded persona for that association. Riley Coast is the owner. Quinn Harbor is the board admin. A real Tang-O-Mar login is not used on these pages.
 - The demo cookie, and a session whose user id is one of the seeded demo people, does not authenticate `/a/tango-mar` or any other association. Login will not email those addresses or create a session for them.
@@ -49,7 +74,7 @@ Anyone can open a fictional association from the public home page without a magi
 
 ## Known gotchas
 
-- D1 migrations are NOT applied by deploy. Each new `migrations/00NN_*.sql` is applied by hand (paste into the D1 console for database `tango`, or `npm run db:migrate:remote`) before the PR that needs it is merged. `migrations/0016_seed_seaside_demo.sql` is required for the public demo. Until it is applied, `/demo` says the demo is not ready and does not show Tang-O-Mar data.
+- D1 migrations are NOT applied by deploy. Each new `migrations/00NN_*.sql` is applied by hand (paste into the D1 console for database `tango`, or `npm run db:migrate:remote`) before the PR that needs it is merged. `migrations/0016_seed_seaside_demo.sql` is required for the public demo. Until it is applied, `/demo` says the demo is not ready and does not show Tang-O-Mar data. `migrations/0017_neighborhood_codes.sql` is required for neighborhood codes and `/tangomar`. Until it is applied, `/a/tango-mar` still works and email links stay on mytangomar.com.
 - The cron list in `wrangler.jsonc` replaces any cron added in the dashboard on every deploy. Change schedules in the file, not the dashboard.
 - Estoppel requests go to `ESTOPPEL_INBOX` in `src/lib/estoppel.ts` (marc@whpinc.com for now, to be changed later). The page links Florida Statute 720.30851.
 - Demo requests go to `DEMO_INBOX` in `src/lib/demo-request.ts` (marc@whpinc.com).

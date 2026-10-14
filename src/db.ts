@@ -111,23 +111,65 @@ function asMembership(
   return null;
 }
 
+const ASSOCIATION_BASE =
+  "id, slug, name, legal_name, address_line1, city, state, postal_code, county, timezone";
+
+async function associationColumns(db: D1Database): Promise<string> {
+  const names = await columnNames(db, "associations");
+  const code = names.has("neighborhood_code") ? "COALESCE(neighborhood_code, '') AS neighborhood_code" : "'' AS neighborhood_code";
+  const vanity = names.has("vanity_slug") ? "COALESCE(vanity_slug, '') AS vanity_slug" : "'' AS vanity_slug";
+  return `${ASSOCIATION_BASE}, ${code}, ${vanity}`;
+}
+
+export async function neighborhoodColumnsReady(db: D1Database): Promise<boolean> {
+  const names = await columnNames(db, "associations");
+  return names.has("neighborhood_code") && names.has("vanity_slug");
+}
+
 export async function findAssociationBySlug(db: D1Database, slug: string): Promise<Association | null> {
+  const columns = await associationColumns(db);
+  return db.prepare(`SELECT ${columns} FROM associations WHERE slug = ?`).bind(slug).first<Association>();
+}
+
+export async function findAssociationById(db: D1Database, id: string): Promise<Association | null> {
+  const columns = await associationColumns(db);
+  return db.prepare(`SELECT ${columns} FROM associations WHERE id = ?`).bind(id).first<Association>();
+}
+
+export async function findAssociationByVanity(db: D1Database, vanity: string): Promise<Association | null> {
+  if (!(await neighborhoodColumnsReady(db))) return null;
+  const columns = await associationColumns(db);
   return db
-    .prepare(
-      `SELECT id, slug, name, legal_name, address_line1, city, state, postal_code, county, timezone
-       FROM associations WHERE slug = ?`,
-    )
-    .bind(slug)
+    .prepare(`SELECT ${columns} FROM associations WHERE vanity_slug = ?`)
+    .bind(vanity.trim().toLowerCase())
     .first<Association>();
 }
 
+export async function findAssociationByCode(db: D1Database, code: string): Promise<Association | null> {
+  if (!(await neighborhoodColumnsReady(db))) return null;
+  const columns = await associationColumns(db);
+  return db
+    .prepare(`SELECT ${columns} FROM associations WHERE neighborhood_code = ?`)
+    .bind(code.trim())
+    .first<Association>();
+}
+
+export async function updateAssociationRouting(
+  db: D1Database,
+  id: string,
+  neighborhoodCode: string,
+  vanitySlug: string,
+): Promise<number> {
+  const result = await db
+    .prepare("UPDATE associations SET neighborhood_code = ?, vanity_slug = ? WHERE id = ?")
+    .bind(neighborhoodCode, vanitySlug, id)
+    .run();
+  return result.meta.changes ?? 0;
+}
+
 export async function listAssociations(db: D1Database): Promise<Association[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT id, slug, name, legal_name, address_line1, city, state, postal_code, county, timezone
-       FROM associations ORDER BY name`,
-    )
-    .all<Association>();
+  const columns = await associationColumns(db);
+  const { results } = await db.prepare(`SELECT ${columns} FROM associations ORDER BY name`).all<Association>();
   return results;
 }
 

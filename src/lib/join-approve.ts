@@ -82,9 +82,17 @@ export function planCoOwnerLink(propertyId: string, properties: LotCandidate[]):
   return { kind: "link", propertyId: match.id, lotNumber: match.lotNumber, asCoOwner: true };
 }
 
-export function welcomeEmail(input: { associationName: string; email: string; name: string }): { subject: string; text: string } {
+export function welcomeEmail(input: {
+  associationName: string;
+  email: string;
+  name: string;
+  loginUrl?: string;
+  homeUrl?: string;
+}): { subject: string; text: string } {
   const name = input.name.replace(/[\r\n]+/g, " ").trim();
   const hello = name ? `Hello ${name},` : "Hello,";
+  const loginUrl = input.loginUrl || LOGIN_URL;
+  const homeUrl = input.homeUrl || HOME_URL;
   return {
     subject: `You are approved for ${input.associationName}`,
     text: [
@@ -92,10 +100,10 @@ export function welcomeEmail(input: { associationName: string; email: string; na
       "",
       `You are approved to use the ${input.associationName} owner portal.`,
       "",
-      `Go to ${LOGIN_URL} and sign in with the same email you used on your request:`,
+      `Go to ${loginUrl} and sign in with the same email you used on your request:`,
       input.email,
       "",
-      `Enter that email and the site will send you a link to log in. There is no password. You can also start from ${HOME_URL} and choose Resident login.`,
+      `Enter that email and the site will send you a link to log in. There is no password. You can also start from ${homeUrl} and choose Resident login.`,
       "",
       "If you did not ask to join, you can ignore this email.",
     ].join("\n"),

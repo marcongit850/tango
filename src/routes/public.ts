@@ -1,19 +1,39 @@
 import type { Hono } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
 import {
+  findAssociationByCode,
   findAssociationBySlug,
+  findAssociationByVanity,
   findMembership,
   insertJoinRequest,
   joinRequestNoticeHref,
   joinRequestNoticeTitle,
   listStaffContacts,
+  neighborhoodColumnsReady,
   notify,
   retireLegacyJoinNotices,
   writeAudit,
 } from "../db";
-import { canViewAdmin, safeNextPath } from "../lib/access";
+import { canViewAdmin } from "../lib/access";
+import {
+  allowContactRequest,
+  contactEmailText,
+  contactFieldError,
+  contactSubject,
+  CONTACT_INBOX,
+  type ContactValues,
+} from "../lib/contact";
+import {
+  associationPublicPath,
+  isProductHost,
+  isVanityCandidate,
+  neighborhoodDestination,
+  portalUrl,
+  vanityOf,
+} from "../lib/hosts";
+import { allowNeighborhoodLookup, normalizeNeighborhoodCode } from "../lib/neighborhood";
 import { DEMO_ASSOCIATION_ID, DEMO_COOKIE, DEMO_SLUG, isDemoAssociation, type DemoRole } from "../lib/demo";
-import { isHttps } from "../lib/html";
+import { esc, isHttps } from "../lib/html";
 import {
   DEMO_INBOX,
   allowDemoRequest,
@@ -36,9 +56,11 @@ import {
 import { NotFoundError, isMissingTable } from "../lib/errors";
 import { logError, logInfo } from "../lib/log";
 import type { AppBindings, Association } from "../types";
+import { performLogin, showAssociationLogin } from "./auth";
 import { render } from "../views/layout";
 import { privacyPage, termsPage } from "../views/legal";
 import { hoaPitchPage } from "../views/pitch";
+import { productPage, type ProductPageState } from "../views/product";
 import { estoppelPage, homePage, joinReceivedPage, joinRequestPage, legalPage, loginPage, type HomePortal } from "../views/public";
 import { readForm, redirectTo, requireAssociation, textValue, type AppContext, type FormFields } from "./common";
 
@@ -53,16 +75,17 @@ function validEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-async function portalForUser(c: AppContext): Promise<HomePortal | null> {
+async function portalForUser(c: AppContext, associationSlug = HOME_SLUG): Promise<HomePortal | null> {
   const user = c.get("user");
   if (!user) return null;
-  const association = await findAssociationBySlug(c.env.DB, HOME_SLUG);
+  const association = await findAssociationBySlug(c.env.DB, associationSlug);
   if (!association) return null;
   const membership = await findMembership(c.env.DB, association.id, user.id);
   if (!membership || membership.status === "inactive") return null;
+  const base = associationPublicPath(association);
   return {
-    dashboardHref: `/a/${association.slug}/dashboard`,
-    adminHref: canViewAdmin(membership) ? `/a/${association.slug}/admin` : null,
+    dashboardHref: `${base}/dashboard`,
+    adminHref: canViewAdmin(membership) ? `${base}/admin` : null,
   };
 }
 
@@ -85,7 +108,8 @@ async function enterDemo(c: AppContext, role: DemoRole): Promise<Response> {
     });
   }
   setDemoCookie(c, role);
-  const destination = role === "admin" ? `/a/${DEMO_SLUG}/admin` : `/a/${DEMO_SLUG}/dashboard`;
+  const tail = role === "admin" ? "/admin" : "/dashboard";
+  const destination = vanityOf(association) ? associationPublicPath(association, tail) : `/a/${DEMO_SLUG}${tail}`;
   return c.redirect(destination, 303);
 }
 
@@ -99,8 +123,79 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/", async (c) => {
+    if (isProductHost(new URL(c.req.url).hostname)) {
+      return render(c, {
+        title: "MyHOADashboard",
+        product: true,
+        icon: "product",
+        body: productPage({ contactSent: c.req.query("sent") === "1", contactOpen: c.req.query("sent") === "1" }),
+      });
+    }
     const portal = await portalForUser(c);
     return render(c, { title: "Tang-O-Mar", active: "home", body: homePage(showDemo(c), portal), portal });
+  });
+
+  app.post("/neighborhood", async (c) => {
+    const fields = await readForm(c);
+    const code = textValue(fields, "code", 12);
+    const fail = (codeError: string, status: number) =>
+      render(c, {
+        title: "MyHOADashboard",
+        product: true,
+        icon: "product",
+        status,
+        body: productPage({ code, codeError }),
+      });
+    if (!isProductHost(new URL(c.req.url).hostname) && !showDemo(c)) {
+      return fail("Enter your neighborhood code on MyHOADashboard.", 404);
+    }
+    if (!allowNeighborhoodLookup(clientIp(c))) return fail("Please wait a few minutes, then try again.", 429);
+    const normalized = normalizeNeighborhoodCode(code);
+    if (!normalized) return fail("Enter the neighborhood code you were given. It is 3 to 12 digits.", 400);
+    if (!(await neighborhoodColumnsReady(c.env.DB))) {
+      return fail("Neighborhood codes are not ready yet. Please try again later.", 503);
+    }
+    const association = await findAssociationByCode(c.env.DB, normalized);
+    const vanity = association ? vanityOf(association) : "";
+    if (!association || !vanity) return fail("That neighborhood code was not found. Check the code and try again.", 404);
+    return c.redirect(neighborhoodDestination(c.req.url, vanity), 303);
+  });
+
+  app.post("/contact", async (c) => {
+    const fields = await readForm(c);
+    const values = contactValues(fields);
+    const page = (state: ProductPageState, status = 200) =>
+      render(c, { title: "MyHOADashboard", product: true, icon: "product", status, body: productPage(state) });
+    if (textValue(fields, "website", 200)) {
+      allowContactRequest(clientIp(c));
+      return c.redirect("/?sent=1#contact", 303);
+    }
+    const error = contactFieldError(values);
+    if (error) return page({ contactError: error, contactValues: values, contactOpen: true }, 400);
+    if (!allowContactRequest(clientIp(c))) {
+      return page({ contactError: "Please wait a few minutes, then try again.", contactValues: values, contactOpen: true }, 429);
+    }
+    const apiKey = resendApiKey(c.env);
+    let sent = false;
+    if (apiKey) {
+      try {
+        sent = await sendResendEmail({
+          apiKey,
+          from: c.env.EMAIL_FROM,
+          to: CONTACT_INBOX,
+          replyTo: values.email,
+          subject: contactSubject(values.neighborhood),
+          text: contactEmailText(values),
+        });
+      } catch (error) {
+        logError("contact_request", { message: error instanceof Error ? error.message : "unknown" });
+      }
+    } else {
+      logError("contact_request", { message: "email not configured" });
+    }
+    if (!sent) return page({ contactError: "Your message could not be sent. Please try again later.", contactValues: values, contactOpen: true }, 503);
+    logInfo("contact_request", {});
+    return c.redirect("/?sent=1#contact", 303);
   });
 
   app.get("/bring-this-to-your-hoa", async (c) => {
@@ -210,7 +305,7 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
       }
       const apiKey = resendApiKey(c.env);
       if (apiKey && staff.length > 0) {
-        const origin = new URL(c.req.url).origin;
+        const review = portalUrl(c.req.url, association, "/admin/join-requests");
         const text = [
           `${name} asked to join ${association.name}.`,
           "",
@@ -219,7 +314,7 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
           "",
           note || "No note.",
           "",
-          `Review requests: ${origin}/a/${association.slug}/admin/join-requests`,
+          `Review requests: ${review}`,
         ].join("\n");
         for (const person of staff) {
           try {
@@ -314,16 +409,95 @@ export function registerPublicRoutes(app: Hono<AppBindings>): void {
 
   app.get("/a/:slug", (c) => {
     const association = requireAssociation(c);
-    if (isDemoAssociation(association)) return c.redirect(`/a/${association.slug}/dashboard`, 302);
+    if (isDemoAssociation(association)) {
+      const dest = vanityOf(association) ? associationPublicPath(association, "/dashboard") : `/a/${association.slug}/dashboard`;
+      return c.redirect(dest, 302);
+    }
+    if (vanityOf(association) && isProductHost(new URL(c.req.url).hostname)) {
+      return c.redirect(associationPublicPath(association), 302);
+    }
     return c.redirect("/", 302);
   });
 
   app.get("/login", async (c) => {
     const association = await findAssociationBySlug(c.env.DB, HOME_SLUG);
     if (!association) throw new NotFoundError();
-    const nextPath = safeNextPath(association.slug, c.req.query("next") ?? "");
-    return render(c, { title: `Sign in · ${association.name}`, active: "login", body: loginPage(association, nextPath) });
+    return showAssociationLogin(c, association, "/login");
   });
+
+  app.get("/:vanity/login", async (c) => {
+    const association = await vanityAssociation(c);
+    if (!association) return c.notFound();
+    return showAssociationLogin(c, association, associationPublicPath(association, "/login"));
+  });
+
+  app.post("/:vanity/login", async (c) => {
+    const association = await vanityAssociation(c);
+    if (!association) return c.notFound();
+    if (isDemoAssociation(association)) {
+      return redirectTo(c, associationPublicPath(association), "Demo only, changes are not saved", "warn");
+    }
+    return performLogin(c, association, associationPublicPath(association, "/login"));
+  });
+
+  app.get("/:vanity/join", async (c) => {
+    const association = await vanityAssociation(c);
+    if (!association) return c.notFound();
+    return render(c, {
+      title: "Request to join",
+      active: "join",
+      icon: association.slug === HOME_SLUG ? "tango" : "product",
+      body: joinRequestPage(),
+    });
+  });
+
+  app.get("/:vanity", async (c) => {
+    const association = await vanityAssociation(c);
+    if (!association) return c.notFound();
+    if (isDemoAssociation(association)) return c.redirect(associationPublicPath(association, "/dashboard"), 302);
+    const portal = await portalForUser(c, association.slug);
+    const base = associationPublicPath(association);
+    const body =
+      association.slug === HOME_SLUG
+        ? `${homePage(showDemo(c), portal, { portalBase: base, loginHref: `${base}/login`, joinHref: `${base}/join` })}${loginPanel(association, base)}`
+        : genericAssociationLanding(association, base);
+    return render(c, {
+      title: association.name,
+      active: "home",
+      landing: true,
+      icon: association.slug === HOME_SLUG ? "tango" : "product",
+      body,
+      portal,
+    });
+  });
+}
+
+async function vanityAssociation(c: AppContext): Promise<Association | null> {
+  const vanity = c.req.param("vanity") ?? "";
+  if (!isVanityCandidate(vanity)) return null;
+  return findAssociationByVanity(c.env.DB, vanity);
+}
+
+function loginPanel(association: Association, base: string): string {
+  return `<div class="wrap home-signin">${loginPage(association, `${base}/dashboard`, "", `${base}/login`)}</div>`;
+}
+
+function genericAssociationLanding(association: Association, base: string): string {
+  return `<section class="panel">
+      <h1>${esc(association.name)}</h1>
+      <p>Sign in with the email on the roster, or request access if you do not have a login yet.</p>
+      <p class="actions"><a class="button secondary" href="${base}/join">Request access</a></p>
+    </section>
+    ${loginPanel(association, base)}`;
+}
+
+function contactValues(fields: FormFields): ContactValues {
+  return {
+    name: textValue(fields, "name", 120),
+    email: textValue(fields, "email", 200).toLowerCase(),
+    neighborhood: textValue(fields, "neighborhood", 160),
+    message: textValue(fields, "message", 2000),
+  };
 }
 
 function clientIp(c: AppContext): string {

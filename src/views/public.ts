@@ -10,6 +10,12 @@ export type HomePortal = {
 
 const PORTAL = "/a/tango-mar";
 
+type HomeLinks = {
+  portalBase?: string;
+  loginHref?: string;
+  joinHref?: string;
+};
+
 function homeIcon(kind: "megaphone" | "document" | "person" | "envelope"): string {
   const common = `viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"`;
   if (kind === "megaphone") {
@@ -33,34 +39,34 @@ function homeCard(kind: "megaphone" | "document" | "person" | "envelope", title:
     </article>`;
 }
 
-function homeBelow(): string {
+function homeBelow(portalBase: string): string {
   const cards = [
     homeCard(
       "megaphone",
       "COMMUNITY UPDATES",
       "Stay up to date on neighborhood announcements, meetings, projects, and important notices.",
-      `${PORTAL}/news`,
+      `${portalBase}/news`,
       "View Updates",
     ),
     homeCard(
       "document",
       "DOCUMENTS &amp; FORMS",
       "Access covenants, bylaws, association records, forms, meeting documents, and other homeowner resources.",
-      `${PORTAL}/documents`,
+      `${portalBase}/documents`,
       "View Documents",
     ),
     homeCard(
       "person",
       "YOUR ACCOUNT",
       "View your property information, association account details, and available payment options.",
-      `${PORTAL}/dashboard`,
+      `${portalBase}/dashboard`,
       "Manage Account",
     ),
     homeCard(
       "envelope",
       "CONTACT THE ASSOCIATION",
       "Have a question or need assistance? Send a request directly through your homeowner portal.",
-      `${PORTAL}/messages`,
+      `${portalBase}/messages`,
       "Contact Us",
     ),
   ].join("");
@@ -86,7 +92,10 @@ function homeBelow(): string {
     </section>`;
 }
 
-export function homePage(showDemo: boolean, portal: HomePortal | null = null): string {
+export function homePage(showDemo: boolean, portal: HomePortal | null = null, links: HomeLinks = {}): string {
+  const portalBase = links.portalBase ?? PORTAL;
+  const loginHref = links.loginHref ?? "/login";
+  const joinHref = links.joinHref ?? "/join";
   const demo = showDemo
     ? `<div class="wrap home-demo"><section class="devbox">
         <h2>Local demo roster</h2>
@@ -113,8 +122,8 @@ export function homePage(showDemo: boolean, portal: HomePortal | null = null): s
                 ? `<a class="button" href="${esc(portal.dashboardHref)}">Open dashboard</a>${
                     portal.adminHref ? `<a class="button secondary" href="${esc(portal.adminHref)}">Admin</a>` : ""
                   }`
-                : `<a class="button" href="/login">Resident login</a>
-            <a class="button secondary" href="/join">Request access</a>`
+                : `<a class="button" href="${esc(loginHref)}">Resident login</a>
+            <a class="button secondary" href="${esc(joinHref)}">Request access</a>`
             }
           </p>
           <p class="home-try"><a href="/demo">Try the demo</a></p>
@@ -126,7 +135,7 @@ export function homePage(showDemo: boolean, portal: HomePortal | null = null): s
         </figure>
       </div>
     </section>
-    ${homeBelow()}
+    ${homeBelow(portalBase)}
     ${demo}`;
 }
 
@@ -211,12 +220,12 @@ Demo covenant text shipped with the first association is a placeholder, not the 
   </section>`;
 }
 
-export function loginPage(association: Association, nextPath: string, error = ""): string {
-  return `<section class="panel">
+export function loginPage(association: Association, nextPath: string, error = "", action = "/login"): string {
+  return `<section class="panel" id="sign-in">
     <h1>Sign in to ${esc(association.name)} Dashboard</h1>
     <p>Enter the email address associated with your association account. We'll send you a secure, one-time login link. No password required.</p>
     ${error ? `<p class="flash warn">${esc(error)}</p>` : ""}
-    <form class="fields" method="post" action="/login">
+    <form class="fields" method="post" action="${esc(action)}">
       <input type="hidden" name="next" value="${esc(nextPath)}">
       <label>Email<input type="email" name="email" autocomplete="email" required></label>
       <button type="submit">Email me a link</button>

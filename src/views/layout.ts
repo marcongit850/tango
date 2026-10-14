@@ -1,6 +1,6 @@
 import { canViewAdmin } from "../lib/access";
 import { findAssociationBySlug, findMembership, unreadCount } from "../db";
-import { isPlatformAdmin, isProductHost } from "../lib/hosts";
+import { associationPublicPath, isPlatformAdmin, isProductHost } from "../lib/hosts";
 import { DEMO_BANNER, isDemoAssociation, type DemoRole } from "../lib/demo";
 import { esc, htmlResponse, isHttps } from "../lib/html";
 import type { AppBindings, Association, Membership } from "../types";
@@ -1069,35 +1069,37 @@ body.product .code-actions a.product-bring:hover { background: #081f44; color: #
   font-weight: 700;
 }
 .product-band .button:hover { background: #185fbf; color: #fff; }
-.contact-panel { max-width: 34rem; margin: 1rem auto 0; text-align: center; }
-.contact-panel > summary {
-  display: list-item;
-  list-style: none;
-  cursor: pointer;
-  width: fit-content;
-  margin: 0 auto;
+.product-actions { justify-content: center; margin: 1rem 0 0; }
+body.product .product-actions .button.secondary {
+  background: transparent;
   color: #0b2a5b;
+  border: 0;
+  padding: 0;
   font-weight: 700;
   text-decoration: underline;
   text-underline-offset: 0.18em;
 }
-.contact-panel > summary::-webkit-details-marker { display: none; }
-.contact-panel > summary::marker { content: ""; }
-.contact-panel form {
-  margin-top: 0.9rem;
+body.product .product-actions .button.secondary:hover { color: #1d6fe0; }
+form.contact-form {
+  display: none;
+  max-width: 34rem;
+  margin: 0.9rem auto 0;
   text-align: left;
   background: #fff;
   border-radius: 0.85rem;
   box-shadow: 0 8px 22px rgba(11, 42, 91, 0.08);
   padding: 1.2rem 1.25rem 1.25rem;
 }
-body.product .contact-panel input,
-body.product .contact-panel textarea {
+form.contact-form:target,
+form.contact-form.open { display: grid; }
+form.contact-form h2 { text-align: center; color: #0b2a5b; font-size: 1.7rem; }
+body.product form.contact-form input,
+body.product form.contact-form textarea {
   border: 1px solid #d3dfeb;
   border-radius: 0.55rem;
   color: #0b2a5b;
 }
-body.product .contact-panel button {
+body.product form.contact-form button {
   background: #1d6fe0;
   color: #fff;
   border: 0;
@@ -1291,16 +1293,16 @@ body.product .product-pitch .pitch-shot {
 const HOME_SLUG = "tango-mar";
 const MEMBER_HEADER_PATHS = new Set(["/privacy", "/terms"]);
 
-export function siteFooter(): string {
+export function siteFooter(homeHref = "/"): string {
   const base = `/a/${HOME_SLUG}`;
   return `<footer class="home-footer">
     <div class="home-footer-inner">
-      <a class="home-footer-brand" href="/">
+      <a class="home-footer-brand" href="${esc(homeHref)}">
         <img src="/tango-mar-mark.webp" alt="Tang-O-Mar" width="1200" height="779">
         <span>Miramar Beach, Florida</span>
       </a>
       <nav aria-label="Footer">
-        <a href="/">Home</a>
+        <a href="${esc(homeHref)}">Home</a>
         <a href="${base}/dashboard">Dashboard</a>
         <a href="${base}/documents">Documents</a>
         <a href="${base}/faq">FAQs</a>
@@ -1377,6 +1379,7 @@ function shell(options: {
   askPortal?: boolean;
   product?: boolean;
   icon?: "product" | "tango";
+  footerHome?: string;
 }): string {
   const icons = iconLinks(options.icon ?? "tango");
   if (options.product) {
@@ -1414,7 +1417,7 @@ function shell(options: {
   <a class="skip" href="#content">Skip to content</a>
   ${topbar}
   <main id="content">${options.body}</main>
-  ${siteFooter()}
+  ${siteFooter(options.footerHome)}
 </body>
 </html>`;
   }
@@ -1438,7 +1441,7 @@ function shell(options: {
   </header>
   <main id="content" class="${options.marketing ? "pitch" : "wrap stack"}">${options.body}</main>
   ${options.askPortal ? askPortalWidget() : ""}
-  ${siteFooter()}
+  ${siteFooter(options.footerHome)}
 </body>
 </html>`;
 }
@@ -1454,10 +1457,10 @@ export function setupResponse(): Response {
   return htmlResponse(body, 503);
 }
 
-export function loggedOutNav(active?: string): { id: string; href: string; label: string }[] {
+export function loggedOutNav(active?: string, homeHref = "/"): { id: string; href: string; label: string }[] {
   const items: { id: string; href: string; label: string }[] = [];
   if (active !== "home" && active !== "join" && active !== "login") {
-    items.push({ id: "home", href: "/", label: "Home" });
+    items.push({ id: "home", href: homeHref, label: "Home" });
   }
   items.push(
     { id: "login", href: "/login", label: "Resident login" },
@@ -1526,6 +1529,7 @@ export async function render(
   }
 
   const base = association ? `/a/${association.slug}` : "";
+  const homePath = association ? associationPublicPath(association) : "/";
   const resident = Boolean(association && user && membership && membership.status !== "inactive");
   const items: { id: string; href: string; label: string }[] = [];
   if (resident) {
@@ -1540,7 +1544,7 @@ export async function render(
       { id: "notices", href: `${base}/notices`, label: unread > 0 ? `Notices from the Board (${unread})` : "Notices from the Board" },
     );
   } else {
-    items.push(...loggedOutNav(options.active));
+    items.push(...loggedOutNav(options.active, homePath));
   }
 
   const nav = items
@@ -1575,7 +1579,8 @@ export async function render(
     (association?.slug === "tango-mar" ? "tango" : association ? "product" : isProductHost(host) ? "product" : "tango");
   let html = shell({
     title: options.title,
-    brandHref: "/",
+    brandHref: resident ? `${homePath}/dashboard` : homePath,
+    footerHome: homePath,
     nav: onPublicHome || options.product ? "" : nav,
     account,
     landing: onPublicHome && !options.product,

@@ -48,7 +48,7 @@ export function isLocalHost(hostname: string): boolean {
   return host === "localhost" || host === "127.0.0.1";
 }
 
-/** Default off. Set LEGACY_HOST_REDIRECT to 1 after myhoadashboard.com is verified. */
+/** On when wrangler sets LEGACY_HOST_REDIRECT to 1, true, on, or yes. */
 export function legacyRedirectEnabled(env: Env): boolean {
   const value = `${(env as Env & { LEGACY_HOST_REDIRECT?: string }).LEGACY_HOST_REDIRECT ?? ""}`.trim().toLowerCase();
   return value === "1" || value === "true" || value === "on" || value === "yes";

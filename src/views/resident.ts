@@ -18,7 +18,7 @@ import { DOCUMENT_FILE_ACCEPT, isImageContentType } from "../lib/files";
 import { clip, paragraphs, esc } from "../lib/html";
 import { formatMoney } from "../lib/money";
 import type { Association } from "../types";
-import { addressLine, addressLocality, confirmDeleteButton, contactPhones, dateCell, dateTimeCell, documentFileLinks, empty, mailingAddressHtml, methodLabel, moneySpan, propertyAddressHtml, selectField, textField, areaField } from "./bits";
+import { addressLine, addressLocality, confirmDeleteButton, contactPhones, dateCell, dateTimeCell, documentFileLinks, empty, invoiceLinesTable, mailingAddressHtml, methodLabel, moneySpan, propertyAddressHtml, selectField, textField, areaField } from "./bits";
 
 function excerpt(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -76,6 +76,7 @@ export function dashboardPage(options: {
           <p class="muted">${esc(row.street_address)}</p>
           ${locality ? `<p class="muted">${esc(locality)}</p>` : ""}
           ${mailing ? `<p class="muted">Mailing address (if different): ${esc(mailing)}</p>` : ""}
+          ${(row.line_items ?? []).map((item) => `<p class="muted">${esc(item.description)} ${esc(formatMoney(item.amount_cents))}</p>`).join("")}
           ${status}
         </div>
         <div class="lot-figures">
@@ -134,7 +135,7 @@ export function dashboardPage(options: {
   const invoices = options.invoices
     .slice(0, 6)
     .map(
-      (row) => `<tr><td><a href="${base}/invoices/${esc(row.id)}">${esc(row.invoice_number)}</a></td><td>${esc(assessmentDisplayName(row.description))}</td><td>${dateCell(row.due_on, association.timezone)}</td><td>${moneySpan(row.amount_cents + row.late_fee_cents)}</td><td>${esc(row.status)}</td></tr>`,
+      (row) => `<tr><td><a href="${base}/invoices/${esc(row.id)}">${esc(row.invoice_number)}</a></td><td>${invoiceDescriptionCell(row)}</td><td>${dateCell(row.due_on, association.timezone)}</td><td>${moneySpan(row.amount_cents + row.late_fee_cents)}</td><td>${esc(row.status)}</td></tr>`,
     )
     .join("");
   const payments = options.payments
@@ -342,7 +343,7 @@ export function invoiceListPage(association: Association, invoices: InvoiceRow[]
       (row) => `<tr>
         <td><a href="/a/${esc(association.slug)}/invoices/${esc(row.id)}">${esc(row.invoice_number)}</a></td>
         <td>Lot ${esc(row.lot_number)}</td>
-        <td>${esc(assessmentDisplayName(row.description))}</td>
+        <td>${invoiceDescriptionCell(row)}</td>
         <td>${dateCell(row.issued_on, association.timezone)}</td>
         <td>${dateCell(row.due_on, association.timezone)}</td>
         <td>${moneySpan(row.amount_cents)}</td>
@@ -370,7 +371,7 @@ export function invoiceDetailPage(association: Association, invoice: InvoiceRow,
   return `<section class="panel">
     <h1>${esc(invoice.invoice_number)}</h1>
     <p>${esc(assessmentDisplayName(invoice.description))}</p>
-    <p>Lot ${esc(invoice.lot_number)}</p>
+    ${(invoice.lines ?? []).length > 0 ? invoiceLinesTable(invoice.lines ?? []) : `<p>Lot ${esc(invoice.lot_number)}</p>`}
     ${timing}
     <p>Amount ${amount} · Late fee ${moneySpan(invoice.late_fee_cents)} · Paid on this invoice ${moneySpan(Number(invoice.paid_cents))}</p>
     ${remainingLine}
@@ -406,6 +407,16 @@ export function paymentDetailPage(association: Association, payment: PaymentRow)
     ${payment.notes ? paragraphs(payment.notes) : ""}
     <p class="muted">This is the association's record of a payment. It is not a bank receipt.</p>
   </section>`;
+}
+
+function invoiceDescriptionCell(row: InvoiceRow): string {
+  const title = esc(assessmentDisplayName(row.description));
+  const lines = row.lines ?? [];
+  if (lines.length === 0) return title;
+  const detail = lines
+    .map((line) => `<span class="muted">${esc(line.description)} ${esc(formatMoney(line.amount_cents))}</span>`)
+    .join("<br>");
+  return `${title}<br>${detail}`;
 }
 
 function noticeFileLinks(slug: string, row: NoticeRow): string {

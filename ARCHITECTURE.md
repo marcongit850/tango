@@ -34,11 +34,12 @@ Do these in the dashboard or on deploy. Deploy does not apply D1 migrations.
 2. Deploy (`npx wrangler deploy`) so the custom domains in `wrangler.jsonc` attach. Wrangler creates proxied DNS for the apex and `www`. SSL is issued for those custom domains.
 3. `LEGACY_HOST_REDIRECT` is `1`. `mytangomar.com` and `www.mytangomar.com` 301 to `https://myhoadashboard.com/tangomar` and keep the path and query.
 4. Paste `migrations/0017_neighborhood_codes.sql` into the D1 console for database `tango` (after `0016`), or run `npm run db:migrate:remote`. Until this runs, codes do not resolve and new email links stay on mytangomar.com. Those old links still 301 onto `/tangomar` once the flag is on.
-5. `EMAIL_FROM` stays `Tang-O-Mar <donotreply@mytangomar.com>` until a sender on myhoadashboard.com is verified in Resend. The link in the message can already point at myhoadashboard.com.
+5. Paste `migrations/0018_fee_schedule.sql` after `0017`, or run `npm run db:migrate:remote`. Until this runs, dues stay one flat invoice per lot. After it runs, Tang-O-Mar has a fee schedule (first improved $625, additional improved $315, vacant $220, Beach box $150) and new dues years bill one itemized invoice per owner. Existing invoices are left as they are.
+6. `EMAIL_FROM` stays `Tang-O-Mar <donotreply@mytangomar.com>` until a sender on myhoadashboard.com is verified in Resend. The link in the message can already point at myhoadashboard.com.
 
 ## Data and images
 
-- Database: D1 `tango` (id `d3f6cfd2-cae0-42ef-843f-b5465efebd2b`), binding `DB`. Schema is in `migrations/` (0001 to 0017 so far). `0016_seed_seaside_demo.sql` adds the public demo association only. It does not read or update Tang-O-Mar rows. `0017_neighborhood_codes.sql` adds unique `neighborhood_code` and `vanity_slug` on `associations`, sets Tang-O-Mar to code `850` and slug `tangomar`, and sets the demo to code `100` and slug `seaside`.
+- Database: D1 `tango` (id `d3f6cfd2-cae0-42ef-843f-b5465efebd2b`), binding `DB`. Schema is in `migrations/` (0001 to 0018 so far). `0016_seed_seaside_demo.sql` adds the public demo association only. It does not read or update Tang-O-Mar rows. `0017_neighborhood_codes.sql` adds unique `neighborhood_code` and `vanity_slug` on `associations`, sets Tang-O-Mar to code `850` and slug `tangomar`, and sets the demo to code `100` and slug `seaside`. `0018_fee_schedule.sql` adds fee rates, add-ons, owner primary lots, and invoice lines. It seeds Tang-O-Mar only and does not rewrite existing invoices.
 - Document files: R2 bucket `tango-documents`, binding `DOCUMENTS`. D1 stores version metadata and the object key.
 - Logo, images, video, and small browser scripts: `public/`, served as static assets (matching URLs are served before the Worker runs).
 - Email: Resend (`https://api.resend.com/emails`).
@@ -73,7 +74,7 @@ Anyone can open a fictional association from the public home page without a magi
 
 ## Known gotchas
 
-- D1 migrations are NOT applied by deploy. Each new `migrations/00NN_*.sql` is applied by hand (paste into the D1 console for database `tango`, or `npm run db:migrate:remote`) before the PR that needs it is merged. `migrations/0016_seed_seaside_demo.sql` is required for the public demo. Until it is applied, `/demo` says the demo is not ready and does not show Tang-O-Mar data. `migrations/0017_neighborhood_codes.sql` is required for neighborhood codes and `/tangomar`. Until it is applied, `/a/tango-mar` still works and email links stay on mytangomar.com.
+- D1 migrations are NOT applied by deploy. Each new `migrations/00NN_*.sql` is applied by hand (paste into the D1 console for database `tango`, or `npm run db:migrate:remote`) before the PR that needs it is merged. `migrations/0016_seed_seaside_demo.sql` is required for the public demo. Until it is applied, `/demo` says the demo is not ready and does not show Tang-O-Mar data. `migrations/0017_neighborhood_codes.sql` is required for neighborhood codes and `/tangomar`. Until it is applied, `/a/tango-mar` still works and email links stay on mytangomar.com. `migrations/0018_fee_schedule.sql` is required for the fee schedule. Until it is applied, Admin, Ledger shows the paste steps and dues stay one flat invoice per lot.
 - The cron list in `wrangler.jsonc` replaces any cron added in the dashboard on every deploy. Change schedules in the file, not the dashboard.
 - Estoppel requests go to `ESTOPPEL_INBOX` in `src/lib/estoppel.ts` (marc@whpinc.com for now, to be changed later). The page links Florida Statute 720.30851.
 - Demo requests go to `DEMO_INBOX` in `src/lib/demo-request.ts` (marc@whpinc.com).

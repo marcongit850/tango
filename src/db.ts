@@ -13,6 +13,16 @@ import type {
 } from "./types";
 import type { LotType } from "./lib/dues";
 import { assessmentDisplayName, assessmentOpenForInvoicing, lotsToInvoice } from "./lib/dues";
+import { adjustBalancesForLines, buildOwnerBills, type BalanceLineInput } from "./lib/fee-schedule";
+import {
+  deleteFeeRowsForUser,
+  invoiceLinesReady,
+  listInvoiceLines,
+  loadBillingInputs,
+  propertyFeeBlockCount,
+  clearPropertyFeeLinks,
+  type InvoiceLineRecord,
+} from "./lib/fee-schedule-store";
 import { isForeignKey, isMissingColumn, isMissingTable } from "./lib/errors";
 import { logError } from "./lib/log";
 import { balanceCents, invoiceStatus, isDelinquent } from "./lib/money";
@@ -351,6 +361,7 @@ export type BalanceRow = {
   past_due: number;
   balance_cents: number;
   delinquent: boolean;
+  line_items?: { description: string; amount_cents: number }[];
 };
 
 type BalanceQueryRow = Omit<BalanceRow, "balance_cents" | "delinquent">;
@@ -374,30 +385,42 @@ function mapBalance(row: BalanceQueryRow): BalanceRow {
 // amount stays off the balance until the assessment opens. Recorded payments
 // still count immediately. Past due requires both the issue date and the due
 // date to have passed, so a scheduled future year is never past due.
-const BALANCE_SQL_TAIL = `
+function balanceSqlTail(excludeLinedInvoices: boolean): string {
+  const excludeInvoice = excludeLinedInvoices
+    ? "AND NOT EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = i.id AND l.association_id = i.association_id)"
+    : "";
+  const excludePayment = excludeLinedInvoices
+    ? "AND (pay.invoice_id IS NULL OR NOT EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = pay.invoice_id AND l.association_id = pay.association_id))"
+    : "";
+  return `
     COALESCE((
       SELECT SUM(amount_cents + late_fee_cents) FROM invoices i
       WHERE i.property_id = p.id AND i.association_id = p.association_id AND i.status != 'void'
         AND i.issued_on <= ?
+        ${excludeInvoice}
     ), 0) AS charges_cents,
     COALESCE((
       SELECT SUM(late_fee_cents) FROM invoices i
       WHERE i.property_id = p.id AND i.association_id = p.association_id AND i.status != 'void'
         AND i.issued_on <= ?
+        ${excludeInvoice}
     ), 0) AS late_fee_cents,
     COALESCE((
       SELECT SUM(amount_cents) FROM payments pay
       WHERE pay.property_id = p.id AND pay.association_id = p.association_id
+        ${excludePayment}
     ), 0) AS payment_cents,
     CASE WHEN EXISTS (
       SELECT 1 FROM invoices i
       WHERE i.property_id = p.id AND i.association_id = p.association_id
         AND i.status IN ('open', 'partial') AND i.due_on < ? AND i.issued_on <= ?
+        ${excludeInvoice}
     ) THEN 1 ELSE 0 END AS past_due
   FROM properties p
 `;
+}
 
-async function balanceSql(db: D1Database): Promise<string> {
+async function balanceSql(db: D1Database, excludeLinedInvoices: boolean): Promise<string> {
   const names = await columnNames(db, "properties");
   const place = ["city", "state", "postal_code"]
     .map((column) => (names.has(column) ? `p.${column}` : `'' AS ${column}`))
@@ -412,7 +435,71 @@ async function balanceSql(db: D1Database): Promise<string> {
     p.street_address,
     ${place},
     ${extra},
-    ${BALANCE_SQL_TAIL}`;
+    ${balanceSqlTail(excludeLinedInvoices)}`;
+}
+
+async function withLineBalances(db: D1Database, associationId: string, rows: BalanceRow[], today: string): Promise<BalanceRow[]> {
+  if (!(await invoiceLinesReady(db))) return rows;
+  const { results: lineRows } = await db
+    .prepare(
+      `SELECT l.id, l.invoice_id, l.property_id, l.description, l.amount_cents, l.sort_order,
+              i.late_fee_cents, i.property_id AS anchor_property_id, i.due_on, i.issued_on, i.status
+       FROM invoice_lines l
+       JOIN invoices i ON i.id = l.invoice_id AND i.association_id = l.association_id
+       WHERE l.association_id = ? AND i.status != 'void' AND i.issued_on <= ?`,
+    )
+    .bind(associationId, today)
+    .all<{
+      id: string;
+      invoice_id: string;
+      property_id: string | null;
+      description: string;
+      amount_cents: number;
+      sort_order: number;
+      late_fee_cents: number;
+      anchor_property_id: string;
+      due_on: string;
+      issued_on: string;
+      status: string;
+    }>();
+  const { results: paidRows } = await db
+    .prepare(
+      `SELECT pay.invoice_id AS invoice_id, SUM(pay.amount_cents) AS paid_cents
+       FROM payments pay
+       JOIN invoices i ON i.id = pay.invoice_id AND i.association_id = pay.association_id
+       WHERE pay.association_id = ? AND pay.invoice_id IS NOT NULL AND i.issued_on <= ?
+         AND EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = i.id AND l.association_id = i.association_id)
+       GROUP BY pay.invoice_id`,
+    )
+    .bind(associationId, today)
+    .all<{ invoice_id: string; paid_cents: number }>();
+  const { results: futureRows } = await db
+    .prepare(
+      `SELECT i.property_id AS property_id, SUM(pay.amount_cents) AS paid_cents
+       FROM payments pay
+       JOIN invoices i ON i.id = pay.invoice_id AND i.association_id = pay.association_id
+       WHERE pay.association_id = ? AND i.issued_on > ?
+         AND EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = i.id AND l.association_id = i.association_id)
+       GROUP BY i.property_id`,
+    )
+    .bind(associationId, today)
+    .all<{ property_id: string; paid_cents: number }>();
+  const lines: BalanceLineInput[] = lineRows.map((row) => ({
+    id: row.id,
+    invoiceId: row.invoice_id,
+    propertyId: row.property_id,
+    anchorPropertyId: row.anchor_property_id,
+    description: row.description,
+    amountCents: Number(row.amount_cents),
+    sortOrder: Number(row.sort_order),
+    lateFeeCents: Number(row.late_fee_cents),
+    dueOn: row.due_on,
+    issuedOn: row.issued_on,
+    status: row.status,
+  }));
+  const paidByInvoice = new Map(paidRows.map((row) => [row.invoice_id, Number(row.paid_cents)]));
+  const futurePaid = new Map(futureRows.map((row) => [row.property_id, Number(row.paid_cents)]));
+  return adjustBalancesForLines(rows, lines, paidByInvoice, futurePaid, today);
 }
 
 export async function ledgerForUser(
@@ -421,7 +508,8 @@ export async function ledgerForUser(
   userId: string,
   today: string,
 ): Promise<BalanceRow[]> {
-  const sql = await balanceSql(db);
+  const lined = await invoiceLinesReady(db);
+  const sql = await balanceSql(db, lined);
   const { results } = await db
     .prepare(
       `${sql}
@@ -431,7 +519,7 @@ export async function ledgerForUser(
     )
     .bind(today, today, today, today, associationId, userId)
     .all<BalanceQueryRow>();
-  return results.map(mapBalance);
+  return withLineBalances(db, associationId, results.map(mapBalance), today);
 }
 
 export async function ledgerForAssociation(
@@ -439,12 +527,13 @@ export async function ledgerForAssociation(
   associationId: string,
   today: string,
 ): Promise<BalanceRow[]> {
-  const sql = await balanceSql(db);
+  const lined = await invoiceLinesReady(db);
+  const sql = await balanceSql(db, lined);
   const { results } = await db
     .prepare(`${sql} WHERE p.association_id = ? ORDER BY p.lot_number`)
     .bind(today, today, today, today, associationId)
     .all<BalanceQueryRow>();
-  return results.map(mapBalance);
+  return withLineBalances(db, associationId, results.map(mapBalance), today);
 }
 
 export async function ownerIdsForProperty(
@@ -459,6 +548,17 @@ export async function ownerIdsForProperty(
   return results.map((row) => row.user_id);
 }
 
+export type InvoiceLineRow = {
+  id: string;
+  invoice_id: string;
+  property_id: string | null;
+  description: string;
+  quantity: number;
+  unit_amount_cents: number;
+  amount_cents: number;
+  sort_order: number;
+};
+
 export type InvoiceRow = {
   id: string;
   property_id: string;
@@ -471,7 +571,37 @@ export type InvoiceRow = {
   due_on: string;
   status: InvoiceStatus;
   paid_cents: number;
+  lines?: InvoiceLineRow[];
 };
+
+function mapInvoiceLine(row: InvoiceLineRecord): InvoiceLineRow {
+  return {
+    id: row.id,
+    invoice_id: row.invoice_id,
+    property_id: row.property_id,
+    description: row.description,
+    quantity: Number(row.quantity),
+    unit_amount_cents: Number(row.unit_amount_cents),
+    amount_cents: Number(row.amount_cents),
+    sort_order: Number(row.sort_order),
+  };
+}
+
+async function attachInvoiceLines(db: D1Database, associationId: string, rows: InvoiceRow[]): Promise<InvoiceRow[]> {
+  if (rows.length === 0) return rows;
+  const lines = await listInvoiceLines(
+    db,
+    associationId,
+    rows.map((row) => row.id),
+  );
+  const grouped = new Map<string, InvoiceLineRow[]>();
+  for (const line of lines) {
+    const list = grouped.get(line.invoice_id) ?? [];
+    list.push(mapInvoiceLine(line));
+    grouped.set(line.invoice_id, list);
+  }
+  return rows.map((row) => ({ ...row, lines: grouped.get(row.id) ?? [] }));
+}
 
 export async function invoicesForUser(
   db: D1Database,
@@ -493,7 +623,7 @@ export async function invoicesForUser(
     )
     .bind(associationId, userId, today)
     .all<InvoiceRow>();
-  return results;
+  return attachInvoiceLines(db, associationId, results);
 }
 
 export async function invoiceById(
@@ -501,7 +631,7 @@ export async function invoiceById(
   associationId: string,
   invoiceId: string,
 ): Promise<InvoiceRow | null> {
-  return db
+  const row = await db
     .prepare(
       `SELECT i.id, i.property_id, p.lot_number, i.invoice_number, i.description, i.amount_cents,
               i.late_fee_cents, i.issued_on, i.due_on, i.status,
@@ -512,6 +642,9 @@ export async function invoiceById(
     )
     .bind(associationId, invoiceId)
     .first<InvoiceRow>();
+  if (!row) return null;
+  const [withLines] = await attachInvoiceLines(db, associationId, [row]);
+  return withLines ?? null;
 }
 
 export async function outstandingInvoiceCents(db: D1Database, associationId: string, today: string): Promise<number> {
@@ -537,6 +670,13 @@ export async function invoicesForProperty(
   associationId: string,
   propertyId: string,
 ): Promise<InvoiceRow[]> {
+  const lined = await invoiceLinesReady(db);
+  const lineMatch = lined
+    ? `OR EXISTS (
+         SELECT 1 FROM invoice_lines l
+         WHERE l.invoice_id = i.id AND l.association_id = i.association_id AND l.property_id = ?
+       )`
+    : "";
   const { results } = await db
     .prepare(
       `SELECT i.id, i.property_id, p.lot_number, i.invoice_number, i.description, i.amount_cents,
@@ -544,12 +684,12 @@ export async function invoicesForProperty(
               COALESCE((SELECT SUM(amount_cents) FROM payments pay WHERE pay.invoice_id = i.id AND pay.association_id = i.association_id), 0) AS paid_cents
        FROM invoices i
        JOIN properties p ON p.id = i.property_id AND p.association_id = i.association_id
-       WHERE i.association_id = ? AND i.property_id = ?
+       WHERE i.association_id = ? AND (i.property_id = ? ${lineMatch})
        ORDER BY i.due_on DESC, i.invoice_number`,
     )
-    .bind(associationId, propertyId)
+    .bind(...(lined ? [associationId, propertyId, propertyId] : [associationId, propertyId]))
     .all<InvoiceRow>();
-  return results;
+  return attachInvoiceLines(db, associationId, results);
 }
 
 export type InvoicePaymentRow = {
@@ -648,6 +788,7 @@ export type AssessmentRow = {
   due_on: string;
   opens_on: string | null;
   lot_type: string | null;
+  billing_mode?: string | null;
   invoice_count: number;
 };
 
@@ -717,7 +858,30 @@ export async function upcomingAssessments(
     )
     .bind(userId, today, associationId, today, today, userId, associationId)
     .all<AssessmentRow>();
-  return results;
+  return applySchedulePreviewAmounts(db, associationId, userId, results);
+}
+
+async function applySchedulePreviewAmounts(
+  db: D1Database,
+  associationId: string,
+  userId: string,
+  rows: AssessmentRow[],
+): Promise<AssessmentRow[]> {
+  if (!(await hasColumn(db, "assessments", "billing_mode"))) return rows;
+  const ids = rows.map((row) => row.id);
+  if (ids.length === 0) return rows;
+  const marks = ids.map(() => "?").join(", ");
+  const { results: modes } = await db
+    .prepare(`SELECT id, billing_mode FROM assessments WHERE association_id = ? AND id IN (${marks})`)
+    .bind(associationId, ...ids)
+    .all<{ id: string; billing_mode: string | null }>();
+  const scheduleIds = new Set(modes.filter((row) => row.billing_mode === "schedule").map((row) => row.id));
+  if (scheduleIds.size === 0) return rows.map((row) => ({ ...row, billing_mode: "flat" }));
+  const inputs = await loadBillingInputs(db, associationId);
+  const total = inputs ? (buildOwnerBills(inputs).bills.find((bill) => bill.userId === userId)?.totalCents ?? 0) : 0;
+  return rows.map((row) =>
+    scheduleIds.has(row.id) ? { ...row, billing_mode: "schedule", amount_cents: total } : { ...row, billing_mode: "flat" },
+  );
 }
 
 export type NoticeRow = {
@@ -1301,6 +1465,7 @@ export async function deletePersonAccount(
     .bind(userId, associationId)
     .first<{ n: number }>();
   const shared = Number(others?.n ?? 0) > 0;
+  await deleteFeeRowsForUser(db, associationId, userId, shared);
 
   const filesReady = await messageAttachmentsReady(db);
   const attachmentDelete = !filesReady
@@ -1369,7 +1534,9 @@ export async function deletePropertyIfClear(
     .bind(associationId, propertyId, associationId, propertyId)
     .first<{ invoices: number; payments: number }>();
   if (Number(counts?.invoices ?? 0) > 0 || Number(counts?.payments ?? 0) > 0) return "blocked";
+  if ((await propertyFeeBlockCount(db, associationId, propertyId)) > 0) return "blocked";
   try {
+    await clearPropertyFeeLinks(db, associationId, propertyId);
     const results = await db.batch([
       db.prepare("UPDATE messages SET property_id = NULL WHERE association_id = ? AND property_id = ?").bind(associationId, propertyId),
       db.prepare("DELETE FROM property_owners WHERE association_id = ? AND property_id = ?").bind(associationId, propertyId),
@@ -1841,6 +2008,7 @@ export type AssessmentAdminRow = {
   due_on: string;
   opens_on: string | null;
   lot_type: LotType | null;
+  billing_mode?: string | null;
   invoice_count: number;
 };
 
@@ -1849,9 +2017,10 @@ export async function duesColumnsReady(db: D1Database): Promise<boolean> {
 }
 
 export async function listAssessments(db: D1Database, associationId: string): Promise<AssessmentAdminRow[]> {
+  const mode = (await hasColumn(db, "assessments", "billing_mode")) ? "a.billing_mode" : "'flat' AS billing_mode";
   const { results } = await db
     .prepare(
-      `SELECT a.id, a.name, a.description, a.amount_cents, a.due_on, a.opens_on, a.lot_type,
+      `SELECT a.id, a.name, a.description, a.amount_cents, a.due_on, a.opens_on, a.lot_type, ${mode},
               (SELECT COUNT(*) FROM invoices i
                WHERE i.assessment_id = a.id AND i.association_id = a.association_id AND i.status != 'void') AS invoice_count
        FROM assessments a
@@ -1866,15 +2035,28 @@ export async function listAssessments(db: D1Database, associationId: string): Pr
 export async function assignAssessmentInvoices(
   db: D1Database,
   input: { associationId: string; assessmentId: string; today: string; includeVoided?: boolean },
-): Promise<{ created: number; already: number; name: string; issuedOn: string } | null> {
+): Promise<{ created: number; already: number; name: string; issuedOn: string; audience: "lots" | "owners" } | null> {
+  const modeReady = await hasColumn(db, "assessments", "billing_mode");
   const assessment = await db
     .prepare(
-      `SELECT id, name, amount_cents, due_on, opens_on, lot_type
-       FROM assessments WHERE association_id = ? AND id = ?`,
+      modeReady
+        ? `SELECT id, name, amount_cents, due_on, opens_on, lot_type, billing_mode
+           FROM assessments WHERE association_id = ? AND id = ?`
+        : `SELECT id, name, amount_cents, due_on, opens_on, lot_type, 'flat' AS billing_mode
+           FROM assessments WHERE association_id = ? AND id = ?`,
     )
     .bind(input.associationId, input.assessmentId)
-    .first<{ id: string; name: string; amount_cents: number; due_on: string; opens_on: string | null; lot_type: LotType | null }>();
+    .first<{
+      id: string;
+      name: string;
+      amount_cents: number;
+      due_on: string;
+      opens_on: string | null;
+      lot_type: LotType | null;
+      billing_mode: string | null;
+    }>();
   if (!assessment) return null;
+  if (assessment.billing_mode === "schedule") return assignScheduleAssessmentInvoices(db, input, assessment);
   const lots = await listLots(db, input.associationId);
   // A voided invoice is still an invoice. Manual assign can replace one. The daily
   // job passes includeVoided so a void is not opened again the next morning.
@@ -1927,7 +2109,120 @@ export async function assignAssessmentInvoices(
       .run();
     created += 1;
   }
-  return { created, already: plan.already, name: displayName, issuedOn };
+  return { created, already: plan.already, name: displayName, issuedOn, audience: "lots" };
+}
+
+async function assignScheduleAssessmentInvoices(
+  db: D1Database,
+  input: { associationId: string; assessmentId: string; today: string; includeVoided?: boolean },
+  assessment: { id: string; name: string; due_on: string; opens_on: string | null },
+): Promise<{ created: number; already: number; name: string; issuedOn: string; audience: "owners" }> {
+  const inputs = await loadBillingInputs(db, input.associationId);
+  const issuedOn = assessment.opens_on && /^\d{4}-\d{2}-\d{2}$/.test(assessment.opens_on) ? assessment.opens_on : input.today;
+  const displayName = assessmentDisplayName(assessment.name);
+  if (!inputs) return { created: 0, already: 0, name: displayName, issuedOn, audience: "owners" };
+  const voidClause = input.includeVoided ? "" : " AND i.status != 'void'";
+  const billedColumn = (await columnNames(db, "invoices")).has("billed_user_id");
+  const { results: existing } = await db
+    .prepare(
+      `SELECT i.id, i.property_id, ${billedColumn ? "i.billed_user_id" : "NULL AS billed_user_id"}
+       FROM invoices i
+       WHERE i.association_id = ? AND i.assessment_id = ?${voidClause}`,
+    )
+    .bind(input.associationId, assessment.id)
+    .all<{ id: string; property_id: string; billed_user_id: string | null }>();
+  const blockedUsers = new Set(existing.map((row) => row.billed_user_id).filter((id): id is string => Boolean(id)));
+  const blockedLots = new Set(existing.map((row) => row.property_id));
+  if (existing.length > 0 && (await invoiceLinesReady(db))) {
+    const lines = await listInvoiceLines(
+      db,
+      input.associationId,
+      existing.map((row) => row.id),
+    );
+    for (const line of lines) {
+      if (line.property_id) blockedLots.add(line.property_id);
+    }
+  }
+  const plan = buildOwnerBills(inputs);
+  const now = new Date().toISOString();
+  let created = 0;
+  let already = 0;
+  for (const bill of plan.bills) {
+    const lotAlreadyInvoiced = bill.lines.some(
+      (line) => line.kind !== "addon" && line.propertyId !== null && blockedLots.has(line.propertyId),
+    );
+    if (blockedUsers.has(bill.userId) || lotAlreadyInvoiced || !bill.anchorPropertyId || bill.lines.length === 0) {
+      already += 1;
+      continue;
+    }
+    const id = crypto.randomUUID();
+    const invoiceNumber = `FEE-${assessment.id.slice(0, 8)}-${bill.userId.replace(/[^A-Za-z0-9]/g, "").slice(0, 12)}`.slice(0, 40);
+    const columns = billedColumn
+      ? `id, association_id, property_id, assessment_id, billed_user_id, invoice_number, description,
+         amount_cents, late_fee_cents, issued_on, due_on, status, created_at`
+      : `id, association_id, property_id, assessment_id, invoice_number, description,
+         amount_cents, late_fee_cents, issued_on, due_on, status, created_at`;
+    const values = billedColumn ? "?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'open', ?" : "?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'open', ?";
+    const statement = db.prepare(`INSERT INTO invoices (${columns}) VALUES (${values})`);
+    if (billedColumn) {
+      await statement
+        .bind(
+          id,
+          input.associationId,
+          bill.anchorPropertyId,
+          assessment.id,
+          bill.userId,
+          invoiceNumber,
+          displayName,
+          bill.totalCents,
+          issuedOn,
+          assessment.due_on,
+          now,
+        )
+        .run();
+    } else {
+      await statement
+        .bind(
+          id,
+          input.associationId,
+          bill.anchorPropertyId,
+          assessment.id,
+          invoiceNumber,
+          displayName,
+          bill.totalCents,
+          issuedOn,
+          assessment.due_on,
+          now,
+        )
+        .run();
+    }
+    for (const line of bill.lines) {
+      await db
+        .prepare(
+          `INSERT INTO invoice_lines (
+             id, association_id, invoice_id, property_id, near_property_id, addon_type_id, kind,
+             description, quantity, unit_amount_cents, amount_cents, sort_order
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          input.associationId,
+          id,
+          line.propertyId,
+          line.nearPropertyId,
+          line.addonTypeId,
+          line.kind,
+          line.description,
+          line.quantity,
+          line.unitAmountCents,
+          line.amountCents,
+          line.sortOrder,
+        )
+        .run();
+    }
+    created += 1;
+  }
+  return { created, already, name: displayName, issuedOn, audience: "owners" };
 }
 
 export type IssuedAssessmentInvoices = {
@@ -1991,19 +2286,35 @@ export async function deleteAssessment(
     .first<{ name: string }>();
   if (!assessment) return { ok: false, reason: "missing" };
 
-  const results = await db.batch([
+  const unpaidInvoices = `NOT EXISTS (
+               SELECT 1
+               FROM payments pay
+               JOIN invoices paid ON paid.id = pay.invoice_id AND paid.association_id = pay.association_id
+               WHERE paid.association_id = i.association_id AND paid.assessment_id = i.assessment_id
+             )`;
+  const statements = [];
+  if (await invoiceLinesReady(db)) {
+    statements.push(
+      db
+        .prepare(
+          `DELETE FROM invoice_lines
+           WHERE association_id = ? AND invoice_id IN (
+             SELECT i.id FROM invoices i
+             WHERE i.association_id = ? AND i.assessment_id = ?
+               AND ${unpaidInvoices}
+           )`,
+        )
+        .bind(associationId, associationId, assessmentId),
+    );
+  }
+  statements.push(
     db
       .prepare(
         `DELETE FROM invoices
          WHERE rowid IN (
            SELECT i.rowid FROM invoices i
            WHERE i.association_id = ? AND i.assessment_id = ?
-             AND NOT EXISTS (
-               SELECT 1
-               FROM payments pay
-               JOIN invoices paid ON paid.id = pay.invoice_id AND paid.association_id = pay.association_id
-               WHERE paid.association_id = i.association_id AND paid.assessment_id = i.assessment_id
-             )
+             AND ${unpaidInvoices}
          )`,
       )
       .bind(associationId, assessmentId),
@@ -2017,10 +2328,11 @@ export async function deleteAssessment(
            )`,
       )
       .bind(associationId, assessmentId),
-  ]);
-
-  if ((results[1]?.meta.changes ?? 0) > 0) {
-    return { ok: true, name: assessment.name, invoicesRemoved: results[0]?.meta.changes ?? 0 };
+  );
+  const results = await db.batch(statements);
+  const invoiceChanges = results[results.length - 2]?.meta.changes ?? 0;
+  if ((results[results.length - 1]?.meta.changes ?? 0) > 0) {
+    return { ok: true, name: assessment.name, invoicesRemoved: invoiceChanges };
   }
 
   const paid = await db

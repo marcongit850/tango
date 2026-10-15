@@ -4,6 +4,15 @@ import { isBrowserViewable } from "../lib/files";
 import { esc } from "../lib/html";
 import { formatMoney } from "../lib/money";
 
+export function invoiceLinesTable(lines: readonly { description: string; amount_cents: number }[]): string {
+  if (lines.length === 0) return "";
+  const body = lines
+    .map((line) => `<tr><td>${esc(line.description)}</td><td>${moneySpan(line.amount_cents)}</td></tr>`)
+    .join("");
+  const total = lines.reduce((sum, line) => sum + Number(line.amount_cents), 0);
+  return `<table><thead><tr><th>Line</th><th>Amount</th></tr></thead><tbody>${body}<tr><td>Total</td><td>${moneySpan(total)}</td></tr></tbody></table>`;
+}
+
 export function moneySpan(cents: number): string {
   const tone = cents > 0 ? "owe" : cents < 0 ? "credit" : "settled";
   const label = cents < 0 ? `${formatMoney(cents)} credit` : formatMoney(cents);

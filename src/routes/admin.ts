@@ -69,7 +69,23 @@ import {
   normalizeFolder,
   placeDocumentFolder,
 } from "../lib/categories";
-import { assessmentDisplayName, defaultDuesYear, isDuesSchedule, isLotType, scheduledDues } from "../lib/dues";
+import { assessmentDisplayName, defaultDuesYear, duesInstallments, isDuesSchedule, isLotType, scheduledDues } from "../lib/dues";
+import {
+  addonTypeInAssociation,
+  clearOwnerPrimaryLot,
+  deleteInvoiceLines,
+  deleteOwnerAddon,
+  feeBillingReady,
+  getFeeRates,
+  insertAddonType,
+  insertOwnerAddon,
+  loadFeeScheduleView,
+  saveFeeRates,
+  setOwnerPrimaryLot,
+  sumInvoiceLineCents,
+  updateAddonType,
+  userLinkedToLot,
+} from "../lib/fee-schedule-store";
 import { parseOwnersCsv } from "../lib/csv";
 import { OWNER_IMPORT_TEMPLATE } from "../lib/owner-import-template";
 import { formatAddress, formatDateTime, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../lib/dates";
@@ -623,9 +639,13 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const ledger = await ledgerForUser(c.env.DB, association.id, owner.user_id, todayIso(association.timezone));
     const total = ledger.reduce((sum, row) => sum + row.balance_cents, 0);
     const lines = ledger.map((row) => `Lot ${row.lot_number}: ${formatMoney(row.balance_cents)}`);
+    const itemLines = ledger.flatMap((row) =>
+      (row.line_items ?? []).map((item) => `${item.description}: ${formatMoney(item.amount_cents)}`),
+    );
     const body = [
       `${association.name} is writing about the balance on your lots.`,
       ...lines,
+      ...(itemLines.length > 0 ? ["Itemized dues:", ...itemLines] : []),
       `Total: ${formatMoney(total)}.`,
       `Mail checks to ${formatAddress(association)}.`,
       "This portal does not take card or ACH payments.",
@@ -1023,6 +1043,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         assessments,
         duesReady,
         duesYear: defaultDuesYear(today),
+        feeSchedule: await loadFeeScheduleView(c.env.DB, association.id),
         canEdit: canEditAdmin(membership),
       }),
     });
@@ -1171,6 +1192,8 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     if (!description || amount === null || amount < 0 || lateFee === null || lateFee < 0 || !isIsoDate(issuedOn) || !isIsoDate(dueOn) || !INVOICE_STATUSES.has(status)) {
       return redirectTo(c, back, "Check the description, amounts, dates, and status.", "warn");
     }
+    const lineSum = await sumInvoiceLineCents(c.env.DB, association.id, id);
+    const amountToSave = lineSum === null ? amount : lineSum;
     const nextStatus = status === "void" ? "void" : "open";
     await c.env.DB
       .prepare(
@@ -1178,7 +1201,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
          SET description = ?, amount_cents = ?, late_fee_cents = ?, issued_on = ?, due_on = ?, status = ?
          WHERE association_id = ? AND id = ?`,
       )
-      .bind(description, amount, lateFee, issuedOn, dueOn, nextStatus, association.id, id)
+      .bind(description, amountToSave, lateFee, issuedOn, dueOn, nextStatus, association.id, id)
       .run();
     if (nextStatus !== "void") await refreshInvoiceStatus(c.env.DB, association.id, id);
     const saved = await invoiceById(c.env.DB, association.id, id);
@@ -1208,6 +1231,12 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     if (!invoice) throw new NotFoundError();
     const back = `/a/${association.slug}/admin/invoices/${id}`;
     if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, back, "Confirm the delete first.", "warn");
+    const paid = await c.env.DB
+      .prepare("SELECT 1 AS found FROM payments WHERE association_id = ? AND invoice_id = ? LIMIT 1")
+      .bind(association.id, id)
+      .first<{ found: number }>();
+    if (paid) return redirectTo(c, back, "That invoice was not deleted because a payment is recorded on it.", "warn");
+    await deleteInvoiceLines(c.env.DB, association.id, id);
     const result = await c.env.DB
       .prepare(
         `DELETE FROM invoices
@@ -1324,6 +1353,67 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     if (!Number.isInteger(year) || year < 2000 || year > 2100) return redirectTo(c, back, "Enter a year between 2000 and 2100.", "warn");
     if (!(await duesColumnsReady(c.env.DB))) {
       return redirectTo(c, back, "Apply the admin migration in D1, then try again. The steps are in the README under Admin improvements.", "warn");
+    }
+    const scheduleRates = (await feeBillingReady(c.env.DB)) ? await getFeeRates(c.env.DB, association.id) : null;
+    if (scheduleRates) {
+      const opensOn = textValue(fields, "opens_on", 20);
+      const dueOn = textValue(fields, "due_on", 20);
+      if (!isIsoDate(opensOn) || !isIsoDate(dueOn)) {
+        return redirectTo(c, back, "Enter valid open and due dates.", "warn");
+      }
+      const schedule = textValue(fields, "schedule", 20) || "annual";
+      if (!isDuesSchedule(schedule)) {
+        return redirectTo(c, back, "Choose Monthly, Quarterly, Semi-annual, or Annual.", "warn");
+      }
+      const created: string[] = [];
+      const existing: string[] = [];
+      for (const row of duesInstallments({ year, schedule, opensOn, dueOn })) {
+        const found = await c.env.DB
+          .prepare(
+            `SELECT id FROM assessments
+             WHERE association_id = ? AND due_on = ? AND billing_mode = 'schedule'`,
+          )
+          .bind(association.id, row.dueOn)
+          .first<{ id: string }>();
+        if (found) {
+          existing.push(row.name);
+          continue;
+        }
+        const id = crypto.randomUUID();
+        await c.env.DB
+          .prepare(
+            `INSERT INTO assessments (
+               id, association_id, name, description, amount_cents, due_on, opens_on, lot_type, billing_mode, created_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'schedule', ?)`,
+          )
+          .bind(
+            id,
+            association.id,
+            row.name,
+            "HOA dues for this period. Amounts follow the fee schedule.",
+            scheduleRates.firstImprovedCents,
+            row.dueOn,
+            row.opensOn,
+            new Date().toISOString(),
+          )
+          .run();
+        created.push(row.name);
+        await writeAudit(c.env.DB, {
+          associationId: association.id,
+          actorUserId: user.id,
+          action: "assessment_create",
+          entityType: "assessment",
+          entityId: id,
+          detail: row.name,
+        });
+      }
+      const message = [
+        created.length ? `Added ${created.join(" and ")}.` : "",
+        existing.length ? `Already had ${existing.join(" and ")}.` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return redirectTo(c, back, message || "Nothing to add.");
     }
     const improvedAmount = parseMoneyToCents(textValue(fields, "improved_amount", 40));
     const unimprovedAmount = parseMoneyToCents(textValue(fields, "unimproved_amount", 40));
@@ -1458,10 +1548,16 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       result.issuedOn > todayIso(association.timezone)
         ? ` Those invoices are scheduled and do not count toward balances until ${result.issuedOn}.`
         : "";
+    const who =
+      result.audience === "owners"
+        ? result.created === 1
+          ? "1 owner"
+          : `${result.created} owners`
+        : `${result.created} lots`;
     return redirectTo(
       c,
       back,
-      `Assigned ${assessmentDisplayName(result.name)} to ${result.created} lots. ${result.already} already had it.${scheduled}`,
+      `Assigned ${assessmentDisplayName(result.name)} to ${who}. ${result.already} already had it.${scheduled}`,
     );
   });
 
@@ -1492,6 +1588,190 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       detail: outcome.invoicesRemoved > 0 ? `${outcome.name}. ${removed}` : outcome.name,
     });
     return redirectTo(c, back, outcome.invoicesRemoved > 0 ? `Assessment deleted. ${removed}` : "Assessment deleted.");
+  });
+
+  app.post("/a/:slug/admin/fee-schedule", async (c) => {
+    const { association, user } = requireEditor(c);
+    const fields = await readForm(c);
+    const back = `/a/${association.slug}/admin/ledger#fee-schedule`;
+    if (!(await feeBillingReady(c.env.DB))) {
+      return redirectTo(c, back, "Apply the fee schedule migration in D1, then try again. The steps are in the README under Fee schedule.", "warn");
+    }
+    const first = parseMoneyToCents(textValue(fields, "first_improved_amount", 40));
+    const additional = parseMoneyToCents(textValue(fields, "additional_improved_amount", 40));
+    const vacant = parseMoneyToCents(textValue(fields, "vacant_amount", 40));
+    if (first === null || additional === null || vacant === null || first < 0 || additional < 0 || vacant < 0) {
+      return redirectTo(c, back, "Enter amounts for the first improved lot, each additional improved lot, and each vacant lot.", "warn");
+    }
+    await saveFeeRates(
+      c.env.DB,
+      association.id,
+      { firstImprovedCents: first, additionalImprovedCents: additional, vacantCents: vacant },
+      new Date().toISOString(),
+    );
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "fee_schedule_update",
+      entityType: "association",
+      entityId: association.id,
+      detail: `First improved ${formatMoney(first)}, additional improved ${formatMoney(additional)}, vacant ${formatMoney(vacant)}.`,
+    });
+    return redirectTo(c, back, "Fee schedule saved. Invoices already assigned were not changed.");
+  });
+
+  app.post("/a/:slug/admin/fee-schedule/primary", async (c) => {
+    const { association, user } = requireEditor(c);
+    const fields = await readForm(c);
+    const back = `/a/${association.slug}/admin/ledger#fee-schedule`;
+    const userId = textValue(fields, "user_id", 80);
+    const propertyId = textValue(fields, "property_id", 80);
+    if (!userId) return redirectTo(c, back, "Choose an owner.", "warn");
+    if (!propertyId) {
+      await clearOwnerPrimaryLot(c.env.DB, association.id, userId);
+      await writeAudit(c.env.DB, {
+        associationId: association.id,
+        actorUserId: user.id,
+        action: "fee_primary_lot",
+        entityType: "user",
+        entityId: userId,
+        detail: "First improved lot cleared. The lowest improved lot number is used.",
+      });
+      return redirectTo(c, back, "First improved lot cleared. The lowest improved lot number is used.");
+    }
+    if (!(await userLinkedToLot(c.env.DB, association.id, userId, propertyId))) {
+      return redirectTo(c, back, "Choose a lot linked to that owner.", "warn");
+    }
+    await setOwnerPrimaryLot(c.env.DB, {
+      associationId: association.id,
+      userId,
+      propertyId,
+      now: new Date().toISOString(),
+    });
+    const property = await propertyInAssociation(c.env.DB, association.id, propertyId);
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "fee_primary_lot",
+      entityType: "user",
+      entityId: userId,
+      detail: `First improved lot set to ${property?.lot_number ?? propertyId}.`,
+    });
+    return redirectTo(c, back, `First improved lot saved${property ? ` for lot ${property.lot_number}` : ""}.`);
+  });
+
+  app.post("/a/:slug/admin/fee-addons", async (c) => {
+    const { association, user } = requireEditor(c);
+    const fields = await readForm(c);
+    const back = `/a/${association.slug}/admin/ledger#fee-schedule`;
+    if (!(await feeBillingReady(c.env.DB))) {
+      return redirectTo(c, back, "Apply the fee schedule migration in D1, then try again.", "warn");
+    }
+    const name = textValue(fields, "name", 80);
+    const amount = parseMoneyToCents(textValue(fields, "amount", 40));
+    if (!name || amount === null || amount < 0) return redirectTo(c, back, "Enter an add-on name and price.", "warn");
+    const id = crypto.randomUUID();
+    await insertAddonType(c.env.DB, { id, associationId: association.id, name, amountCents: amount, now: new Date().toISOString() });
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "fee_addon_create",
+      entityType: "fee_addon",
+      entityId: id,
+      detail: `${name} ${formatMoney(amount)}`,
+    });
+    return redirectTo(c, back, `Added ${name}.`);
+  });
+
+  app.post("/a/:slug/admin/fee-addons/:addonId", async (c) => {
+    const { association, user } = requireEditor(c);
+    const fields = await readForm(c);
+    const back = `/a/${association.slug}/admin/ledger#fee-schedule`;
+    const name = textValue(fields, "name", 80);
+    const amount = parseMoneyToCents(textValue(fields, "amount", 40));
+    const active = textValue(fields, "active", 2) !== "0";
+    if (!name || amount === null || amount < 0) return redirectTo(c, back, "Enter an add-on name and price.", "warn");
+    const saved = await updateAddonType(c.env.DB, {
+      associationId: association.id,
+      id: c.req.param("addonId"),
+      name,
+      amountCents: amount,
+      active,
+    });
+    if (!saved) throw new NotFoundError();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "fee_addon_update",
+      entityType: "fee_addon",
+      entityId: c.req.param("addonId"),
+      detail: `${name} ${formatMoney(amount)}${active ? "" : " inactive"}`,
+    });
+    return redirectTo(c, back, active ? `${name} saved.` : `${name} deactivated.`);
+  });
+
+  app.post("/a/:slug/admin/owner-addons", async (c) => {
+    const { association, user } = requireEditor(c);
+    const fields = await readForm(c);
+    const back = `/a/${association.slug}/admin/ledger#fee-schedule`;
+    const userId = textValue(fields, "user_id", 80);
+    const addonTypeId = textValue(fields, "addon_type_id", 80);
+    const propertyId = textValue(fields, "property_id", 80);
+    const quantity = Number(textValue(fields, "quantity", 4));
+    if (!userId || !Number.isInteger(quantity) || quantity < 1 || quantity > 99) {
+      return redirectTo(c, back, "Choose an owner and a quantity from 1 to 99.", "warn");
+    }
+    const addon = await addonTypeInAssociation(c.env.DB, association.id, addonTypeId);
+    if (!addon || Number(addon.active) !== 1) return redirectTo(c, back, "Choose an active add-on.", "warn");
+    const ownerLinked = await c.env.DB
+      .prepare("SELECT 1 AS found FROM property_owners WHERE association_id = ? AND user_id = ? LIMIT 1")
+      .bind(association.id, userId)
+      .first<{ found: number }>();
+    if (!ownerLinked) return redirectTo(c, back, "Choose an owner in this association.", "warn");
+    if (propertyId) {
+      const property = await propertyInAssociation(c.env.DB, association.id, propertyId);
+      if (!property) return redirectTo(c, back, "Choose a lot in this association.", "warn");
+      if (!(await userLinkedToLot(c.env.DB, association.id, userId, propertyId))) {
+        return redirectTo(c, back, "The nearby lot has to be one this owner holds.", "warn");
+      }
+    }
+    const id = crypto.randomUUID();
+    await insertOwnerAddon(c.env.DB, {
+      id,
+      associationId: association.id,
+      userId,
+      addonTypeId,
+      propertyId: propertyId || null,
+      quantity,
+      now: new Date().toISOString(),
+    });
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "owner_addon_create",
+      entityType: "owner_addon",
+      entityId: id,
+      detail: `Quantity ${quantity}`,
+    });
+    return redirectTo(c, back, "Add-on attached. It is included the next time dues invoices are created.");
+  });
+
+  app.post("/a/:slug/admin/owner-addons/:attachmentId/delete", async (c) => {
+    const { association, user } = requireEditor(c);
+    const fields = await readForm(c);
+    const back = `/a/${association.slug}/admin/ledger#fee-schedule`;
+    if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, back, "Confirm the remove first.", "warn");
+    const removed = await deleteOwnerAddon(c.env.DB, association.id, c.req.param("attachmentId"));
+    if (!removed) throw new NotFoundError();
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "owner_addon_delete",
+      entityType: "owner_addon",
+      entityId: c.req.param("attachmentId"),
+      detail: "Removed",
+    });
+    return redirectTo(c, back, "Add-on removed. Invoices already assigned were not changed.");
   });
 
   app.post("/a/:slug/admin/payments", async (c) => {

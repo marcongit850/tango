@@ -511,7 +511,7 @@ Magic-link tokens and session tokens are stored as SHA-256 hashes. The cookie is
 
 No D1 migration. Marc does not paste SQL for this change.
 
-When an assessment has an open date, and that date is today in the association time zone (or any earlier date that is still not fully invoiced), the Worker creates one invoice for each active lot of that assessment's lot type. Improved assessments go only to improved lots. Unimproved assessments go only to unimproved lots. An assessment set to all lots goes to every active lot. Lots that already have an invoice for that assessment, including a voided one, are skipped. The invoice uses the open date as the issued date and the assessment due date as the due date, the same as **Assign to matching lots**. A future open date stays off the balance until that date. A blank open date is not automatic.
+When an assessment has an open date, and that date is today in the association time zone (or any earlier date that is still not fully invoiced), the Worker creates invoices for it. A flat assessment (the older kind, and any association that has not saved a fee schedule) still creates one invoice for each active lot of that assessment's lot type. Improved assessments go only to improved lots. Unimproved assessments go only to unimproved lots. An assessment set to all lots goes to every active lot. A fee-schedule assessment creates one itemized invoice per owner instead. Lots or owners that already have an invoice for that assessment, including a voided one, are skipped. The invoice uses the open date as the issued date and the assessment due date as the due date, the same as **Assign to matching lots** or **Assign itemized invoices to owners**. A future open date stays off the balance until that date. A blank open date is not automatic.
 
 The schedule is in `wrangler.jsonc`: `15 6 * * *`. That is 6:15 AM UTC, which is 12:15 AM Central Standard Time and 1:15 AM Central Daylight Time, so Tango Mar (`America/Chicago`) has already reached the open date. The next deploy with Wrangler installs this trigger and replaces any other cron triggers on the Worker. Adding a second schedule in the dashboard does not stick after the next `npx wrangler deploy`.
 
@@ -550,13 +550,41 @@ Preview URLs are public unless you put access control in front of them.
 
 A board member's dashboard still shows only their own lots. Other residents' balances are on the admin ledger. View-only board members can open that ledger but cannot change it.
 
+## Fee schedule (paste this before merge)
+
+`migrations/0018_fee_schedule.sql` adds a per-association fee schedule on top of the existing assessments and invoices. Paste it in the Cloudflare dashboard after `0017_neighborhood_codes.sql`. Deploy does not apply D1 migrations. The file adds tables and columns. It does not delete or rewrite invoices, payments, or assessments.
+
+Tang-O-Mar starts with these amounts for one assessment period. Admins can change them under Admin, Ledger, Fee schedule. Other associations start with no schedule until an admin saves one.
+
+- First improved lot an owner holds: $625
+- Each additional improved lot that same owner holds: $315
+- Each vacant lot (stored as unimproved): $220. A vacant lot never counts as the first property.
+- One add-on type, Beach box, at $150. Admins can add more types and attach a quantity to an owner, with an optional nearby lot.
+
+The first improved lot is the lowest improved lot number, unless an admin picks a different improved lot for that owner. Annual dues use these amounts once a year. Quarterly dues use the same amounts each quarter.
+
+Add a year, while a schedule is saved, creates one assessment per period with billing mode `schedule`. On the open date, or when an admin assigns early, each owner gets one invoice. The lines look like `Lot 43, first improved`, `Lot 44, additional improved`, `Lot 12, vacant`, and `Beach box`. An owner with 2 improved lots, 1 vacant lot, and 1 beach box is billed $625 + $315 + $220 + $150 = $1,310. The invoice total is that sum. A processing fee added only when someone pays online applies to the total. Changing the schedule later does not rewrite invoices already assigned. Older flat assessments and their invoices stay as they are.
+
+Dashboard steps:
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database**.
+2. Select the database named **tango**.
+3. Open **Console**.
+4. Paste the full contents of `migrations/0018_fee_schedule.sql`.
+5. Select **Execute**.
+
+Run that file once, after `0017`. If the console says a column already exists, this file was already applied. Stop. Do not paste it again.
+
+Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0017` is already on the remote database.
+
 ## Data model
 
 Migrations live in `migrations/`.
 
 - `associations`, `users`, `roles`, `memberships` (`is_admin` is edit access on a homeowner or a board member; a board member without it is view-only; `is_master` is the one locked master admin for that association)
 - `properties` (lots, with `lot_type` of `improved` or `unimproved`, plus `house_name`, mailing address, and `admin_notes`) and `property_owners`
-- `assessments` (`opens_on`, `lot_type`, amount, due date), `invoices`, `payments` (amounts in cents; payments are recorded, not charged online)
+- `assessments` (`opens_on`, `lot_type`, `billing_mode` of `flat` or `schedule`, amount, due date), `invoices` (optional `billed_user_id` when one owner invoice covers several lots), `invoice_lines`, `payments` (amounts in cents; payments are recorded, not charged online)
+- `fee_schedules` (first improved, additional improved, and vacant amounts for one period), `fee_addon_types`, `owner_addons` (quantity on an owner, optional nearby lot), `owner_primary_lots` (which improved lot is the first one)
 - `documents` and `document_versions` (`current_version_id` is what residents see; `visibility` is `residents` or `board`; `folder` is an optional subfolder; `document_date` is the date that files Meeting Minutes, Budgets, and Insurance into a year folder)
 - `announcements`, `events`, `faqs`, `board_contacts`
 - `messages` (private threads to the board)
@@ -575,7 +603,7 @@ Balance = non-void invoice amounts + late fees − recorded payments.
 | --- | --- |
 | `npm run dev` | Local Worker with `APP_ENV=development` |
 | `npm run check` | Typecheck |
-| `npm test` | Unit tests for CSV parsing, money, access rules, Central Time, join approval, and automatic assessment invoices |
+| `npm test` | Unit tests for CSV parsing, money, access rules, Central Time, join approval, automatic assessment invoices, and the fee schedule |
 | `npm run db:migrate:local` | Apply D1 migrations locally |
 | `npm run db:migrate:remote` | Apply D1 migrations to the bound remote database |
 | `npm run types` | Regenerate `worker-configuration.d.ts` after binding changes |

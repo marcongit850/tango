@@ -2,6 +2,8 @@ import { DOCUMENT_CATEGORIES } from "../lib/categories";
 import { DOCUMENT_FILE_ACCEPT } from "../lib/files";
 import { formatDateTime, zonedIsoDate } from "../lib/dates";
 import { assessmentDisplayName, compareDuesRows, DUES_SCHEDULE_OPTIONS, duesAmountFieldLabel, latestDuesPrefill, lotTypeLabel, type DuesSchedule } from "../lib/dues";
+import { allocateLinePayments } from "../lib/fee-schedule";
+import type { FeeScheduleView } from "../lib/fee-schedule-store";
 import { isAdmin, MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE, signInRoleLabel, type UserListGroup } from "../lib/access";
 import { esc, paragraphs } from "../lib/html";
 import { formatDollarsPlain, formatMoney } from "../lib/money";
@@ -38,6 +40,7 @@ import {
   confirmDeleteButton,
   contactPhones,
   documentFileLinks,
+  invoiceLinesTable,
   empty,
   methodLabel,
   moneySpan,
@@ -795,6 +798,7 @@ export function ledgerPage(options: {
   assessments: AssessmentAdminRow[];
   duesReady: boolean;
   duesYear: number;
+  feeSchedule?: FeeScheduleView;
   canEdit?: boolean;
 }): string {
   const canEdit = options.canEdit !== false;
@@ -802,7 +806,7 @@ export function ledgerPage(options: {
     .map((row) => {
       const href = `/a/${options.association.slug}/admin/ledger/${row.property_id}`;
       return `<tr>
-        <td><a href="${esc(href)}">Lot ${esc(row.lot_number)}</a></td>
+        <td><a href="${esc(href)}">Lot ${esc(row.lot_number)}</a>${(row.line_items ?? []).map((item) => `<br><span class="muted">${esc(item.description)} ${esc(formatMoney(item.amount_cents))}</span>`).join("")}</td>
         <td>${esc(options.ownersByProperty.get(row.property_id) ?? "")}</td>
         <td>${moneyLink(href, row.charges_cents - row.late_fee_cents)}</td>
         <td>${moneyLink(href, row.late_fee_cents)}</td>
@@ -862,6 +866,7 @@ export function ledgerPage(options: {
       <p><a href="/a/${esc(options.association.slug)}/admin/export.csv">Download ledger (CSV)</a></p>
       ${rows ? `<table><thead><tr><th>Lot</th><th>Primary owner</th><th>Charges</th><th>Late fees</th><th>Payments</th><th>Balance</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No lots.")}
     </section>
+    ${options.feeSchedule ? feeScheduleSection(options.association, options.feeSchedule, canEdit) : ""}
     ${duesSection(options, canEdit)}
     ${record}`;
 }
@@ -900,13 +905,14 @@ export function ledgerLotPage(options: {
     .map((invoice) => {
       const href = `${base}/invoices/${invoice.id}`;
       const status = scheduledInvoice(invoice) ? "scheduled" : invoice.status;
+      const share = lotInvoiceShare(invoice, options.propertyId);
       return `<tr>
         <td><a href="${esc(href)}">${esc(invoice.invoice_number)}</a></td>
-        <td>${esc(assessmentDisplayName(invoice.description))}</td>
+        <td>${esc(share.description)}</td>
         <td>${dateCell(invoice.due_on, options.association.timezone)}</td>
-        <td>${moneyLink(href, Number(invoice.amount_cents))}</td>
-        <td>${moneyLink(href, Number(invoice.late_fee_cents))}</td>
-        <td>${moneyLink(href, Number(invoice.paid_cents))}</td>
+        <td>${moneyLink(href, share.amount)}</td>
+        <td>${moneyLink(href, share.late)}</td>
+        <td>${moneyLink(href, share.paid)}</td>
         <td><span class="badge">${esc(status)}</span></td>
       </tr>`;
     })
@@ -1021,11 +1027,17 @@ export function invoiceAdminPage(options: {
       ? `<p class="muted">A payment is recorded on this invoice, so delete stays blocked. Delete that payment above first if it was recorded by mistake. You can still change the amount, dates, description, and status.</p>`
       : `<p class="muted">This removes the invoice from the lot.</p>
          ${confirmDeleteButton(`/a/${association.slug}/admin/invoices/${invoice.id}/delete`, "Delete invoice", "Delete this invoice")}`;
+  const lined = (invoice.lines ?? []).length > 0;
   const editForm = canEdit
     ? `<h2>Edit invoice</h2>
       <form class="fields" method="post" action="${base}/invoices/${esc(invoice.id)}">
         ${textField("Description", "description", { value: assessmentDisplayName(invoice.description), required: true })}
-        ${textField("Amount", "amount", { value: dollarsInput(invoice.amount_cents), required: true })}
+        ${
+          lined
+            ? `<input type="hidden" name="amount" value="${esc(dollarsInput(invoice.amount_cents))}">
+               <p class="muted">The amount is the total of the lines. It stays in step with those lines.</p>`
+            : textField("Amount", "amount", { value: dollarsInput(invoice.amount_cents), required: true })
+        }
         ${textField("Late fee", "late_fee", { value: dollarsInput(invoice.late_fee_cents) })}
         ${textField("Issued", "issued_on", { type: "date", value: invoice.issued_on, required: true })}
         ${textField("Due", "due_on", { type: "date", value: invoice.due_on, required: true })}
@@ -1051,6 +1063,7 @@ export function invoiceAdminPage(options: {
       <h1>${esc(invoice.invoice_number)}</h1>
       <p><span class="badge">${esc(invoice.status)}</span></p>
       <p>Amount ${moneySpan(Number(invoice.amount_cents))} · Late fee ${moneySpan(Number(invoice.late_fee_cents))} · Paid ${moneySpan(paid)} · Remaining ${moneySpan(remaining)}</p>
+      ${(invoice.lines ?? []).length > 0 ? invoiceLinesTable(invoice.lines ?? []) : ""}
       ${editForm}
     </section>
     <section class="panel">
@@ -1487,11 +1500,169 @@ function messageReviewForm(slug: string, threadId: string, next: string): string
   return `<form method="post" action="/a/${esc(slug)}/admin/messages/${esc(threadId)}/reviewed"><input type="hidden" name="next" value="${esc(next)}"><button class="secondary" type="submit">Mark reviewed</button></form>`;
 }
 
+function lotInvoiceShare(
+  invoice: InvoiceRow,
+  propertyId: string,
+): { description: string; amount: number; paid: number; late: number } {
+  const lines = invoice.lines ?? [];
+  const mine = lines.filter((line) => line.property_id === propertyId);
+  if (lines.length === 0 || mine.length === 0) {
+    return {
+      description: assessmentDisplayName(invoice.description),
+      amount: Number(invoice.amount_cents),
+      paid: Number(invoice.paid_cents),
+      late: Number(invoice.late_fee_cents),
+    };
+  }
+  const allocation = allocateLinePayments(
+    lines.map((line) => ({ id: line.id, amountCents: Number(line.amount_cents), sortOrder: Number(line.sort_order) })),
+    Number(invoice.paid_cents),
+  );
+  return {
+    description: mine.map((line) => line.description).join(", "),
+    amount: mine.reduce((sum, line) => sum + Number(line.amount_cents), 0),
+    paid: mine.reduce((sum, line) => sum + (allocation.byLineId.get(line.id) ?? 0), 0),
+    late: invoice.property_id === propertyId ? Number(invoice.late_fee_cents) : 0,
+  };
+}
+
+function feeLotLabel(lotType: string): string {
+  return lotType === "unimproved" ? "Vacant" : "Improved";
+}
+
+function feeScheduleSection(association: Association, schedule: FeeScheduleView, canEdit: boolean): string {
+  const base = `/a/${esc(association.slug)}/admin`;
+  if (!schedule.ready) {
+    return `<section class="panel" id="fee-schedule"><h2>Fee schedule</h2><p>Apply the fee schedule migration in D1, then reload. The steps are in the README under Fee schedule.</p></section>`;
+  }
+  const rates = schedule.rates;
+  const rateForm = canEdit
+    ? `<form class="fields" method="post" action="${base}/fee-schedule">
+        ${textField("First improved lot", "first_improved_amount", { value: rates ? dollarsInput(rates.firstImprovedCents) : "", required: true })}
+        ${textField("Each additional improved lot", "additional_improved_amount", { value: rates ? dollarsInput(rates.additionalImprovedCents) : "", required: true })}
+        ${textField("Each vacant lot", "vacant_amount", { value: rates ? dollarsInput(rates.vacantCents) : "", required: true })}
+        <button type="submit">Save fee schedule</button>
+      </form>`
+    : rates
+      ? `<p>First improved lot ${moneySpan(rates.firstImprovedCents)}. Each additional improved lot ${moneySpan(rates.additionalImprovedCents)}. Each vacant lot ${moneySpan(rates.vacantCents)}.</p>`
+      : `<p class="muted">No fee schedule is saved yet.</p>`;
+  const typeRows = schedule.addonTypes
+    .map((addon) => {
+      const edit = canEdit
+        ? `<form class="fields" method="post" action="${base}/fee-addons/${esc(addon.id)}">
+            ${textField("Name", "name", { value: addon.name, required: true })}
+            ${textField("Price", "amount", { value: dollarsInput(addon.amountCents), required: true })}
+            <input type="hidden" name="active" value="${addon.active ? "1" : "0"}">
+            <button class="secondary" type="submit">Save add-on</button>
+          </form>
+          <form method="post" action="${base}/fee-addons/${esc(addon.id)}">
+            <input type="hidden" name="name" value="${esc(addon.name)}">
+            <input type="hidden" name="amount" value="${esc(dollarsInput(addon.amountCents))}">
+            <input type="hidden" name="active" value="${addon.active ? "0" : "1"}">
+            <button class="secondary" type="submit">${addon.active ? "Deactivate" : "Activate"}</button>
+          </form>`
+        : "";
+      return `<tr>
+        <td>${esc(addon.name)}${addon.active ? "" : " (inactive)"}</td>
+        <td>${moneySpan(addon.amountCents)}</td>
+        <td>${edit}</td>
+      </tr>`;
+    })
+    .join("");
+  const addType = canEdit
+    ? `<form class="fields" method="post" action="${base}/fee-addons">
+        ${textField("Name", "name", { required: true })}
+        ${textField("Price", "amount", { required: true })}
+        <button type="submit">Add add-on type</button>
+      </form>`
+    : "";
+  const ownerOptions = schedule.owners.map((owner) => ({ value: owner.id, label: owner.name }));
+  const lotOptions = [
+    { value: "", label: "No nearby lot" },
+    ...schedule.lots.map((lot) => ({ value: lot.id, label: `Lot ${lot.lotNumber}, ${feeLotLabel(lot.lotType)}` })),
+  ];
+  const activeTypes = schedule.addonTypes.filter((addon) => addon.active);
+  const attach = canEdit && ownerOptions.length > 0 && activeTypes.length > 0
+    ? `<form class="fields" method="post" action="${base}/owner-addons">
+        ${selectField("Owner", "user_id", ownerOptions)}
+        ${selectField("Add-on", "addon_type_id", activeTypes.map((addon) => ({ value: addon.id, label: `${addon.name}, ${formatMoney(addon.amountCents)}` })))}
+        ${textField("Quantity", "quantity", { value: "1", required: true })}
+        ${selectField("Near lot", "property_id", lotOptions, "")}
+        <button type="submit">Attach add-on</button>
+      </form>`
+    : "";
+  const attachmentRows = schedule.attachments
+    .map((row) => {
+      const near = row.lotNumber ? ` near lot ${row.lotNumber}` : "";
+      const remove = canEdit
+        ? confirmDeleteButton(`${base}/owner-addons/${row.id}/delete`, "Remove", "Remove this add-on")
+        : "";
+      return `<tr><td>${esc(row.ownerName)}</td><td>${esc(row.name)} x${row.quantity}${esc(near)}</td><td>${remove}</td></tr>`;
+    })
+    .join("");
+  const previewRows = schedule.preview
+    .map((owner) => {
+      const options = [
+        { value: "", label: "Lowest improved lot number" },
+        ...owner.lots.map((lot) => ({ value: lot.id, label: `Lot ${lot.lotNumber}, ${feeLotLabel(lot.lotType)}` })),
+      ];
+      if (owner.primaryPropertyId && !owner.lots.some((lot) => lot.id === owner.primaryPropertyId)) {
+        const extra = schedule.lots.find((lot) => lot.id === owner.primaryPropertyId);
+        if (extra) options.push({ value: extra.id, label: `Lot ${extra.lotNumber}, ${feeLotLabel(extra.lotType)}` });
+      }
+      const primary = canEdit
+        ? `<form method="post" action="${base}/fee-schedule/primary">
+            <input type="hidden" name="user_id" value="${esc(owner.userId)}">
+            ${selectField("First improved lot", "property_id", options, owner.primaryPropertyId ?? "")}
+            <button class="secondary" type="submit">Save first lot</button>
+          </form>`
+        : "";
+      const note = owner.ignoredPrimary
+        ? `<p class="muted">The saved first lot is not an improved lot billed to this owner. The lowest improved lot number is used instead.</p>`
+        : "";
+      const lines = owner.lines
+        .map((line) => `<li>${esc(line.description)} ${moneySpan(line.amountCents)}</li>`)
+        .join("");
+      return `<tr>
+        <td><a href="${base}/owners/${esc(owner.userId)}">${esc(owner.name)}</a>${primary}${note}</td>
+        <td><ul>${lines}</ul><p>Total ${moneySpan(owner.totalCents)}</p></td>
+      </tr>`;
+    })
+    .join("");
+  const unassigned = schedule.unassigned
+    .map((lot) => `<li>Lot ${esc(lot.lotNumber)}, ${esc(feeLotLabel(lot.lotType).toLowerCase())}, has no owner, so it is not billed.</li>`)
+    .join("");
+  return `<section class="panel" id="fee-schedule">
+    <h2>Fee schedule</h2>
+    <p class="muted">These amounts are for one assessment period. Annual dues use them once a year. Quarterly dues use them each quarter. A vacant lot is an unimproved lot. It always uses the vacant rate and never counts as the first property.</p>
+    <p class="muted">Saving this schedule is how new dues years are billed. Existing assessments and invoices stay as they are. Changing these amounts does not rewrite invoices already assigned.</p>
+    ${rateForm}
+    <h3>Add-ons</h3>
+    <p class="muted">Beach boxes belong to an owner and can sit near a lot. The price is per item, per assessment period.</p>
+    ${typeRows ? `<table><thead><tr><th>Add-on</th><th>Price</th><th></th></tr></thead><tbody>${typeRows}</tbody></table>` : empty("No add-on types yet.")}
+    ${addType}
+    <h3>Owner add-ons</h3>
+    ${attachmentRows ? `<table><thead><tr><th>Owner</th><th>Add-on</th><th></th></tr></thead><tbody>${attachmentRows}</tbody></table>` : empty("No add-ons are attached.")}
+    ${attach}
+    <h3>Billing preview</h3>
+    <p class="muted">This is what each owner will be billed for one period, before invoices are created. The first improved lot is a stable choice. Pick one, or leave it blank to use the lowest lot number.</p>
+    ${
+      rates
+        ? previewRows
+          ? `<table><thead><tr><th>Owner</th><th>Invoice lines</th></tr></thead><tbody>${previewRows}</tbody></table>`
+          : empty("No owners to preview.")
+        : `<p class="muted">Save a fee schedule to preview owner invoices.</p>`
+    }
+    ${unassigned ? `<ul class="muted">${unassigned}</ul>` : ""}
+  </section>`;
+}
+
 function duesSection(options: {
   association: Association;
   assessments: AssessmentAdminRow[];
   duesReady: boolean;
   duesYear: number;
+  feeSchedule?: FeeScheduleView;
 }, canEdit = true): string {
   const base = `/a/${esc(options.association.slug)}/admin`;
   if (!options.duesReady) {
@@ -1502,19 +1673,28 @@ function duesSection(options: {
     .map((row) => {
       const edit = `${base}/assessments/${esc(row.id)}`;
       const confirm = row.invoice_count === 0 ? "Confirm" : "Delete this assessment and its unpaid invoices";
+      const scheduleMode = row.billing_mode === "schedule";
+      const assignLabel = scheduleMode ? "Assign itemized invoices to owners" : "Assign to matching lots";
+      const assignConfirm = scheduleMode ? "Assign this assessment to owners" : "Assign this assessment to matching lots";
       const actions = canEdit
         ? `<td>
-          <form method="post" action="${edit}/assign"><label><input type="checkbox" name="confirm" value="yes" required> Assign this assessment to matching lots</label><button class="secondary" type="submit">Assign to matching lots</button></form>
+          <form method="post" action="${edit}/assign"><label><input type="checkbox" name="confirm" value="yes" required> ${assignConfirm}</label><button class="secondary" type="submit">${assignLabel}</button></form>
           <details>
             <summary>Edit</summary>
             <form class="fields" method="post" action="${edit}">
               ${textField("Name", "name", { value: row.name, required: true })}
-              ${selectField("Lot type", "lot_type", [
-                { value: "improved", label: "Improved" },
-                { value: "unimproved", label: "Unimproved" },
-                { value: "", label: "All lots" },
-              ], row.lot_type ?? "")}
-              ${textField("Amount", "amount", { value: (row.amount_cents / 100).toFixed(2), required: true })}
+              ${
+                scheduleMode
+                  ? `<input type="hidden" name="lot_type" value="">
+                     <input type="hidden" name="amount" value="${esc((row.amount_cents / 100).toFixed(2))}">
+                     <p class="muted">Amounts come from the fee schedule.</p>`
+                  : `${selectField("Lot type", "lot_type", [
+                      { value: "improved", label: "Improved" },
+                      { value: "unimproved", label: "Unimproved" },
+                      { value: "", label: "All lots" },
+                    ], row.lot_type ?? "")}
+                    ${textField("Amount", "amount", { value: (row.amount_cents / 100).toFixed(2), required: true })}`
+              }
               ${textField("Opens", "opens_on", { type: "date", value: row.opens_on ?? "" })}
               ${textField("Due", "due_on", { type: "date", value: row.due_on, required: true })}
               <button class="secondary" type="submit">Save assessment</button>
@@ -1528,19 +1708,34 @@ function duesSection(options: {
         <td>${esc(lotTypeLabel(row.lot_type))}</td>
         <td>${row.opens_on ? dateCell(row.opens_on, options.association.timezone) : ""}</td>
         <td>${dateCell(row.due_on, options.association.timezone)}</td>
-        <td>${moneySpan(row.amount_cents)}</td>
+        <td>${scheduleMode ? "Fee schedule" : moneySpan(row.amount_cents)}</td>
         <td>${row.invoice_count}</td>
         ${actions}
       </tr>`;
     })
     .join("");
   const prefill = latestDuesPrefill(options.assessments);
+  const rates = options.feeSchedule?.rates ?? null;
+  const intro = rates
+    ? `<p class="muted">Pick a schedule. Amounts come from the fee schedule above. Add a year creates one assessment per period. The open date and due date are for the first installment. Later installments keep that gap and step forward by the period.</p>`
+    : `<p class="muted">Pick a schedule and the amount per installment for improved and unimproved lots. Annual is the amount for the year. Add a year creates each installment for both lot types. The open date and due date are for the first installment. Later installments keep that gap and step forward by the period.</p>`;
+  const amountFields = rates
+    ? `<p class="muted">First improved ${moneySpan(rates.firstImprovedCents)}. Each additional improved ${moneySpan(rates.additionalImprovedCents)}. Each vacant lot ${moneySpan(rates.vacantCents)}.</p>`
+    : `${duesAmountField("improved", prefill.schedule, formatDollarsPlain(prefill.improvedCents))}
+      ${duesAmountField("unimproved", prefill.schedule, formatDollarsPlain(prefill.unimprovedCents))}`;
+  const addLabel = rates ? "Add dues for this schedule" : "Add improved and unimproved dues";
+  const openHelp = rates
+    ? "On the open date, each owner who does not already have this assessment gets one itemized invoice. If a day is missed, the next run catches up. The invoice date stays the open date."
+    : "On the open date, each active lot of that type that does not already have this assessment gets an invoice. If a day is missed, the next run catches up. The invoice date stays the open date.";
+  const assignHelp = rates
+    ? "Leave the open date blank if you want to invoice only by hand. Use Assign itemized invoices to owners to create those invoices early. Each owner gets one invoice with a line for each lot and each add-on."
+    : "Leave the open date blank if you want to invoice only by hand. Use Assign to matching lots to create those invoices early.";
   return `<section class="panel" id="dues">
     <h2>Annual dues</h2>
-    <p class="muted">Pick a schedule and the amount per installment for improved and unimproved lots. Annual is the amount for the year. Add a year creates each installment for both lot types. The open date and due date are for the first installment. Later installments keep that gap and step forward by the period.</p>
+    ${intro}
     <ul class="muted dues-help">
-      <li>On the open date, each active lot of that type that does not already have this assessment gets an invoice. If a day is missed, the next run catches up. The invoice date stays the open date.</li>
-      <li>Leave the open date blank if you want to invoice only by hand. Use Assign to matching lots to create those invoices early.</li>
+      <li>${openHelp}</li>
+      <li>${assignHelp}</li>
       <li>Until the open date, the amount stays off the owner balance, so a future year does not look due today. Upcoming stays Scheduled until that open date. On and after the open date, once invoices are live, Upcoming shows Invoiced.</li>
       <li>Changing the amount later does not rewrite invoices already assigned. A voided invoice stays void.</li>
       <li>Under Assessments and balances, click a dollar amount to change one invoice. Delete removes the assessment and its unpaid invoices. Delete is blocked when a payment is recorded on one of those invoices.</li>
@@ -1550,11 +1745,10 @@ function duesSection(options: {
     <form class="fields" method="post" action="${base}/assessments" data-dues-schedule>
       ${textField("Year", "year", { value: String(options.duesYear), required: true })}
       ${selectField("Schedule", "schedule", DUES_SCHEDULE_OPTIONS, prefill.schedule)}
-      ${duesAmountField("improved", prefill.schedule, formatDollarsPlain(prefill.improvedCents))}
-      ${duesAmountField("unimproved", prefill.schedule, formatDollarsPlain(prefill.unimprovedCents))}
+      ${amountFields}
       ${textField("Open date", "opens_on", { type: "date", value: `${options.duesYear}-01-01`, required: true })}
       ${textField("Due date", "due_on", { type: "date", value: `${options.duesYear}-03-01`, required: true })}
-      <button type="submit">Add improved and unimproved dues</button>
+      <button type="submit">${addLabel}</button>
     </form>
     <script src="/dues-schedule.js"></script>` : ""}
   </section>`;

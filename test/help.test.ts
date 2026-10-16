@@ -6,6 +6,7 @@ import {
   BOARD_ONLY_HELP,
   CLEAR_STUCK_HELP,
   ELECTRONIC_NOTICE_HELP,
+  INVOICE_EMAIL_HELP,
   PROCESSING_HELP,
   ROLE_HELP,
   STRIPE_KEY_HELP,
@@ -42,7 +43,7 @@ const association: Association = {
 const FEE_HELP =
   "This small fee covers the cost of the bank transfer. It's about 0.8%, never more than $5.00, and it doesn't count toward your dues. To avoid it, mail a check to the association.";
 
-const COPY = [FEE_HELP, PROCESSING_HELP, ELECTRONIC_NOTICE_HELP, STRIPE_KEY_HELP, WEBHOOK_HELP, ROLE_HELP, BOARD_ONLY_HELP, CLEAR_STUCK_HELP];
+const COPY = [FEE_HELP, PROCESSING_HELP, ELECTRONIC_NOTICE_HELP, STRIPE_KEY_HELP, WEBHOOK_HELP, ROLE_HELP, BOARD_ONLY_HELP, CLEAR_STUCK_HELP, INVOICE_EMAIL_HELP];
 
 function shown(text: string): string {
   return text.replaceAll("'", "&#39;");
@@ -199,6 +200,8 @@ describe("help placements", () => {
       feeEnabled: true,
       feePercent: "0.8",
       feeCap: "5.00",
+      invoiceEmailsReady: true,
+      invoiceEmailsEnabled: false,
       processing: [{ id: "intent_stuck", amountCents: 40050, feeCents: 323, lotNumbers: "27", createdAt: "2026-10-01T00:00:00.000Z" }],
     });
     const stripeAt = settings.indexOf("<h2>Stripe secret key");
@@ -209,6 +212,10 @@ describe("help placements", () => {
     expect(settings.slice(webhookAt, webhookAt + 700)).toContain(shown(WEBHOOK_HELP));
     expect(settings).toContain("Clear stuck transfer");
     expect(settings).toContain(shown(CLEAR_STUCK_HELP));
+    expect(settings).toContain('aria-label="Help: Invoice emails"');
+    expect(settings).toContain(INVOICE_EMAIL_HELP);
+    expect(settings).toContain("Save invoice emails");
+    expect(settings).not.toContain('name="invoice_emails" value="yes" checked');
     expect(settings.slice(settings.indexOf("<h2>Webhook signing secret"), settings.indexOf("<h2>Webhook signing secret") + 80)).not.toContain("help-btn");
 
     const owner: OwnerListRow = {

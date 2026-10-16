@@ -3,6 +3,7 @@ import { notifyStaff, writeAudit } from "../db";
 import { isDemoAssociation } from "../lib/demo";
 import { isMissingTable } from "../lib/errors";
 import { canonicalPortalUrl } from "../lib/hosts";
+import { invoiceEmailSettings, saveInvoiceEmailSetting } from "../lib/invoice-emails";
 import { todayIso } from "../lib/dates";
 import { BANK_TRANSFER_FEE_UPDATED, bankTransferFeeCents, parseDisplayedFeeCents } from "../lib/bank-fee";
 import { formatMoney } from "../lib/money";
@@ -47,7 +48,10 @@ const MAX_WEBHOOK_BYTES = 262144;
 export function registerPaymentRoutes(app: Hono<AppBindings>): void {
   app.get("/a/:slug/admin/payment-settings", async (c) => {
     const { association } = requireEditor(c);
-    const view = await paymentSettingsView(c.env, c.env.DB, association.id);
+    const [view, invoiceEmails] = await Promise.all([
+      paymentSettingsView(c.env, c.env.DB, association.id),
+      invoiceEmailSettings(c.env.DB, association.id),
+    ]);
     return render(c, {
       title: `Payment settings · ${association.name}`,
       active: "admin",
@@ -56,6 +60,9 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
         ...view,
         webhookUrl: canonicalPortalUrl(association, "/webhooks/stripe"),
         demo: isDemoAssociation(association),
+        invoiceEmailsReady: invoiceEmails.ready,
+        invoiceEmailsEnabled: invoiceEmails.enabled,
+        invoiceEmailsEnabledOn: invoiceEmails.enabledOn,
         processing: await processingCheckoutsForAssociation(c.env.DB, association.id),
       }),
     });
@@ -158,6 +165,33 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
     }
     if (!saved.changed) return redirectTo(c, back, "Payment settings saved.");
     return redirectTo(c, back, enabled ? "Online payments turned on." : "Online payments turned off.");
+  });
+
+  app.post("/a/:slug/admin/payment-settings/invoice-emails", async (c) => {
+    const { association, user } = requireEditor(c);
+    const fields = await readForm(c);
+    const back = settingsPath(association.slug);
+    const enabled = textValue(fields, "invoice_emails", 5) === "yes";
+    const saved = await saveInvoiceEmailSetting(c.env.DB, association.id, enabled, todayIso(association.timezone));
+    if (!saved.ok) return redirectTo(c, back, saved.message, "warn");
+    if (saved.changed) {
+      const previous = saved.previousEnabled ? "on" : "off";
+      const next = saved.enabled ? "on" : "off";
+      const cutoff =
+        saved.enabled && saved.enabledOn
+          ? ` Invoices issued before ${saved.enabledOn} are not emailed.`
+          : "";
+      await writeAudit(c.env.DB, {
+        associationId: association.id,
+        actorUserId: user.id,
+        action: "invoice_emails_setting",
+        entityType: "invoice_email_settings",
+        entityId: association.id,
+        detail: `Invoice emails changed from ${previous} to ${next}.${cutoff}`,
+      });
+    }
+    if (!saved.changed) return redirectTo(c, back, "Payment settings saved.");
+    return redirectTo(c, back, enabled ? "Invoice emails turned on." : "Invoice emails turned off.");
   });
 
   app.post("/a/:slug/admin/payment-settings/fee", async (c) => {

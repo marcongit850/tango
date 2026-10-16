@@ -1,5 +1,8 @@
+import { formatDate } from "./dates";
 import { contentTypeForUpload, MAX_DOCUMENT_BYTES, safeFilename } from "./files";
+import { esc } from "./html";
 import { logError } from "./log";
+import { formatMoney } from "./money";
 
 const PORTAL_ORIGIN = "https://mytangomar.com";
 
@@ -133,6 +136,41 @@ export function ownerNoticeEmail(input: {
   return { subject: `${associationName}: ${title}`, text: lines.join("\n"), href };
 }
 
+/** Plain invoice letter. Sent on issued_on, not when the invoice row was created. */
+export function invoiceOwnerEmail(input: {
+  associationName: string;
+  invoiceNumber: string;
+  description: string;
+  amountCents: number;
+  lateFeeCents?: number;
+  dueOn: string;
+  timeZone: string;
+  payUrl: string;
+}): { subject: string; text: string; html: string } {
+  const associationName = oneLine(input.associationName) || "Your association";
+  const description = oneLine(input.description) || "Invoice";
+  const invoiceNumber = oneLine(input.invoiceNumber) || "Invoice";
+  const amount = formatMoney(input.amountCents);
+  const due = formatDate(input.dueOn, input.timeZone);
+  const lateFeeCents = input.lateFeeCents ?? 0;
+  const lateText = lateFeeCents > 0 ? `Late fee: ${formatMoney(lateFeeCents)}` : "";
+  const subject = `${associationName}: ${description} invoice`;
+  const lines = [associationName, "", `Invoice ${invoiceNumber}`, description, `Amount: ${amount}`];
+  if (lateText) lines.push(lateText);
+  lines.push(`Due: ${due}`, "", `View and pay: ${input.payUrl}`);
+  const lateHtml = lateText ? `<br>${esc(lateText)}` : "";
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>${esc(subject)}</title></head>
+<body>
+<p>${esc(associationName)}</p>
+<p>Invoice ${esc(invoiceNumber)}<br>${esc(description)}<br>Amount: ${esc(amount)}${lateHtml}<br>Due: ${esc(due)}</p>
+<p><a href="${esc(input.payUrl)}">View and pay</a></p>
+</body>
+</html>`;
+  return { subject, text: lines.join("\n"), html };
+}
+
 function ownerNoticeHref(slug: string, kind: OwnerNoticeKind, itemId?: string, canonicalBase?: string): string {
   const tail =
     kind === "announcement" && itemId ? `/news/${itemId}` : kind === "event" ? "/calendar" : kind === "account" ? "/notices" : "/documents";
@@ -248,6 +286,7 @@ export async function sendResendEmail(options: {
   to: string;
   subject: string;
   text: string;
+  html?: string;
   replyTo?: string;
   attachments?: ResendAttachment[];
   fetchImpl?: typeof fetch;
@@ -258,6 +297,7 @@ export async function sendResendEmail(options: {
     to: string[];
     subject: string;
     text: string;
+    html?: string;
     reply_to?: string;
     attachments?: { filename: string; content: string; content_type: string }[];
   } = {
@@ -266,6 +306,7 @@ export async function sendResendEmail(options: {
     subject: options.subject,
     text: options.text,
   };
+  if (options.html) payload.html = options.html;
   if (options.replyTo) payload.reply_to = options.replyTo;
   if (options.attachments && options.attachments.length > 0) {
     payload.attachments = options.attachments.map((item) => ({

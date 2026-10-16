@@ -8,6 +8,7 @@ export const WEBHOOK_TOPIC = "Webhook";
 export const ROLE_TOPIC = "Role";
 export const BOARD_ONLY_TOPIC = "Board only";
 export const CLEAR_STUCK_TOPIC = "Clear stuck transfer";
+export const INVOICE_EMAIL_TOPIC = "Invoice emails";
 
 export const PROCESSING_HELP =
   "Bank transfers usually take about 4 business days to clear. Your balance will update automatically once your payment goes through. You don't need to do anything.";
@@ -29,6 +30,9 @@ export const BOARD_ONLY_HELP = "Only board members and admins can see these file
 
 export const CLEAR_STUCK_HELP =
   "Use this only if a bank payment has shown Processing for more than 14 days with no update from Stripe. It removes the hold so the owner can pay again. It does not mark anything paid.";
+
+export const INVOICE_EMAIL_HELP =
+  "When this is on, each owner is emailed their invoice on the date it is scheduled to go out, with a link to view and pay. Invoices are emailed once.";
 
 /** One help control. className is an extra class on the wrapper, such as help-desktop or help-mobile. */
 export function helpTip(topic: string, text: string, className = ""): string {

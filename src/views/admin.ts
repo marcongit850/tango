@@ -51,6 +51,7 @@ import {
   visibilityLabel,
 } from "./bits";
 import { supportPage, threadPage, type SupportFormValues } from "./resident";
+import { CLEAR_STUCK_HELP, CLEAR_STUCK_TOPIC, ROLE_HELP, ROLE_TOPIC, STRIPE_KEY_HELP, STRIPE_KEY_TOPIC, WEBHOOK_HELP, WEBHOOK_TOPIC, helpTip } from "./help";
 
 function adminNav(slug: string, current: string, canEdit = true): string {
   const links = [
@@ -508,6 +509,7 @@ function addUserForm(slug: string, lots: readonly { id: string; lot_number: stri
             { value: "admin", label: "Admin" },
           ],
           "owner",
+          helpTip(ROLE_TOPIC, ROLE_HELP),
         )}
         ${selectField("Lot", "property_id", lotOptions, "")}
         <button type="submit">Add user</button>
@@ -527,6 +529,7 @@ function userRoleForm(slug: string, owner: OwnerListRow, next: string): string {
           { value: "board", label: "Board member" },
         ],
         owner.role_id === "board" ? "board" : "homeowner",
+        helpTip(ROLE_TOPIC, ROLE_HELP),
       )}
       ${editAccessField(owner)}
       <button type="submit">Save role</button>
@@ -554,7 +557,7 @@ export function usersPage(
           <span class="user-name"><span class="lot-kicker">Name</span>${esc(owner.name)}</span>
           <span class="user-email"><span class="lot-kicker">Email</span>${esc(owner.email)}</span>
           <span class="user-lots"><span class="lot-kicker">Lots</span>${userLotLinks(association.slug, person.lots)}</span>
-          <span class="user-role"><span class="lot-kicker">Role</span>${esc(role)}</span>
+          <span class="user-role"><span class="lot-kicker">Role${helpTip(ROLE_TOPIC, ROLE_HELP, "help-mobile")}</span>${esc(role)}</span>
           <span class="user-access"><span class="lot-kicker">Edit access</span>${edit}</span>
           <span class="user-consent"><span class="lot-kicker">Consent</span>${esc(consent)}</span>
           <span class="user-login"><span class="lot-kicker">Last sign-in</span>${owner.last_login_at ? dateTimeCell(owner.last_login_at, association.timezone) : "Never"}</span>
@@ -581,7 +584,7 @@ export function usersPage(
           <span>Name</span>
           <span>Email</span>
           <span>Lots</span>
-          <span>Role</span>
+          <span>Role${helpTip(ROLE_TOPIC, ROLE_HELP, "help-desktop")}</span>
           <span>Edit access</span>
           <span>Consent</span>
           <span>Last sign-in</span>
@@ -925,7 +928,7 @@ export function paymentSettingsPage(options: {
       </form>
       ${processingTransfers(options.association, options.processing ?? [])}
       <p class="muted">If two online payments for the same invoice finish at the same moment, the extra amount is recorded as unapplied credit on the lot.</p>
-      <h2>Webhook</h2>
+      <h2>Webhook${helpTip(WEBHOOK_TOPIC, WEBHOOK_HELP)}</h2>
       <p>In Stripe, open Developers, Webhooks, and add an endpoint. Paste this URL. Select <code>checkout.session.completed</code>, <code>checkout.session.async_payment_succeeded</code>, <code>checkout.session.async_payment_failed</code>, <code>charge.refunded</code>, <code>charge.dispute.created</code>, and <code>charge.dispute.closed</code>.</p>
       <p><code>${esc(options.webhookUrl)}</code></p>
       ${secretField({
@@ -937,6 +940,7 @@ export function paymentSettingsPage(options: {
         saveAction: `${base}/secret`,
         removeAction: `${base}/secret/remove`,
         hint: "Starts with sk_test_, sk_live_, rk_test_, or rk_live_.",
+        help: helpTip(STRIPE_KEY_TOPIC, STRIPE_KEY_HELP),
       })}
       ${secretField({
         title: "Webhook signing secret",
@@ -972,9 +976,12 @@ function processingTransfers(association: Association, rows: StuckProcessingChec
         <td>${esc(formatMoney(row.feeCents))}</td>
         <td>${dateTimeCell(row.createdAt, association.timezone)}</td>
         <td>
-          <form method="post" action="${base}/processing/${esc(row.id)}/abandon">
-            <button type="submit">Clear stuck transfer</button>
-          </form>
+          <div class="help-inline">
+            <form method="post" action="${base}/processing/${esc(row.id)}/abandon">
+              <button type="submit">Clear stuck transfer</button>
+            </form>
+            ${helpTip(CLEAR_STUCK_TOPIC, CLEAR_STUCK_HELP)}
+          </div>
         </td>
       </tr>`,
     )
@@ -996,6 +1003,7 @@ function secretField(options: {
   saveAction: string;
   removeAction: string;
   hint: string;
+  help?: string;
 }): string {
   const state = options.set
     ? `<p>Set, ending in ${esc(options.last4)}.${options.mode ? ` ${esc(options.mode)}` : ""}</p>`
@@ -1003,7 +1011,7 @@ function secretField(options: {
   const remove = options.set
     ? confirmDeleteButton(options.removeAction, "Remove", "Remove the stored value")
     : "";
-  return `<h2>${esc(options.title)}</h2>
+  return `<h2>${esc(options.title)}${options.help ?? ""}</h2>
     ${state}
     <p class="muted">${esc(options.hint)}</p>
     <form class="fields" method="post" action="${esc(options.saveAction)}">

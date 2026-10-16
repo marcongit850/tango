@@ -1494,7 +1494,7 @@ describe("document viewing", () => {
       sampleDocument({ id: "doc-closed", category: "minutes", title: "Closed session", folder: "2024/January", visibility: "board" }),
       sampleDocument({ id: "doc-note", category: "bylaws", title: "Board bylaws note", folder: "", visibility: "board" }),
     ]);
-    const split = html.indexOf("<h2>Board only</h2>");
+    const split = html.indexOf("<h2>Board only");
     expect(split).toBeGreaterThan(html.indexOf("<h1>Documents</h1>"));
     const resident = html.slice(0, split);
     const board = html.slice(split);

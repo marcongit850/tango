@@ -1308,6 +1308,75 @@ body.product .product-pitch .pitch-shot {
   overflow: hidden;
   box-shadow: 0 8px 22px rgba(11, 42, 91, 0.07);
 }
+.help {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+  line-height: 1;
+}
+.help-btn {
+  width: 1.15rem;
+  height: 1.15rem;
+  min-width: 1.15rem;
+  padding: 0;
+  border: 1px solid var(--muted);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: none;
+}
+.help-btn:hover,
+.help-btn:focus-visible {
+  color: var(--gulf);
+  border-color: var(--gulf);
+  background: transparent;
+}
+.help-btn:focus-visible {
+  outline: 2px solid var(--gulf);
+  outline-offset: 2px;
+}
+.help-mark { pointer-events: none; }
+.help-pop {
+  position: fixed;
+  z-index: 50;
+  width: min(18rem, calc(100vw - 1rem));
+  max-height: calc(100vh - 1rem);
+  overflow: auto;
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 8px 24px rgba(28, 40, 48, 0.14);
+  font-family: var(--sans);
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-align: left;
+}
+.help-pop[hidden] { display: none; }
+.help-inline { display: inline-flex; align-items: center; gap: 0.35rem; }
+.help-inline form { margin: 0; }
+.help-inline .help { margin-left: 0; }
+.field-label { display: inline-flex; align-items: center; }
+@media (max-width: 720px) {
+  .help-btn { width: 1.35rem; height: 1.35rem; min-width: 1.35rem; font-size: 0.8rem; }
+  .help-desktop { display: none; }
+}
+@media (min-width: 721px) {
+  .help-mobile { display: none; }
+}
 `;
 
 const HOME_SLUG = "tango-mar";
@@ -1501,6 +1570,7 @@ function shell(options: {
   <main id="content" class="${options.marketing ? "pitch" : "wrap stack"}">${options.body}</main>
   ${options.askPortal ? askPortalWidget(askName) : ""}
   ${footer}
+  <script src="/help.js" defer></script>
 </body>
 </html>`;
 }

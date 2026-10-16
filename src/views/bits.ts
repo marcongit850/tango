@@ -91,6 +91,7 @@ export function selectField(
   name: string,
   options: { value: string; label: string; propertyId?: string; hidden?: boolean }[],
   selected = "",
+  helpHtml = "",
 ): string {
   const html = options
     .map((option) => {
@@ -99,7 +100,8 @@ export function selectField(
       return `<option value="${esc(option.value)}"${property}${hidden} ${option.value === selected ? "selected" : ""}>${esc(option.label)}</option>`;
     })
     .join("");
-  return `<label>${esc(label)}<select name="${esc(name)}">${html}</select></label>`;
+  const labelHtml = helpHtml ? `<span class="field-label">${esc(label)}${helpHtml}</span>` : esc(label);
+  return `<label>${labelHtml}<select name="${esc(name)}">${html}</select></label>`;
 }
 
 /** City, ST ZIP from whatever is stored. Empty parts are left out. */

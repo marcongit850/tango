@@ -395,6 +395,12 @@ export async function paymentTestReady(db: D1Database): Promise<boolean> {
   return names.has("is_test");
 }
 
+/** True after migrations/0022_bank_transfer_fee.sql adds payments.fee_cents. */
+export async function paymentFeeReady(db: D1Database): Promise<boolean> {
+  const names = await columnNames(db, "payments");
+  return names.has("fee_cents");
+}
+
 /** Net cents paid on invoice alias i. Won disputes are not subtracted. Test payments are not included. */
 export function invoiceNetPaidSql(reversals: boolean, excludeTest = false): string {
   const applied = excludeTest ? " AND pay.is_test = 0" : "";
@@ -764,6 +770,7 @@ export async function invoicesForProperty(
 export type InvoicePaymentRow = {
   id: string;
   amount_cents: number;
+  fee_cents: number;
   method: PaymentMethod;
   reference: string;
   paid_on: string;
@@ -777,9 +784,10 @@ export async function paymentsForInvoice(
   invoiceId: string,
 ): Promise<InvoicePaymentRow[]> {
   const testColumn = (await paymentTestReady(db)) ? "is_test" : "0 AS is_test";
+  const feeColumn = (await paymentFeeReady(db)) ? "fee_cents" : "0 AS fee_cents";
   const { results } = await db
     .prepare(
-      `SELECT id, amount_cents, method, reference, paid_on, notes, ${testColumn}
+      `SELECT id, amount_cents, ${feeColumn}, method, reference, paid_on, notes, ${testColumn}
        FROM payments
        WHERE association_id = ? AND invoice_id = ?
        ORDER BY paid_on DESC, created_at DESC`,
@@ -796,6 +804,7 @@ export type PaymentRow = {
   invoice_id: string | null;
   invoice_number: string | null;
   amount_cents: number;
+  fee_cents: number;
   method: PaymentMethod;
   reference: string;
   paid_on: string;
@@ -807,16 +816,21 @@ async function paymentTestSelect(db: D1Database): Promise<string> {
   return (await paymentTestReady(db)) ? "pay.is_test" : "0 AS is_test";
 }
 
+async function paymentFeeSelect(db: D1Database): Promise<string> {
+  return (await paymentFeeReady(db)) ? "pay.fee_cents" : "0 AS fee_cents";
+}
+
 export async function paymentsForUser(
   db: D1Database,
   associationId: string,
   userId: string,
 ): Promise<PaymentRow[]> {
   const testColumn = await paymentTestSelect(db);
+  const feeColumn = await paymentFeeSelect(db);
   const { results } = await db
     .prepare(
       `SELECT pay.id, pay.property_id, p.lot_number, pay.invoice_id, i.invoice_number, pay.amount_cents,
-              pay.method, pay.reference, pay.paid_on, pay.notes, ${testColumn}
+              ${feeColumn}, pay.method, pay.reference, pay.paid_on, pay.notes, ${testColumn}
        FROM payments pay
        JOIN properties p ON p.id = pay.property_id AND p.association_id = pay.association_id
        JOIN property_owners po ON po.property_id = p.id AND po.association_id = p.association_id
@@ -835,10 +849,11 @@ export async function paymentById(
   paymentId: string,
 ): Promise<PaymentRow | null> {
   const testColumn = await paymentTestSelect(db);
+  const feeColumn = await paymentFeeSelect(db);
   return db
     .prepare(
       `SELECT pay.id, pay.property_id, p.lot_number, pay.invoice_id, i.invoice_number, pay.amount_cents,
-              pay.method, pay.reference, pay.paid_on, pay.notes, ${testColumn}
+              ${feeColumn}, pay.method, pay.reference, pay.paid_on, pay.notes, ${testColumn}
        FROM payments pay
        JOIN properties p ON p.id = pay.property_id AND p.association_id = pay.association_id
        LEFT JOIN invoices i ON i.id = pay.invoice_id AND i.association_id = pay.association_id

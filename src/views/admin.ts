@@ -7,7 +7,7 @@ import type { FeeScheduleView } from "../lib/fee-schedule-store";
 import { isAdmin, MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE, signInRoleLabel, type UserListGroup } from "../lib/access";
 import { esc, paragraphs } from "../lib/html";
 import { formatDollarsPlain, formatMoney } from "../lib/money";
-import type { PaymentStatusLine } from "../lib/online-payments";
+import type { PaymentStatusLine, StuckProcessingCheckout } from "../lib/online-payments";
 import type { Association, DocumentCategory } from "../types";
 import { messageWaitingOnBoard, type MessageRow } from "../db";
 import type {
@@ -892,6 +892,11 @@ export function paymentSettingsPage(options: {
   webhookLast4: string;
   webhookUrl: string;
   demo: boolean;
+  feeReady: boolean;
+  feeEnabled: boolean;
+  feePercent: string;
+  feeCap: string;
+  processing?: StuckProcessingCheckout[];
 }): string {
   const base = `/a/${esc(options.association.slug)}/admin/payment-settings`;
   const warnings = [
@@ -905,12 +910,23 @@ export function paymentSettingsPage(options: {
       <h1>Payment settings</h1>
       <p>Payments: ${esc(options.status)}.</p>
       ${warnings}
-      <p class="muted">Only an admin can change these keys. Officers and people with the admin flag share that access. There is no separate treasurer role. Keys are encrypted and are not shown again. Activity records that a key was saved, replaced, or removed, not the key itself. Card numbers are not collected on this site. A checkout page expires after 30 minutes.</p>
+      <p class="muted">Only an admin can change these keys. Officers and people with the admin flag share that access. There is no separate treasurer role. Keys are encrypted and are not shown again. Activity records that a key was saved, replaced, or removed, not the key itself. Online payments are ACH bank transfer only. Credit and debit cards are not accepted. Bank account numbers are not collected on this site. Stripe hosts the bank page. A checkout page expires after 30 minutes. A bank transfer usually takes 4 business days to settle, and the invoice is credited only after it succeeds.</p>
       <p class="muted">Test mode shows Pay now only to an admin. Owners see Pay now after a live key is saved. A test-mode payment is saved as Test payment, not applied. It does not change the invoice or the balance. A live event is recorded only when the saved key is live.</p>
-      <p class="muted">Card fees (about 2.9% + 30 cents) are absorbed by the association unless the board decides otherwise. No convenience fee is added.</p>
+      <h2>Bank transfer processing fee</h2>
+      <p class="muted">Homeowners who pay online cover the bank transfer processing fee. Mailing a check stays fee-free. The fee is grossed up, rounded up to the next cent, and capped so the association receives the full invoice amount. It is not applied to invoices or balances.</p>
+      ${options.ready && !options.feeReady ? `<p>Apply migrations/0022_bank_transfer_fee.sql in D1, then reload, before this fee can be saved. Until then, online payments do not add a fee.</p>` : ""}
+      <form class="fields" method="post" action="${base}/fee">
+        <label><input type="checkbox" name="fee_enabled" value="yes"${options.feeEnabled ? " checked" : ""}> Charge a bank transfer processing fee</label>
+        ${textField("Fee percent", "fee_percent", { value: options.feePercent, required: true })}
+        <p class="muted">Percent from 0 to 10, such as 0.8.</p>
+        ${textField("Cap", "fee_cap", { value: options.feeCap, required: true })}
+        <p class="muted">Cap from 0.00 to 25.00, such as 5.00.</p>
+        <button type="submit">Save fee</button>
+      </form>
+      ${processingTransfers(options.association, options.processing ?? [])}
       <p class="muted">If two online payments for the same invoice finish at the same moment, the extra amount is recorded as unapplied credit on the lot.</p>
       <h2>Webhook</h2>
-      <p>In Stripe, open Developers, Webhooks, and add an endpoint. Paste this URL. Select <code>checkout.session.completed</code>, <code>checkout.session.async_payment_succeeded</code>, <code>charge.refunded</code>, <code>charge.dispute.created</code>, and <code>charge.dispute.closed</code>.</p>
+      <p>In Stripe, open Developers, Webhooks, and add an endpoint. Paste this URL. Select <code>checkout.session.completed</code>, <code>checkout.session.async_payment_succeeded</code>, <code>checkout.session.async_payment_failed</code>, <code>charge.refunded</code>, <code>charge.dispute.created</code>, and <code>charge.dispute.closed</code>.</p>
       <p><code>${esc(options.webhookUrl)}</code></p>
       ${secretField({
         title: "Stripe secret key",
@@ -943,6 +959,32 @@ export function paymentSettingsPage(options: {
            <form method="post" action="${base}/reencrypt"><button type="submit">Re-encrypt stored keys</button></form>`
         : ""}
     </section>`;
+}
+
+function processingTransfers(association: Association, rows: StuckProcessingCheckout[]): string {
+  if (rows.length === 0) return "";
+  const base = `/a/${esc(association.slug)}/admin/payment-settings`;
+  const body = rows
+    .map(
+      (row) => `<tr>
+        <td>Lot ${esc(row.lotNumbers)}</td>
+        <td>${esc(formatMoney(row.amountCents))}</td>
+        <td>${esc(formatMoney(row.feeCents))}</td>
+        <td>${dateTimeCell(row.createdAt, association.timezone)}</td>
+        <td>
+          <form method="post" action="${base}/processing/${esc(row.id)}/abandon">
+            <button type="submit">Clear stuck transfer</button>
+          </form>
+        </td>
+      </tr>`,
+    )
+    .join("");
+  return `<h2>Bank transfers still processing</h2>
+    <p class="muted">A transfer older than 14 days no longer blocks Pay now. Clear removes a stuck transfer from this list. Clearing does not credit the invoice.</p>
+    <table>
+      <thead><tr><th>Lot</th><th>Invoices</th><th>Fee</th><th>Started</th><th></th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>`;
 }
 
 function secretField(options: {
@@ -1117,6 +1159,7 @@ export function invoiceAdminPage(options: {
         <td>${esc(paymentMethodLabel(payment.method, Number(payment.is_test) === 1))}</td>
         <td>${esc(payment.reference)}</td>
         <td>${moneySpan(Number(payment.amount_cents))}</td>
+        <td>${moneySpan(Number(payment.fee_cents ?? 0))}</td>
         <td>${esc(payment.notes)}</td>
         <td>${actions}</td>
       </tr>`;
@@ -1175,9 +1218,10 @@ export function invoiceAdminPage(options: {
     <section class="panel">
       <h2>Payments on this invoice</h2>
       ${canEdit && options.payments.length > 0 ? `<p class="muted">Edit a payment to correct the amount, date, method, reference, or notes.</p>` : ""}
+      <p class="muted">Processing fee is the bank transfer processing fee for that payment. It is stored once and is not part of the invoice amount. A check has no processing fee.</p>
       ${
         paymentRows
-          ? `<table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th><th>Notes</th><th></th></tr></thead><tbody>${paymentRows}</tbody></table>${paymentForms}`
+          ? `<table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th><th>Processing fee</th><th>Notes</th><th></th></tr></thead><tbody>${paymentRows}</tbody></table>${paymentForms}`
           : empty("No payment is recorded on this invoice.")
       }
     </section>

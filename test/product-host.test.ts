@@ -116,7 +116,8 @@ describe("MyHOADashboard host", () => {
     expect(html).toContain("Manage your HOA");
     expect(html).toContain("Owner portal");
     expect(html).toContain("Estoppel requests");
-    expect(html).toContain("Card numbers are not stored");
+    expect(html).toContain("Bank account numbers are not stored");
+    expect(html).toContain("Credit and debit cards are not accepted.");
     expect(html).toContain("Electronic notice consent");
     expect(html).not.toMatch(/Tang-O-Mar|tango-mar-boardwalk|tango-mar-mark/);
     expect(html).not.toMatch(/\u2013|\u2014/);

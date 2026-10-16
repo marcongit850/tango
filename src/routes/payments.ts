@@ -4,19 +4,28 @@ import { isDemoAssociation } from "../lib/demo";
 import { isMissingTable } from "../lib/errors";
 import { canonicalPortalUrl } from "../lib/hosts";
 import { todayIso } from "../lib/dates";
+import { BANK_TRANSFER_FEE_UPDATED, bankTransferFeeCents, parseDisplayedFeeCents } from "../lib/bank-fee";
+import { formatMoney } from "../lib/money";
 import {
+  abandonProcessingCheckout,
   applyStripeAdjustment,
   applyStripeCheckout,
+  bankFeeConfig,
+  checkoutReturnState,
   emailStripeReceipt,
+  markCheckoutFailed,
+  markCheckoutProcessing,
   markReceiptEmailed,
   payableInvoicesForUser,
   paymentSettingsView,
   paymentsReady,
+  processingCheckoutsForAssociation,
   payOfferFor,
   reencryptPaymentSecrets,
   receiptRecipients,
   removeStripeSecret,
   removeWebhookSecret,
+  saveBankTransferFee,
   saveStripeSecret,
   saveWebhookSecret,
   setPaymentsEnabled,
@@ -47,6 +56,7 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
         ...view,
         webhookUrl: canonicalPortalUrl(association, "/webhooks/stripe"),
         demo: isDemoAssociation(association),
+        processing: await processingCheckoutsForAssociation(c.env.DB, association.id),
       }),
     });
   });
@@ -150,6 +160,50 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
     return redirectTo(c, back, enabled ? "Online payments turned on." : "Online payments turned off.");
   });
 
+  app.post("/a/:slug/admin/payment-settings/fee", async (c) => {
+    const { association, user } = requireEditor(c);
+    const fields = await readForm(c);
+    const back = settingsPath(association.slug);
+    const enabled = textValue(fields, "fee_enabled", 5) === "yes";
+    const saved = await saveBankTransferFee(
+      c.env.DB,
+      association.id,
+      user.id,
+      enabled,
+      textValue(fields, "fee_percent", 20),
+      textValue(fields, "fee_cap", 20),
+    );
+    if (!saved.ok) return redirectTo(c, back, saved.message, "warn");
+    if (saved.changed) {
+      await writeAudit(c.env.DB, {
+        associationId: association.id,
+        actorUserId: user.id,
+        action: "payment_settings_fee",
+        entityType: "payment_settings",
+        entityId: association.id,
+        detail: `Bank transfer processing fee changed from ${saved.previousEnabled ? "on" : "off"}, ${saved.previousPercent}% capped at $${saved.previousCap} to ${saved.enabled ? "on" : "off"}, ${saved.percent}% capped at $${saved.cap}.`,
+      });
+    }
+    return redirectTo(c, back, saved.changed ? "Bank transfer processing fee saved." : "Payment settings saved.");
+  });
+
+  app.post("/a/:slug/admin/payment-settings/processing/:intentId/abandon", async (c) => {
+    const { association, user } = requireEditor(c);
+    await readForm(c);
+    const back = settingsPath(association.slug);
+    const cleared = await abandonProcessingCheckout(c.env.DB, association.id, c.req.param("intentId"));
+    if (!cleared.ok) return redirectTo(c, back, cleared.message, "warn");
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "payment_processing_abandoned",
+      entityType: "checkout_intent",
+      entityId: c.req.param("intentId"),
+      detail: `Bank transfer marked abandoned. Nothing was applied to an invoice. Lot ${cleared.lotNumbers}. ${formatMoney(cleared.amountCents)}. ${c.req.param("intentId")}.`,
+    });
+    return redirectTo(c, back, "Stuck bank transfer cleared. Nothing was applied to an invoice.");
+  });
+
   app.post("/a/:slug/admin/payment-settings/reencrypt", async (c) => {
     const { association, user } = requireEditor(c);
     await readForm(c);
@@ -180,10 +234,11 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
       });
     }
     const open = await payableInvoicesForUser(c.env.DB, association.id, user.id, todayIso(association.timezone));
+    const fee = await bankFeeConfig(c.env.DB, association.id);
     return render(c, {
       title: offer.kind === "demo" ? "Sample checkout" : "Pay now",
       active: "dashboard",
-      body: paySelectPage({ association, invoices: open, offer, message: "" }),
+      body: paySelectPage({ association, invoices: open, offer, message: "", fee }),
     });
   });
 
@@ -193,15 +248,19 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
     const invoices = await selectDemoInvoices(c.env.DB, association, user.id, selectedInvoiceIds(c.req.queries("invoice_id"), c.req.query("invoice") ?? "", c.req.query("scope") ?? ""));
     if (invoices.length === 0) {
       const open = await payableInvoicesForUser(c.env.DB, association.id, user.id, todayIso(association.timezone));
+      const fee = await bankFeeConfig(c.env.DB, association.id);
       return render(c, {
         title: "Sample checkout",
         active: "dashboard",
-        body: paySelectPage({ association, invoices: open, offer: { kind: "demo" }, message: "Choose at least one invoice." }),
+        body: paySelectPage({ association, invoices: open, offer: { kind: "demo" }, message: "Choose at least one invoice.", fee }),
       });
     }
     const params = new URLSearchParams();
     params.set("sample", "1");
     for (const invoice of invoices) params.append("invoice_id", invoice.invoiceId);
+    const subtotal = invoices.reduce((sum, invoice) => sum + invoice.amountCents, 0);
+    const fee = await bankFeeConfig(c.env.DB, association.id);
+    const feeCents = bankTransferFeeCents(subtotal, fee) ?? 0;
     return render(c, {
       title: "Sample checkout",
       active: "dashboard",
@@ -210,6 +269,8 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
         invoices,
         successHref: `/a/${association.slug}/pay/success?${params.toString()}`,
         cancelHref: `/a/${association.slug}/pay/cancel?sample=1`,
+        feeCents,
+        fee,
       }),
     });
   });
@@ -227,6 +288,27 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
     const requested = new Set(textList(fields, "invoice_id", 80));
     const selected = open.filter((invoice) => requested.has(invoice.invoiceId));
     if (requested.size === 0 || selected.length === 0) return redirectTo(c, back, "Choose at least one invoice.", "warn");
+    const fee = await bankFeeConfig(c.env.DB, association.id);
+    const subtotal = selected.reduce((sum, invoice) => sum + invoice.amountCents, 0);
+    const recomputed = bankTransferFeeCents(subtotal, fee);
+    if (recomputed === null) {
+      return redirectTo(c, back, "The bank transfer processing fee settings need to be corrected in Payment settings.", "warn");
+    }
+    const displayed = parseDisplayedFeeCents(textValue(fields, "fee_cents", 12));
+    if (displayed === null || displayed !== recomputed) {
+      return render(c, {
+        title: "Pay now",
+        active: "dashboard",
+        body: paySelectPage({
+          association,
+          invoices: open,
+          offer,
+          message: BANK_TRANSFER_FEE_UPDATED,
+          fee,
+          checkedIds: selected.map((invoice) => invoice.invoiceId),
+        }),
+      });
+    }
     const started = await startCheckout({
       env: c.env,
       db: c.env.DB,
@@ -244,10 +326,12 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
     const { association, user } = requireMember(c);
     const sample = c.req.query("sample") === "1" && isDemoAssociation(association);
     if (!sample) {
-      return render(c, { title: "Payment submitted", active: "dashboard", body: paySuccessPage({ association, sample: null }) });
+      const state = await checkoutReturnState(c.env.DB, association.id, user.id, c.req.query("session_id") ?? "");
+      return render(c, { title: "Payment submitted", active: "dashboard", body: paySuccessPage({ association, sample: null, state }) });
     }
     const invoices = await selectDemoInvoices(c.env.DB, association, user.id, selectedInvoiceIds(c.req.queries("invoice_id"), c.req.query("invoice") ?? "", c.req.query("scope") ?? ""));
     const appliedCents = invoices.reduce((sum, invoice) => sum + invoice.amountCents, 0);
+    const feeCents = bankTransferFeeCents(appliedCents, await bankFeeConfig(c.env.DB, association.id)) ?? 0;
     return render(c, {
       title: "Sample payment",
       active: "dashboard",
@@ -256,6 +340,7 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
         sample: {
           invoices,
           appliedCents,
+          feeCents,
           reference: "sample_pi_demo",
         },
       }),
@@ -317,6 +402,38 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
       return c.json({ error: "unreadable" }, 400);
     }
     if (event.kind === "ignore") return c.json({ ok: true });
+    if (event.kind === "processing" || event.kind === "checkout_failed") {
+      try {
+        const marked = event.kind === "processing"
+          ? await markCheckoutProcessing({
+              db: c.env.DB,
+              association,
+              livemode: event.livemode,
+              eventId: event.eventId,
+              sessionId: event.sessionId,
+              amountTotal: event.amountTotal,
+              clientReferenceId: event.clientReferenceId,
+              neighborhoodId: event.neighborhoodId,
+              userId: event.userId,
+            })
+          : await markCheckoutFailed({
+              db: c.env.DB,
+              association,
+              livemode: event.livemode,
+              eventId: event.eventId,
+              sessionId: event.sessionId,
+              amountTotal: event.amountTotal,
+              clientReferenceId: event.clientReferenceId,
+              neighborhoodId: event.neighborhoodId,
+              userId: event.userId,
+            });
+        if (!marked.ok) await reviewWebhook(c, association, marked.detail, marked.review);
+      } catch (error) {
+        logError("payment_webhook", { message: redactSecrets(error instanceof Error ? error.message : "unknown") });
+        return c.json({ error: "not recorded" }, 500);
+      }
+      return c.json({ ok: true });
+    }
     if (event.kind === "refund" || event.kind === "dispute") {
       try {
         const adjusted = await applyStripeAdjustment({ db: c.env.DB, association, event });

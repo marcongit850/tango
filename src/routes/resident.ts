@@ -6,7 +6,7 @@ import { ForbiddenError, isMissingColumn, isMissingTable, NotFoundError } from "
 import { logInfo } from "../lib/log";
 import { isValidEmail, normalizeEmail } from "../lib/homeowner-account";
 import { demoFileResponse, isDemoAssociation } from "../lib/demo";
-import { payOfferFor } from "../lib/online-payments";
+import { payOfferFor, processingCheckoutsForUser } from "../lib/online-payments";
 import { ensureSeedFiles } from "../lib/seed-files";
 import { sha256Hex } from "../lib/tokens";
 import { issueEmailChangeLink } from "./auth";
@@ -114,6 +114,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
         events: upcomingEvents,
         today,
         pay: await payOfferFor(c.env.DB, association, canEditAdmin(membership)),
+        bankTransferProcessing: (await processingCheckoutsForUser(c.env.DB, association.id, user.id)).length > 0,
       }),
     });
   });
@@ -461,7 +462,8 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
   app.get("/a/:slug/payments", async (c) => {
     const { association, user } = requireMember(c);
     const payments = await paymentsForUser(c.env.DB, association.id, user.id);
-    return render(c, { title: "Payments", active: "dashboard", body: paymentListPage(association, payments) });
+    const processing = await processingCheckoutsForUser(c.env.DB, association.id, user.id);
+    return render(c, { title: "Payments", active: "dashboard", body: paymentListPage(association, payments, processing) });
   });
 
   app.get("/a/:slug/payments/:paymentId", async (c) => {

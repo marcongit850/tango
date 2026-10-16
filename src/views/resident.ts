@@ -16,8 +16,16 @@ import { groupDocuments, type CategoryGroup, type FolderGroup } from "../lib/cat
 import { assessmentDisplayName } from "../lib/dues";
 import { DOCUMENT_FILE_ACCEPT, isImageContentType } from "../lib/files";
 import { clip, paragraphs, esc } from "../lib/html";
+import {
+  BANK_TRANSFER_FEE_LABEL,
+  BANK_TRANSFER_FEE_NOTE,
+  BANK_TRANSFER_PROCESSING_STATUS,
+  bankTransferFeeCents,
+  bankTransferFeeRateNote,
+  type BankFeeConfig,
+} from "../lib/bank-fee";
 import { formatMoney } from "../lib/money";
-import type { OwnerPayOffer } from "../lib/online-payments";
+import type { OwnerPayOffer, ProcessingCheckout } from "../lib/online-payments";
 import type { Association } from "../types";
 import { addressLine, addressLocality, confirmDeleteButton, contactPhones, dateCell, dateTimeCell, documentFileLinks, empty, invoiceLinesTable, mailingAddressHtml, moneySpan, paymentMethodLabel, propertyAddressHtml, selectField, textField, areaField } from "./bits";
 
@@ -76,6 +84,7 @@ export function dashboardPage(options: {
   events?: EventRow[];
   today?: string;
   pay?: OwnerPayOffer;
+  bankTransferProcessing?: boolean;
 }): string {
   const { association, ledger } = options;
   const total = ledger.reduce((sum, row) => sum + row.balance_cents, 0);
@@ -223,6 +232,7 @@ export function dashboardPage(options: {
       </article>
       <article class="panel">
         <h2>Payments</h2>
+        ${options.bankTransferProcessing ? `<p>${esc(BANK_TRANSFER_PROCESSING_STATUS)}</p>` : ""}
         ${payments ? `<table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th></tr></thead><tbody>${payments}</tbody></table>` : empty("No recorded payments yet.")}
         <p><a href="${base}/payments">Payment history</a></p>
       </article>
@@ -414,7 +424,11 @@ export function invoiceDetailPage(association: Association, invoice: InvoiceRow,
   </section>`;
 }
 
-export function paymentListPage(association: Association, payments: PaymentRow[]): string {
+export function paymentListPage(
+  association: Association,
+  payments: PaymentRow[],
+  processing: ProcessingCheckout[] = [],
+): string {
   const rows = payments
     .map(
       (row) => `<tr>
@@ -424,11 +438,29 @@ export function paymentListPage(association: Association, payments: PaymentRow[]
         <td>${esc(row.reference)}</td>
         <td>${esc(row.invoice_number ?? "Unapplied")}</td>
         <td>${moneySpan(row.amount_cents)}</td>
+        <td>${moneySpan(Number(row.fee_cents ?? 0))}</td>
       </tr>`,
     )
     .join("");
+  const pending = processing
+    .map(
+      (row) => `<tr>
+        <td>Lot ${esc(row.lotNumbers)}</td>
+        <td>${moneySpan(row.amountCents)}</td>
+        <td>${moneySpan(row.feeCents)}</td>
+        <td>${moneySpan(row.amountCents + row.feeCents)}</td>
+        <td>${esc(BANK_TRANSFER_PROCESSING_STATUS)}</td>
+      </tr>`,
+    )
+    .join("");
+  const pendingTable = pending
+    ? `<h2>Bank transfers still processing</h2>
+       <p>${esc(BANK_TRANSFER_PROCESSING_STATUS)}</p>
+       <table><thead><tr><th>Lot</th><th>Invoices</th><th>${esc(BANK_TRANSFER_FEE_LABEL)}</th><th>Total</th><th>Status</th></tr></thead><tbody>${pending}</tbody></table>`
+    : "";
   return `<section class="panel"><h1>Payment history</h1>
-    ${rows ? `<table><thead><tr><th>Date</th><th>Lot</th><th>Method</th><th>Reference</th><th>Invoice</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>` : empty("No payments recorded for your lots.")}
+    ${pendingTable}
+    ${rows ? `<table><thead><tr><th>Date</th><th>Lot</th><th>Method</th><th>Reference</th><th>Invoice</th><th>Amount</th><th>${esc(BANK_TRANSFER_FEE_LABEL)}</th></tr></thead><tbody>${rows}</tbody></table>` : empty("No payments recorded for your lots.")}
   </section>`;
 }
 
@@ -436,6 +468,7 @@ export function paymentDetailPage(association: Association, payment: PaymentRow)
   return `<section class="panel">
     <h1>Payment receipt</h1>
     <p>${moneySpan(payment.amount_cents)} recorded on ${dateCell(payment.paid_on, association.timezone)}</p>
+    ${Number(payment.fee_cents) > 0 ? `<p>${esc(BANK_TRANSFER_FEE_LABEL)} ${moneySpan(Number(payment.fee_cents))}</p><p class="muted">The bank transfer processing fee is not applied to the invoice.</p>` : ""}
     <p>Lot ${esc(payment.lot_number)} · ${esc(paymentMethodLabel(payment.method, Number(payment.is_test) === 1))} ${esc(payment.reference)}</p>
     <p>${
       Number(payment.is_test) === 1
@@ -454,21 +487,35 @@ export function paySelectPage(options: {
   invoices: { invoiceId: string; lotNumber: string; invoiceNumber: string; description?: string; amountCents: number }[];
   offer: OwnerPayOffer;
   message: string;
+  fee?: BankFeeConfig;
+  checkedIds?: string[];
 }): string {
-  const total = options.invoices.reduce((sum, invoice) => sum + invoice.amountCents, 0);
+  const fee = options.fee ?? { enabled: false, percentBps: 0, capCents: 0 };
+  const checked = new Set(options.checkedIds ?? options.invoices.map((invoice) => invoice.invoiceId));
+  const subtotal = options.invoices.reduce((sum, invoice) => sum + (checked.has(invoice.invoiceId) ? invoice.amountCents : 0), 0);
+  const feeCents = bankTransferFeeCents(subtotal, fee) ?? 0;
+  const showFee = fee.enabled && fee.percentBps > 0 && fee.capCents > 0;
   const demo = options.offer.kind === "demo";
   const action = demo ? `/a/${esc(options.association.slug)}/pay/sample` : `/a/${esc(options.association.slug)}/pay`;
   const method = demo ? "get" : "post";
   const boxes = options.invoices
     .map((invoice) => {
       const label = invoice.description?.trim() ? `${invoice.invoiceNumber}, ${invoice.description}` : invoice.invoiceNumber;
-      return `<label class="pay-invoice"><input type="checkbox" name="invoice_id" value="${esc(invoice.invoiceId)}" data-cents="${invoice.amountCents}" checked><span>Lot ${esc(invoice.lotNumber)}, ${esc(label)}, ${esc(formatMoney(invoice.amountCents))}</span></label>`;
+      const mark = checked.has(invoice.invoiceId) ? " checked" : "";
+      return `<label class="pay-invoice"><input type="checkbox" name="invoice_id" value="${esc(invoice.invoiceId)}" data-cents="${invoice.amountCents}"${mark}><span>Lot ${esc(invoice.lotNumber)}, ${esc(label)}, ${esc(formatMoney(invoice.amountCents))}</span></label>`;
     })
     .join("");
+  const feeLine = showFee
+    ? `<p>Invoices <strong data-pay-subtotal>${esc(formatMoney(subtotal))}</strong></p>
+       <p>${esc(BANK_TRANSFER_FEE_LABEL)} <strong data-pay-fee>${esc(formatMoney(feeCents))}</strong></p>
+       <p class="muted">${esc(bankTransferFeeRateNote(fee))}</p>`
+    : "";
   const form = options.invoices.length
-    ? `<form class="fields" method="${method}" action="${action}" data-pay-select>
+    ? `<form class="fields" method="${method}" action="${action}" data-pay-select data-fee-enabled="${showFee ? "1" : "0"}" data-fee-bps="${fee.percentBps}" data-fee-cap-cents="${fee.capCents}">
         ${boxes}
-        <p>Total <strong data-pay-total>${esc(formatMoney(total))}</strong></p>
+        <input type="hidden" name="fee_cents" value="${feeCents}">
+        ${feeLine}
+        <p>Total <strong data-pay-total>${esc(formatMoney(subtotal + feeCents))}</strong></p>
         <p class="muted">Uncheck an invoice to leave it for later. The amount is the total of the invoices still checked.</p>
         <button type="submit">${demo ? "Continue sample checkout" : "Pay now"}</button>
       </form>
@@ -498,34 +545,48 @@ export function sampleCheckoutPage(options: {
   invoices: { invoiceId: string; lotNumber: string; invoiceNumber: string; amountCents: number }[];
   successHref: string;
   cancelHref: string;
+  feeCents?: number;
+  fee?: BankFeeConfig;
 }): string {
-  const total = options.invoices.reduce((sum, invoice) => sum + invoice.amountCents, 0);
+  const subtotal = options.invoices.reduce((sum, invoice) => sum + invoice.amountCents, 0);
+  const feeCents = options.feeCents ?? 0;
   const rows = options.invoices
     .map(
       (invoice) => `<tr><td>Lot ${esc(invoice.lotNumber)}</td><td>${esc(invoice.invoiceNumber)}</td><td>${moneySpan(invoice.amountCents)}</td></tr>`,
     )
     .join("");
+  const feeRow = feeCents > 0
+    ? `<tr><td></td><td>${esc(BANK_TRANSFER_FEE_LABEL)}</td><td>${moneySpan(feeCents)}</td></tr>`
+    : "";
   const action = options.invoices.length
     ? `<p><a class="button" href="${esc(options.successHref)}">Complete sample payment</a> <a class="button secondary" href="${esc(options.cancelHref)}">Cancel</a></p>`
     : `<p><a href="/a/${esc(options.association.slug)}/dashboard">Back to the dashboard</a></p>`;
+  const note = feeCents > 0 ? `<p class="muted">${esc(options.fee ? bankTransferFeeRateNote(options.fee) : BANK_TRANSFER_FEE_NOTE)}</p>` : "";
   return `<section class="panel">
     <p class="kicker">Sample checkout</p>
     <h1>Sample checkout</h1>
     <p><strong>Nothing is charged. Nothing here is real or saved.</strong></p>
-    <p>This is not Stripe. Card number, expiration, and CVC are not collected.</p>
-    ${rows ? `<table><thead><tr><th>Lot</th><th>Invoice</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table><p>Total ${moneySpan(total)}</p>` : empty("Nothing is due.")}
+    <p>This is not Stripe. Bank account numbers are not collected. Credit and debit cards are not accepted.</p>
+    ${rows ? `<table><thead><tr><th>Lot</th><th>Invoice</th><th>Amount</th></tr></thead><tbody>${rows}${feeRow}</tbody></table><p>Total ${moneySpan(subtotal + feeCents)}</p>${note}` : empty("Nothing is due.")}
     ${action}
   </section>`;
 }
 
 export function paySuccessPage(options: {
   association: Association;
-  sample: { invoices: { lotNumber: string; invoiceNumber: string; amountCents: number }[]; appliedCents: number; reference: string } | null;
+  sample: { invoices: { lotNumber: string; invoiceNumber: string; amountCents: number }[]; appliedCents: number; feeCents: number; reference: string } | null;
+  state?: "processing" | "succeeded" | "failed";
 }): string {
   if (!options.sample) {
+    const state = options.state ?? "processing";
+    const detail = state === "succeeded"
+      ? "<p>This bank transfer has been recorded. The invoice credit is the amount due. The processing fee is not applied to the invoice.</p>"
+      : state === "failed"
+        ? "<p>This bank transfer did not go through. Nothing was applied to the invoice.</p>"
+        : `<p>${esc(BANK_TRANSFER_PROCESSING_STATUS)}</p><p>The invoice is credited after the bank transfer succeeds. It then shows in Payment history. Paying again is not required.</p>`;
     return `<section class="panel">
       <h1>Payment submitted</h1>
-      <p>Stripe is confirming this payment. It shows in Payment history when the receipt is recorded. Refresh that page in a moment. Paying again is not required.</p>
+      ${detail}
       <p><a href="/a/${esc(options.association.slug)}/payments">Payment history</a></p>
     </section>`;
   }
@@ -534,12 +595,17 @@ export function paySuccessPage(options: {
       (invoice) => `<tr><td>Lot ${esc(invoice.lotNumber)}</td><td>${esc(invoice.invoiceNumber)}</td><td>Online (Stripe)</td><td>${esc(options.sample?.reference ?? "")}</td><td>${moneySpan(invoice.amountCents)}</td></tr>`,
     )
     .join("");
+  const feeCents = options.sample.feeCents;
+  const feeLine = feeCents > 0
+    ? `<p>${esc(BANK_TRANSFER_FEE_LABEL)} ${moneySpan(feeCents)}</p><p class="muted">${esc(BANK_TRANSFER_FEE_NOTE)}</p>`
+    : "";
   return `<section class="panel">
     <p class="kicker">Sample payment</p>
     <h1>Sample payment applied</h1>
     <p><strong>Nothing here is real or saved.</strong></p>
     <p>The dashboard still shows the sample balance because this demo does not save payments.</p>
     ${rows ? `<table><thead><tr><th>Lot</th><th>Invoice</th><th>Method</th><th>Reference</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>` : empty("Nothing was due.")}
+    ${feeLine}
     <p>Sample payment ${moneySpan(options.sample.appliedCents)}</p>
     <p><a href="/a/${esc(options.association.slug)}/dashboard">Back to the dashboard</a></p>
   </section>`;

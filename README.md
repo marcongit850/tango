@@ -31,7 +31,7 @@ Add another owner on that page sends a join request for one lot. It does not cre
 
 ## Not in this phase
 
-Moderated forum, online card or ACH payments, ARC requests, SMS, and a working AI covenant assistant. Signed-in pages include an Ask the portal placeholder that says subscription required and does not call a model. A board officer can email one owner a balance reminder. Email owners on an announcement, event, or document starts unchecked, so a save does not email anyone unless the board checks it. Email owner on a portal notice also starts unchecked, and a checked notice attaches its file when there is one. The request to join form stores a note for the board. It does not create a login until a board member approves it.
+Moderated forum, ARC requests, SMS, and a working AI covenant assistant. Online payments are ACH bank transfer only. Credit and debit cards are not accepted. Signed-in pages include an Ask the portal placeholder that says subscription required and does not call a model. A board officer can email one owner a balance reminder. Email owners on an announcement, event, or document starts unchecked, so a save does not email anyone unless the board checks it. Email owner on a portal notice also starts unchecked, and a checked notice attaches its file when there is one. The request to join form stores a note for the board. It does not create a login until a board member approves it.
 
 ## Stack
 
@@ -563,7 +563,7 @@ Tang-O-Mar starts with these amounts for one assessment period. Admins can chang
 
 The first improved lot is the lowest improved lot number, unless an admin picks a different improved lot for that owner. Annual dues use these amounts once a year. Quarterly dues use the same amounts each quarter.
 
-Add a year, while a schedule is saved, creates one assessment per period with billing mode `schedule`. On the open date, or when an admin assigns early, each owner gets one invoice. The lines look like `Lot 43, first improved`, `Lot 44, additional improved`, `Lot 12, vacant`, and `Beach box`. An owner with 2 improved lots, 1 vacant lot, and 1 beach box is billed $625 + $315 + $220 + $150 = $1,310. The invoice total is that sum. Online card fees (about 2.9% + 30 cents) are absorbed by the association unless the board decides otherwise. No convenience fee is added today. Changing the schedule later does not rewrite invoices already assigned. Older flat assessments and their invoices stay as they are.
+Add a year, while a schedule is saved, creates one assessment per period with billing mode `schedule`. On the open date, or when an admin assigns early, each owner gets one invoice. The lines look like `Lot 43, first improved`, `Lot 44, additional improved`, `Lot 12, vacant`, and `Beach box`. An owner with 2 improved lots, 1 vacant lot, and 1 beach box is billed $625 + $315 + $220 + $150 = $1,310. The invoice total is that sum. A homeowner who pays that invoice online also pays a bank transfer processing fee. The default is 0.8 percent, capped at $5.00. A mailed check has no processing fee. The board can change the percent, the cap, and the on/off switch under Payment settings. Changing the schedule later does not rewrite invoices already assigned. Older flat assessments and their invoices stay as they are.
 
 Dashboard steps:
 
@@ -579,7 +579,7 @@ Someone with a terminal can apply the same file with `npm run db:migrate:remote`
 
 ## Online payments (paste this before merge)
 
-`migrations/0019_online_payments.sql` adds encrypted Stripe settings, checkout intents, and webhook idempotency. It also allows the payment method `stripe`, shown as Online (Stripe). Paste it after `0018_fee_schedule.sql`. Then paste `migrations/0020_payment_controls.sql` so refunds, disputes, and the append-only activity log are in place. Then paste `migrations/0021_test_payments.sql` so a test-mode payment is stored without changing a balance. Deploy does not apply D1 migrations. None of these files stores a Stripe key.
+`migrations/0019_online_payments.sql` adds encrypted Stripe settings, checkout intents, and webhook idempotency. It also allows the payment method `stripe`, shown as Online (Stripe). Paste it after `0018_fee_schedule.sql`. Then paste `migrations/0020_payment_controls.sql` so refunds, disputes, and the append-only activity log are in place. Then paste `migrations/0021_test_payments.sql` so a test-mode payment is stored without changing a balance. Then paste `migrations/0022_bank_transfer_fee.sql` so the bank transfer processing fee, the fee cap, and checkout status (open, processing, succeeded, failed, abandoned) can be stored. Online payments are ACH bank transfer only. Credit and debit cards are not accepted. The fee is not applied to invoices. Deploy does not apply D1 migrations. None of these files stores a Stripe key or a bank account number.
 
 Set the Worker secret `PAYMENT_ENCRYPTION_KEY` before a treasurer saves keys. It is a base64-encoded 32-byte key (`openssl rand -base64 32`, then `npx wrangler secret put PAYMENT_ENCRYPTION_KEY`). Do not put the value in git, email, or the activity log.
 
@@ -593,8 +593,9 @@ Dashboard steps for the migration:
 4. Paste the full contents of `migrations/0019_online_payments.sql` and select **Execute**.
 5. Paste the full contents of `migrations/0020_payment_controls.sql` and select **Execute**.
 6. Paste the full contents of `migrations/0021_test_payments.sql` and select **Execute**.
+7. Paste the full contents of `migrations/0022_bank_transfer_fee.sql` and select **Execute**.
 
-Run that file once, after `0018`. If the console says `online_payments_migration` already exists, this file was already applied. Stop. Do not paste it again.
+Run each file once, after the one before it. If the console says `online_payments_migration` already exists, `0019` was already applied. Stop that file. Do not paste it again. If the console says `bank_transfer_fee_migration` already exists, `0022` was already applied. Stop that file. Do not paste it again.
 
 Treasurer steps to turn payments on are in `ARCHITECTURE.md` under Online payments.
 

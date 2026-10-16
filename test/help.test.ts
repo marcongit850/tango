@@ -49,6 +49,12 @@ function shown(text: string): string {
 }
 
 describe("help copy", () => {
+  it("uses the approved Users role sentence", () => {
+    expect(ROLE_HELP).toBe(
+      "Owners see their own account, invoices, and documents. Board members also see board-only documents. Anyone with edit access, including admins, can edit owners, lots, invoices, and settings and gets staff notices.",
+    );
+  });
+
   it("uses the saved fee percent and cap in the same format as the owner note", () => {
     expect(bankTransferFeeHelp({ enabled: true, percentBps: 80, capCents: 500 })).toBe(FEE_HELP);
     expect(bankTransferFeeHelp({ enabled: true, percentBps: 125, capCents: 1000 })).toBe(

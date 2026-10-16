@@ -116,6 +116,8 @@ import { ensureHomeownerAccount, isValidEmail, linkLotOwner, unlinkLotOwner } fr
 import { importOwners } from "../lib/import-owners";
 import { csvText, formatDollarsPlain, formatMoney, parseMoneyToCents } from "../lib/money";
 import { demoFileResponse, isDemoAssociation } from "../lib/demo";
+import { paymentSettingsView } from "../lib/online-payments";
+import { paymentsStatusForView } from "./payments";
 import { ensureSeedFiles } from "../lib/seed-files";
 import { isCheckConstraint, isMissingColumn, isMissingTable, NotFoundError } from "../lib/errors";
 import { logError, logInfo } from "../lib/log";
@@ -275,6 +277,11 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         admins: activeAdminContacts(owners),
         audit,
         canEdit: canEditAdmin(membership),
+        paymentsStatus: paymentsStatusForView(
+          canEditAdmin(membership),
+          association.slug,
+          (await paymentSettingsView(c.env, c.env.DB, association.id)).status,
+        ),
       }),
     });
   });
@@ -642,13 +649,16 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const itemLines = ledger.flatMap((row) =>
       (row.line_items ?? []).map((item) => `${item.description}: ${formatMoney(item.amount_cents)}`),
     );
+    const payments = await paymentSettingsView(c.env, c.env.DB, association.id);
     const body = [
       `${association.name} is writing about the balance on your lots.`,
       ...lines,
       ...(itemLines.length > 0 ? ["Itemized dues:", ...itemLines] : []),
       `Total: ${formatMoney(total)}.`,
       `Mail checks to ${formatAddress(association)}.`,
-      "This portal does not take card or ACH payments.",
+      payments.status === "not enabled"
+        ? "This portal does not take card or ACH payments."
+        : "Open invoices can be paid from your dashboard.",
       "This note is not legal advice.",
     ].join("\n");
     await notify(c.env.DB, {
@@ -1045,6 +1055,11 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         duesYear: defaultDuesYear(today),
         feeSchedule: await loadFeeScheduleView(c.env.DB, association.id),
         canEdit: canEditAdmin(membership),
+        paymentsStatus: paymentsStatusForView(
+          canEditAdmin(membership),
+          association.slug,
+          (await paymentSettingsView(c.env, c.env.DB, association.id)).status,
+        ),
       }),
     });
   });
@@ -1279,6 +1294,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       .bind(association.id, invoiceId, paymentId)
       .first<{ id: string; amount_cents: number; method: string; reference: string }>();
     if (!payment) throw new NotFoundError();
+    if (payment.method === "stripe") {
+      return redirectTo(c, back, "Online (Stripe) payments stay on the ledger. Refund the charge in Stripe.", "warn");
+    }
     if (textValue(fields, "confirm", 10) !== "yes") return redirectTo(c, back, "Confirm the delete first.", "warn");
     const result = await c.env.DB
       .prepare("DELETE FROM payments WHERE association_id = ? AND invoice_id = ? AND id = ?")
@@ -1308,15 +1326,18 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const back = `/a/${association.slug}/admin/invoices/${invoiceId}`;
     const payment = await c.env.DB
       .prepare(
-        `SELECT id
+        `SELECT id, method
          FROM payments
          WHERE association_id = ? AND invoice_id = ? AND id = ?`,
       )
       .bind(association.id, invoiceId, paymentId)
-      .first<{ id: string }>();
+      .first<{ id: string; method: string }>();
     if (!payment) throw new NotFoundError();
     const amount = parseMoneyToCents(textValue(fields, "amount", 40));
     const method = textValue(fields, "method", 20);
+    if (payment.method === "stripe" || method === "stripe") {
+      return redirectTo(c, back, "Online (Stripe) payments are recorded from Stripe and cannot be edited here.", "warn");
+    }
     const reference = textValue(fields, "reference", 80);
     const paidOn = textValue(fields, "paid_on", 20);
     const notes = textValue(fields, "notes", 1000);
@@ -1784,6 +1805,9 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const paidOn = textValue(fields, "paid_on", 20);
     const notes = textValue(fields, "notes", 1000);
     const invoiceId = textValue(fields, "invoice_id", 80);
+    if (method === "stripe") {
+      return redirectTo(c, `/a/${association.slug}/admin/ledger`, "Online (Stripe) is recorded from Stripe. Choose another method.", "warn");
+    }
     if (!property || amount === null || amount <= 0 || !METHODS.has(method) || !isIsoDate(paidOn)) {
       return redirectTo(c, `/a/${association.slug}/admin/ledger`, "Check the lot, amount, method, and date.", "warn");
     }

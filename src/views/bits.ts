@@ -49,7 +49,13 @@ export function methodLabel(method: string): string {
   if (method === "cash") return "Cash";
   if (method === "ach_recorded") return "ACH (recorded)";
   if (method === "other") return "Other";
+  if (method === "stripe") return "Online (Stripe)";
   return method;
+}
+
+export function paymentMethodLabel(method: string, isTest = false): string {
+  if (isTest) return "Test payment, not applied";
+  return methodLabel(method);
 }
 
 export function documentFileLinks(href: string, contentType: string | null | undefined): string {

@@ -13,7 +13,7 @@ export type DocumentCategory =
   | "insurance";
 export type DocumentVisibility = "residents" | "board";
 export type InvoiceStatus = "open" | "partial" | "paid" | "void";
-export type PaymentMethod = "check" | "cash" | "ach_recorded" | "other";
+export type PaymentMethod = "check" | "cash" | "ach_recorded" | "other" | "stripe";
 export type AnnouncementKind = "news" | "emergency" | "meeting";
 export type EventKind = "meeting" | "event" | "emergency";
 

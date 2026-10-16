@@ -8,6 +8,7 @@ export const WEBHOOK_TOPIC = "Webhook";
 export const ROLE_TOPIC = "Role";
 export const BOARD_ONLY_TOPIC = "Board only";
 export const CLEAR_STUCK_TOPIC = "Clear stuck transfer";
+export const INVOICE_EMAIL_TOPIC = "Invoice emails";
 export const LATE_FEE_TOPIC = "Late fees";
 
 export const PROCESSING_HELP =
@@ -30,6 +31,9 @@ export const BOARD_ONLY_HELP = "Only board members and admins can see these file
 
 export const CLEAR_STUCK_HELP =
   "Use this only if a bank payment has shown Processing for more than 14 days with no update from Stripe. It removes the hold so the owner can pay again. It does not mark anything paid.";
+
+export const INVOICE_EMAIL_HELP =
+  "When this is on, each owner is emailed their invoice on the date it is scheduled to go out, with a link to view and pay. Invoices are emailed once.";
 
 export const LATE_FEE_HELP =
   "Late fees are added once to each invoice still unpaid after the number of days you choose. Florida law limits a late fee to $25 or 5% of the late installment, whichever is greater, and your governing documents must allow it.";

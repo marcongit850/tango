@@ -641,6 +641,8 @@ export type InvoiceRow = {
   due_on: string;
   status: InvoiceStatus;
   paid_cents: number;
+  /** When the invoice email went out. Empty until then. */
+  emailed_at?: string | null;
   lines?: InvoiceLineRow[];
 };
 
@@ -705,10 +707,18 @@ export async function invoiceById(
 ): Promise<InvoiceRow | null> {
   const reversals = await paymentReversalsReady(db);
   const excludeTest = await paymentTestReady(db);
+  const invoiceColumns = await columnNames(db, "invoices");
+  const emailed =
+    invoiceColumns.has("emailed_at") && (await tableExists(db, "invoice_email_events"))
+      ? `COALESCE(i.emailed_at, (SELECT MIN(e.sent_at) FROM invoice_email_events e WHERE e.invoice_id = i.id AND e.association_id = i.association_id))`
+      : invoiceColumns.has("emailed_at")
+        ? "i.emailed_at"
+        : "NULL";
   const row = await db
     .prepare(
       `SELECT i.id, i.property_id, p.lot_number, i.invoice_number, i.description, i.amount_cents,
               i.late_fee_cents, i.issued_on, i.due_on, i.status,
+              ${emailed} AS emailed_at,
               ${invoiceNetPaidSql(reversals, excludeTest)} AS paid_cents
        FROM invoices i
        JOIN properties p ON p.id = i.property_id AND p.association_id = i.association_id

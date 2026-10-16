@@ -595,8 +595,9 @@ Dashboard steps for the migration:
 6. Paste the full contents of `migrations/0021_test_payments.sql` and select **Execute**.
 7. Paste the full contents of `migrations/0022_bank_transfer_fee.sql` and select **Execute**.
 8. Paste the full contents of `migrations/0023_late_fees.sql` and select **Execute**. That file turns automatic late fees on only for the Seaside demo. It does not change any other association.
+9. Paste the full contents of `migrations/0024_invoice_emails.sql` and select **Execute**. That file adds the invoice email switch. It does not turn invoice emails on for any association, and it does not send email.
 
-Run each file once, after the one before it. If the console says `online_payments_migration` already exists, `0019` was already applied. Stop that file. Do not paste it again. If the console says `bank_transfer_fee_migration` already exists, `0022` was already applied. Stop that file. Do not paste it again. If the console says `late_fees_migration` already exists, `0023` was already applied. Stop that file. Do not paste it again.
+Run each file once, after the one before it. If the console says `online_payments_migration` already exists, `0019` was already applied. Stop that file. Do not paste it again. If the console says `bank_transfer_fee_migration` already exists, `0022` was already applied. Stop that file. Do not paste it again. If the console says `late_fees_migration` already exists, `0023` was already applied. Stop that file. Do not paste it again. If the console says `invoice_emails_migration` already exists, `0024` was already applied. Stop that file. Do not paste it again.
 
 Treasurer steps to turn payments on are in `ARCHITECTURE.md` under Online payments.
 
@@ -606,7 +607,9 @@ Migrations live in `migrations/`.
 
 - `associations`, `users`, `roles`, `memberships` (`is_admin` is edit access on a homeowner or a board member; a board member without it is view-only; `is_master` is the one locked master admin for that association)
 - `properties` (lots, with `lot_type` of `improved` or `unimproved`, plus `house_name`, mailing address, and `admin_notes`) and `property_owners`
-- `assessments` (`opens_on`, `lot_type`, `billing_mode` of `flat` or `schedule`, amount, due date), `invoices` (optional `billed_user_id` when one owner invoice covers several lots), `invoice_lines`, `payments` (amounts in cents; method `stripe` is an online Stripe payment marked Online (Stripe))
+- `assessments` (`opens_on`, `lot_type`, `billing_mode` of `flat` or `schedule`, amount, due date), `invoices` (optional `billed_user_id` when one owner invoice covers several lots; `emailed_at` is set after every current owner has been emailed), `invoice_lines`, `payments` (amounts in cents; method `stripe` is an online Stripe payment marked Online (Stripe))
+- `late_fee_settings` (automatic late fee switch, amount, wait, and whether the wait starts on the invoice date or the due date)
+- `invoice_email_settings` (invoice email switch and the date it was last turned on) and `invoice_email_events` (one row per owner emailed for an invoice)
 - `fee_schedules` (first improved, additional improved, and vacant amounts for one period), `fee_addon_types`, `owner_addons` (quantity on an owner, optional nearby lot), `owner_primary_lots` (which improved lot is the first one)
 - `documents` and `document_versions` (`current_version_id` is what residents see; `visibility` is `residents` or `board`; `folder` is an optional subfolder; `document_date` is the date that files Meeting Minutes, Budgets, and Insurance into a year folder)
 - `announcements`, `events`, `faqs`, `board_contacts`
@@ -637,7 +640,7 @@ Balance = non-void invoice amounts + late fees − recorded payments.
 ```text
 migrations/          D1 schema and Tango Mar seed
 samples/             Example owner CSV
-src/index.ts         Worker entry, including the daily assessment invoice cron
+src/index.ts         Worker entry, including the daily cron for assessment invoices, invoice emails, and late fees
 src/app.ts           Routes and session loading
 src/routes/          Public, auth, resident, and board handlers
 public/              Static files, including the Tango Mar header logo

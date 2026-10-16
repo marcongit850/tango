@@ -14,7 +14,7 @@ import {
 } from "../src/lib/late-fees";
 import { addIsoDays } from "../src/lib/dates";
 import { sha256Hex } from "../src/lib/tokens";
-import { LATE_FEE_HELP } from "../src/views/help";
+import { INVOICE_EMAIL_HELP, LATE_FEE_HELP } from "../src/views/help";
 
 class SqliteStatement {
   constructor(
@@ -88,6 +88,7 @@ const MIGRATIONS = [
   "migrations/0021_test_payments.sql",
   "migrations/0022_bank_transfer_fee.sql",
   "migrations/0023_late_fees.sql",
+  "migrations/0024_invoice_emails.sql",
 ];
 
 const TANGO = "assoc_tango_mar";
@@ -453,7 +454,9 @@ describe("late fee settings and waive", () => {
       expect(page.status).toBe(200);
       const html = await page.text();
       expect(html).toContain(LATE_FEE_HELP);
+      expect(html).toContain(INVOICE_EMAIL_HELP);
       expect(html).toContain('id="late-fees"');
+      expect(html).toContain("Save invoice emails");
       expect(html).toContain("Turn on automatic late fees");
       expect(html).toContain("Flat dollar amount");
       expect(html).toContain("Percent of the unpaid balance");

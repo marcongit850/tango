@@ -52,7 +52,7 @@ import {
 } from "./bits";
 import { supportPage, threadPage, type SupportFormValues } from "./resident";
 import { formatLateFeePercent, type LateFeeSettingsView } from "../lib/late-fees";
-import { CLEAR_STUCK_HELP, CLEAR_STUCK_TOPIC, LATE_FEE_HELP, LATE_FEE_TOPIC, ROLE_HELP, ROLE_TOPIC, STRIPE_KEY_HELP, STRIPE_KEY_TOPIC, WEBHOOK_HELP, WEBHOOK_TOPIC, helpTip } from "./help";
+import { CLEAR_STUCK_HELP, CLEAR_STUCK_TOPIC, INVOICE_EMAIL_HELP, INVOICE_EMAIL_TOPIC, LATE_FEE_HELP, LATE_FEE_TOPIC, ROLE_HELP, ROLE_TOPIC, STRIPE_KEY_HELP, STRIPE_KEY_TOPIC, WEBHOOK_HELP, WEBHOOK_TOPIC, helpTip } from "./help";
 
 function adminNav(slug: string, current: string, canEdit = true): string {
   const links = [
@@ -902,6 +902,9 @@ export function paymentSettingsPage(options: {
   feeEnabled: boolean;
   feePercent: string;
   feeCap: string;
+  invoiceEmailsReady: boolean;
+  invoiceEmailsEnabled: boolean;
+  invoiceEmailsEnabledOn?: string | null;
   processing?: StuckProcessingCheckout[];
   lateFees?: LateFeeSettingsView;
 }): string {
@@ -920,6 +923,7 @@ export function paymentSettingsPage(options: {
       ${lateFeeSettingsSection(options.association, options.lateFees)}
       <p class="muted">Only an admin can change these keys. Officers and people with the admin flag share that access. There is no separate treasurer role. Keys are encrypted and are not shown again. Activity records that a key was saved, replaced, or removed, not the key itself. Online payments are ACH bank transfer only. Credit and debit cards are not accepted. Bank account numbers are not collected on this site. Stripe hosts the bank page. A checkout page expires after 30 minutes. A bank transfer usually takes 4 business days to settle, and the invoice is credited only after it succeeds.</p>
       <p class="muted">Test mode shows Pay now only to an admin. Owners see Pay now after a live key is saved. A test-mode payment is saved as Test payment, not applied. It does not change the invoice or the balance. A live event is recorded only when the saved key is live.</p>
+      ${invoiceEmailSection(options)}
       <h2>Bank transfer processing fee</h2>
       <p class="muted">Homeowners who pay online cover the bank transfer processing fee. Mailing a check stays fee-free. The fee is grossed up, rounded up to the next cent, and capped so the association receives the full invoice amount. It is not applied to invoices or balances.</p>
       ${options.ready && !options.feeReady ? `<p>Apply migrations/0022_bank_transfer_fee.sql in D1, then reload, before this fee can be saved. Until then, online payments do not add a fee.</p>` : ""}
@@ -968,6 +972,33 @@ export function paymentSettingsPage(options: {
            <form method="post" action="${base}/reencrypt"><button type="submit">Re-encrypt stored keys</button></form>`
         : ""}
     </section>`;
+}
+
+function invoiceEmailSection(options: {
+  association: Association;
+  demo: boolean;
+  invoiceEmailsReady: boolean;
+  invoiceEmailsEnabled: boolean;
+  invoiceEmailsEnabledOn?: string | null;
+}): string {
+  const base = `/a/${esc(options.association.slug)}/admin/payment-settings`;
+  const heading = `<h2>Invoice emails${helpTip(INVOICE_EMAIL_TOPIC, INVOICE_EMAIL_HELP)}</h2>`;
+  if (!options.invoiceEmailsReady) {
+    return `${heading}
+      <p>Apply migrations/0024_invoice_emails.sql in D1, then reload, before invoice emails can be turned on.</p>`;
+  }
+  const cutoff =
+    options.invoiceEmailsEnabled && options.invoiceEmailsEnabledOn
+      ? `<p class="muted">Invoices issued before ${dateCell(options.invoiceEmailsEnabledOn, options.association.timezone)} are not emailed.</p>`
+      : "";
+  const demo = options.demo ? `<p class="muted">This demo does not send invoice email.</p>` : "";
+  return `${heading}
+    ${demo}
+    ${cutoff}
+    <form class="fields" method="post" action="${base}/invoice-emails">
+      <label><input type="checkbox" name="invoice_emails" value="yes"${options.invoiceEmailsEnabled ? " checked" : ""}> Email each owner their invoice on the issue date</label>
+      <button type="submit">Save invoice emails</button>
+    </form>`;
 }
 
 function lateFeeSettingsSection(association: Association, lateFees: LateFeeSettingsView | undefined): string {
@@ -1267,6 +1298,7 @@ export function invoiceAdminPage(options: {
       <p><a href="${base}/ledger/${esc(invoice.property_id)}">Lot ${esc(invoice.lot_number)}</a></p>
       <h1>${esc(invoice.invoice_number)}</h1>
       <p><span class="badge">${esc(invoice.status)}</span></p>
+      ${invoice.emailed_at ? `<p>Emailed ${dateCell(invoice.emailed_at, association.timezone)}</p>` : ""}
       <p>Amount ${moneySpan(Number(invoice.amount_cents))} · Late fee ${moneySpan(Number(invoice.late_fee_cents))} · Paid ${moneySpan(paid)} · Remaining ${moneySpan(remaining)}</p>
       ${Number(invoice.late_fee_cents) > 0 ? `<p>Late fee ${moneySpan(Number(invoice.late_fee_cents))}</p>` : ""}
       ${(invoice.lines ?? []).length > 0 ? invoiceLinesTable(invoice.lines ?? []) : ""}

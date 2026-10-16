@@ -77,6 +77,8 @@ const MIGRATIONS = [
   "migrations/0020_payment_controls.sql",
   "migrations/0021_test_payments.sql",
   "migrations/0022_bank_transfer_fee.sql",
+  "migrations/0023_late_fees.sql",
+  "migrations/0024_invoice_emails.sql",
 ];
 
 const SECRET_KEY = "sk_test_5123456789abcdef";

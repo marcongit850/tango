@@ -5,6 +5,7 @@ import { isMissingTable } from "../lib/errors";
 import { canonicalPortalUrl } from "../lib/hosts";
 import { todayIso } from "../lib/dates";
 import { BANK_TRANSFER_FEE_UPDATED, bankTransferFeeCents, parseDisplayedFeeCents } from "../lib/bank-fee";
+import { describeLateFeeSettings, lateFeeSettingsView, saveLateFeeSettings } from "../lib/late-fees";
 import { formatMoney } from "../lib/money";
 import {
   abandonProcessingCheckout,
@@ -57,6 +58,7 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
         webhookUrl: canonicalPortalUrl(association, "/webhooks/stripe"),
         demo: isDemoAssociation(association),
         processing: await processingCheckoutsForAssociation(c.env.DB, association.id),
+        lateFees: await lateFeeSettingsView(c.env.DB, association.id),
       }),
     });
   });
@@ -158,6 +160,32 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
     }
     if (!saved.changed) return redirectTo(c, back, "Payment settings saved.");
     return redirectTo(c, back, enabled ? "Online payments turned on." : "Online payments turned off.");
+  });
+
+  app.post("/a/:slug/admin/payment-settings/late-fees", async (c) => {
+    const { association, user } = requireEditor(c);
+    const fields = await readForm(c);
+    const back = `${settingsPath(association.slug)}#late-fees`;
+    const saved = await saveLateFeeSettings(c.env.DB, association.id, user.id, {
+      enabled: textValue(fields, "late_fee_enabled", 5) === "yes",
+      feeType: textValue(fields, "fee_type", 20),
+      flatAmount: textValue(fields, "flat_amount", 20),
+      percent: textValue(fields, "percent", 20),
+      days: textValue(fields, "days", 10),
+      countFrom: textValue(fields, "count_from", 20),
+    });
+    if (!saved.ok) return redirectTo(c, back, saved.message, "warn");
+    if (saved.changed) {
+      await writeAudit(c.env.DB, {
+        associationId: association.id,
+        actorUserId: user.id,
+        action: "late_fee_settings",
+        entityType: "late_fee_settings",
+        entityId: association.id,
+        detail: `Late fees changed from ${describeLateFeeSettings(saved.previous)} to ${describeLateFeeSettings(saved.next)}.`,
+      });
+    }
+    return redirectTo(c, back, "Late fees saved.");
   });
 
   app.post("/a/:slug/admin/payment-settings/fee", async (c) => {

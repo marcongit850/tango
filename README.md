@@ -594,8 +594,9 @@ Dashboard steps for the migration:
 5. Paste the full contents of `migrations/0020_payment_controls.sql` and select **Execute**.
 6. Paste the full contents of `migrations/0021_test_payments.sql` and select **Execute**.
 7. Paste the full contents of `migrations/0022_bank_transfer_fee.sql` and select **Execute**.
+8. Paste the full contents of `migrations/0023_late_fees.sql` and select **Execute**. That file turns automatic late fees on only for the Seaside demo. It does not change any other association.
 
-Run each file once, after the one before it. If the console says `online_payments_migration` already exists, `0019` was already applied. Stop that file. Do not paste it again. If the console says `bank_transfer_fee_migration` already exists, `0022` was already applied. Stop that file. Do not paste it again.
+Run each file once, after the one before it. If the console says `online_payments_migration` already exists, `0019` was already applied. Stop that file. Do not paste it again. If the console says `bank_transfer_fee_migration` already exists, `0022` was already applied. Stop that file. Do not paste it again. If the console says `late_fees_migration` already exists, `0023` was already applied. Stop that file. Do not paste it again.
 
 Treasurer steps to turn payments on are in `ARCHITECTURE.md` under Online payments.
 

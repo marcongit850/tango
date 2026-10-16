@@ -5,6 +5,14 @@ export function isIsoDate(value: string): boolean {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
+/** Calendar days after an ISO date. Month lengths and leap days are included. */
+export function addIsoDays(iso: string, days: number): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 export function zonedIsoDate(instant: Date, timeZone: string): string {
   return todayIso(timeZone, instant);
 }

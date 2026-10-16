@@ -80,7 +80,7 @@ const MIGRATIONS = [
   "migrations/0020_payment_controls.sql",
   "migrations/0021_test_payments.sql",
   "migrations/0022_bank_transfer_fee.sql",
-  "migrations/0023_invoice_emails.sql",
+  "migrations/0024_invoice_emails.sql",
 ];
 
 const FROM = "Tang-O-Mar <donotreply@mytangomar.com>";

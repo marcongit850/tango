@@ -980,7 +980,7 @@ function invoiceEmailSection(options: {
   const heading = `<h2>Invoice emails${helpTip(INVOICE_EMAIL_TOPIC, INVOICE_EMAIL_HELP)}</h2>`;
   if (!options.invoiceEmailsReady) {
     return `${heading}
-      <p>Apply migrations/0023_invoice_emails.sql in D1, then reload, before invoice emails can be turned on.</p>`;
+      <p>Apply migrations/0024_invoice_emails.sql in D1, then reload, before invoice emails can be turned on.</p>`;
   }
   const cutoff =
     options.invoiceEmailsEnabled && options.invoiceEmailsEnabledOn

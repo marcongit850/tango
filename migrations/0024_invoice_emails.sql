@@ -2,7 +2,7 @@
 -- The switch is off until a board admin turns it on. Invoices issued before that date are not emailed.
 -- A sent invoice is recorded so the daily job does not send it again. A failed send is left unmarked and retries the next day.
 -- Dashboard steps: Cloudflare dashboard, D1 SQL database, open tango, Console, paste this whole file, Execute.
--- Run this once, after migrations/0022_bank_transfer_fee.sql.
+-- Run this once, after migrations/0023_late_fees.sql.
 -- Deploy does not apply this file. Until it is applied, invoice emails stay off.
 -- If the console says invoice_emails_migration already exists, this file was already applied. Stop.
 

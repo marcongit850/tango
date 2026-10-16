@@ -24,7 +24,7 @@ export type InvoiceEmailSave =
     }
   | { ok: false; message: string };
 
-const MIGRATION_MESSAGE = "Apply migrations/0023_invoice_emails.sql in D1, then try again.";
+const MIGRATION_MESSAGE = "Apply migrations/0024_invoice_emails.sql in D1, then try again.";
 
 export async function invoiceEmailSettings(db: D1Database, associationId: string): Promise<InvoiceEmailSettings> {
   if (!(await tableExists(db, "invoice_email_settings"))) {

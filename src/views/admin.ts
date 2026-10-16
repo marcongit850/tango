@@ -51,7 +51,8 @@ import {
   visibilityLabel,
 } from "./bits";
 import { supportPage, threadPage, type SupportFormValues } from "./resident";
-import { CLEAR_STUCK_HELP, CLEAR_STUCK_TOPIC, INVOICE_EMAIL_HELP, INVOICE_EMAIL_TOPIC, ROLE_HELP, ROLE_TOPIC, STRIPE_KEY_HELP, STRIPE_KEY_TOPIC, WEBHOOK_HELP, WEBHOOK_TOPIC, helpTip } from "./help";
+import { formatLateFeePercent, type LateFeeSettingsView } from "../lib/late-fees";
+import { CLEAR_STUCK_HELP, CLEAR_STUCK_TOPIC, INVOICE_EMAIL_HELP, INVOICE_EMAIL_TOPIC, LATE_FEE_HELP, LATE_FEE_TOPIC, ROLE_HELP, ROLE_TOPIC, STRIPE_KEY_HELP, STRIPE_KEY_TOPIC, WEBHOOK_HELP, WEBHOOK_TOPIC, helpTip } from "./help";
 
 function adminNav(slug: string, current: string, canEdit = true): string {
   const links = [
@@ -84,7 +85,9 @@ function adminNav(slug: string, current: string, canEdit = true): string {
 
 function paymentsStatusLine(status: { line: PaymentStatusLine; settingsHref: string | null } | undefined): string {
   if (!status) return "";
-  const link = status.settingsHref ? ` <a href="${esc(status.settingsHref)}">Payment settings</a>` : "";
+  const link = status.settingsHref
+    ? ` <a href="${esc(status.settingsHref)}">Payment settings</a> <a href="${esc(status.settingsHref)}#late-fees">Late fees</a>`
+    : "";
   return `<p>Payments: ${esc(status.line)}.${link}</p>`;
 }
 
@@ -903,6 +906,7 @@ export function paymentSettingsPage(options: {
   invoiceEmailsEnabled: boolean;
   invoiceEmailsEnabledOn?: string | null;
   processing?: StuckProcessingCheckout[];
+  lateFees?: LateFeeSettingsView;
 }): string {
   const base = `/a/${esc(options.association.slug)}/admin/payment-settings`;
   const warnings = [
@@ -916,6 +920,7 @@ export function paymentSettingsPage(options: {
       <h1>Payment settings</h1>
       <p>Payments: ${esc(options.status)}.</p>
       ${warnings}
+      ${lateFeeSettingsSection(options.association, options.lateFees)}
       <p class="muted">Only an admin can change these keys. Officers and people with the admin flag share that access. There is no separate treasurer role. Keys are encrypted and are not shown again. Activity records that a key was saved, replaced, or removed, not the key itself. Online payments are ACH bank transfer only. Credit and debit cards are not accepted. Bank account numbers are not collected on this site. Stripe hosts the bank page. A checkout page expires after 30 minutes. A bank transfer usually takes 4 business days to settle, and the invoice is credited only after it succeeds.</p>
       <p class="muted">Test mode shows Pay now only to an admin. Owners see Pay now after a live key is saved. A test-mode payment is saved as Test payment, not applied. It does not change the invoice or the balance. A live event is recorded only when the saved key is live.</p>
       ${invoiceEmailSection(options)}
@@ -993,6 +998,37 @@ function invoiceEmailSection(options: {
     <form class="fields" method="post" action="${base}/invoice-emails">
       <label><input type="checkbox" name="invoice_emails" value="yes"${options.invoiceEmailsEnabled ? " checked" : ""}> Email each owner their invoice on the issue date</label>
       <button type="submit">Save invoice emails</button>
+    </form>`;
+}
+
+function lateFeeSettingsSection(association: Association, lateFees: LateFeeSettingsView | undefined): string {
+  const base = `/a/${esc(association.slug)}/admin/payment-settings`;
+  const heading = `<h2 id="late-fees">Late fees${helpTip(LATE_FEE_TOPIC, LATE_FEE_HELP)}</h2>`;
+  const intro = `<p class="muted">Added once to each issued invoice that is still unpaid after the wait you set. A late fee already typed on an invoice is left as it is. An open or processing bank transfer pauses the fee for that invoice. Florida law limits the fee to $25 or 5% of the invoice, whichever is greater. A higher amount is reduced to that limit when it is added. Your governing documents must allow the fee.</p>`;
+  if (!lateFees?.ready) {
+    return `${heading}
+      ${intro}
+      <p>Apply migrations/0023_late_fees.sql in D1, then reload, before automatic late fees can be saved. Until then, late fees stay a manual amount on each invoice.</p>`;
+  }
+  return `${heading}
+    ${intro}
+    <form class="fields" method="post" action="${base}/late-fees">
+      <label><input type="checkbox" name="late_fee_enabled" value="yes"${lateFees.enabled ? " checked" : ""}> Turn on automatic late fees</label>
+      ${selectField("Fee type", "fee_type", [
+        { value: "flat", label: "Flat dollar amount" },
+        { value: "percent", label: "Percent of the unpaid balance" },
+      ], lateFees.feeType)}
+      ${textField("Flat amount", "flat_amount", { value: lateFees.flatCents === 0 ? "0.00" : dollarsInput(lateFees.flatCents) })}
+      <p class="muted">Used when the fee type is a flat dollar amount. Example: 25.00.</p>
+      ${textField("Percent", "percent", { value: formatLateFeePercent(lateFees.percentBps) })}
+      <p class="muted">Used when the fee type is a percent of the unpaid balance of that invoice. From 0 to 100, such as 5.</p>
+      ${textField("Days to wait", "days", { value: String(lateFees.daysToWait), required: true })}
+      <p class="muted">Whole number from 1 to 365.</p>
+      ${selectField("Count from", "count_from", [
+        { value: "issued_on", label: "Invoice date" },
+        { value: "due_on", label: "Due date" },
+      ], lateFees.countFrom)}
+      <button type="submit">Save late fees</button>
     </form>`;
 }
 
@@ -1179,6 +1215,7 @@ export function invoiceAdminPage(options: {
   invoice: InvoiceRow;
   payments: InvoicePaymentRow[];
   canEdit?: boolean;
+  lateFeeWaived?: boolean;
 }): string {
   const { association, invoice } = options;
   const canEdit = options.canEdit !== false;
@@ -1237,7 +1274,18 @@ export function invoiceAdminPage(options: {
         ], invoice.status)}
         <p class="muted">Open, partial, and paid follow payments on this invoice when you save. Void leaves the invoice off the balance. A recorded payment stays on the lot.</p>
         <button type="submit">Save invoice</button>
-      </form>`
+      </form>
+      ${
+        Number(invoice.late_fee_cents) > 0
+          ? `<form method="post" action="${base}/invoices/${esc(invoice.id)}/waive-late-fee">
+              <button type="submit">Waive late fee</button>
+            </form>
+            <p class="muted">Sets this late fee to $0.00. The daily job will not add it again.</p>`
+          : ""
+      }`
+    : "";
+  const waivedNote = options.lateFeeWaived && Number(invoice.late_fee_cents) <= 0
+    ? `<p>Late fee waived. The daily job will not add it again.</p>`
     : "";
   const deleteSection = canEdit
     ? `<section class="panel">
@@ -1252,8 +1300,10 @@ export function invoiceAdminPage(options: {
       <p><span class="badge">${esc(invoice.status)}</span></p>
       ${invoice.emailed_at ? `<p>Emailed ${dateCell(invoice.emailed_at, association.timezone)}</p>` : ""}
       <p>Amount ${moneySpan(Number(invoice.amount_cents))} · Late fee ${moneySpan(Number(invoice.late_fee_cents))} · Paid ${moneySpan(paid)} · Remaining ${moneySpan(remaining)}</p>
+      ${Number(invoice.late_fee_cents) > 0 ? `<p>Late fee ${moneySpan(Number(invoice.late_fee_cents))}</p>` : ""}
       ${(invoice.lines ?? []).length > 0 ? invoiceLinesTable(invoice.lines ?? []) : ""}
       ${editForm}
+      ${waivedNote}
     </section>
     <section class="panel">
       <h2>Payments on this invoice</h2>

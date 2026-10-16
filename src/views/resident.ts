@@ -424,7 +424,8 @@ export function invoiceDetailPage(association: Association, invoice: InvoiceRow,
     <p>${esc(assessmentDisplayName(invoice.description))}</p>
     ${(invoice.lines ?? []).length > 0 ? invoiceLinesTable(invoice.lines ?? [], { plain: true }) : `<p>Lot ${esc(invoice.lot_number)}</p>`}
     ${timing}
-    <p>Amount ${plainMoney(invoice.amount_cents)} · Late fee ${plainMoney(invoice.late_fee_cents)} · Paid on this invoice ${plainMoney(Number(invoice.paid_cents))}</p>
+    <p>Amount ${plainMoney(invoice.amount_cents)} · Paid on this invoice ${plainMoney(Number(invoice.paid_cents))}</p>
+    ${Number(invoice.late_fee_cents) > 0 ? `<p>Late fee ${plainMoney(invoice.late_fee_cents)}</p>` : ""}
     ${balanceLine}
     <p><span class="badge">${esc(scheduled ? "scheduled" : invoice.status)}</span></p>
     ${

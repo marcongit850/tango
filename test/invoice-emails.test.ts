@@ -5,7 +5,7 @@ import { createApp } from "../src/app";
 import worker from "../src/index";
 import { todayIso } from "../src/lib/dates";
 import { invoiceOwnerEmail } from "../src/lib/email";
-import { INVOICE_EMAIL_HELP } from "../src/views/help";
+import { INVOICE_EMAIL_HELP, LATE_FEE_HELP } from "../src/views/help";
 import { runDueInvoiceEmails, saveInvoiceEmailSetting } from "../src/lib/invoice-emails";
 import { sha256Hex } from "../src/lib/tokens";
 
@@ -80,6 +80,7 @@ const MIGRATIONS = [
   "migrations/0020_payment_controls.sql",
   "migrations/0021_test_payments.sql",
   "migrations/0022_bank_transfer_fee.sql",
+  "migrations/0023_late_fees.sql",
   "migrations/0024_invoice_emails.sql",
 ];
 
@@ -517,7 +518,9 @@ describe("invoice email setting", () => {
     const html = await page.text();
     expect(page.status).toBe(200);
     expect(html).toContain(INVOICE_EMAIL_HELP);
+    expect(html).toContain(LATE_FEE_HELP);
     expect(html).toContain('aria-label="Help: Invoice emails"');
+    expect(html).toContain('id="late-fees"');
     expect(html).toContain('name="invoice_emails"');
     expect(html).not.toContain('name="invoice_emails" value="yes" checked');
 

@@ -60,6 +60,7 @@ import {
   writeAudit,
 } from "../db";
 import { activeAdminContacts, isAdmin, isBoardOrAdmin, keepsAnAdmin, MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE, masterKeepsAdminWrites, membershipForSignInRole, userListGroup } from "../lib/access";
+import { lateFeeWaiverState, waiveLateFee } from "../lib/late-fees";
 import { changeLoginEmail } from "../lib/login-email";
 import {
   categoryLabel,
@@ -1149,10 +1150,17 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const invoice = await invoiceById(c.env.DB, association.id, c.req.param("invoiceId"));
     if (!invoice) throw new NotFoundError();
     const payments = await paymentsForInvoice(c.env.DB, association.id, invoice.id);
+    const waiver = await lateFeeWaiverState(c.env.DB, association.id, invoice.id);
     return render(c, {
       title: invoice.invoice_number,
       active: "admin",
-      body: invoiceAdminPage({ association, invoice, payments, canEdit: canEditAdmin(membership) }),
+      body: invoiceAdminPage({
+        association,
+        invoice,
+        payments,
+        canEdit: canEditAdmin(membership),
+        lateFeeWaived: waiver.waived,
+      }),
     });
   });
 
@@ -1236,6 +1244,27 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
           ? `Invoice ${existing.invoice_number} saved. Status is ${saved.status} based on payments on this invoice.`
           : `Invoice ${existing.invoice_number} saved.`;
     return redirectTo(c, back, message);
+  });
+
+  app.post("/a/:slug/admin/invoices/:invoiceId/waive-late-fee", async (c) => {
+    const { association, user } = requireEditor(c);
+    await readForm(c);
+    const id = c.req.param("invoiceId");
+    const existing = await invoiceById(c.env.DB, association.id, id);
+    if (!existing) throw new NotFoundError();
+    const back = `/a/${association.slug}/admin/invoices/${id}`;
+    const waived = await waiveLateFee(c.env.DB, association.id, id, user.id);
+    if (!waived.ok) return redirectTo(c, back, waived.message, "warn");
+    const who = user.name.trim() || user.email;
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "late_fee_waived",
+      entityType: "invoice",
+      entityId: id,
+      detail: `Late fee on ${waived.invoiceNumber} for lot ${waived.lotNumber} waived by ${who}. Amount changed from ${formatMoney(waived.previousCents)} to $0.00. The daily job will not add it again.`,
+    });
+    return redirectTo(c, back, `Late fee on ${waived.invoiceNumber} waived.`);
   });
 
   app.post("/a/:slug/admin/invoices/:invoiceId/delete", async (c) => {

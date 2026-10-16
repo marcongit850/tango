@@ -7,6 +7,7 @@ import {
   CLEAR_STUCK_HELP,
   ELECTRONIC_NOTICE_HELP,
   INVOICE_EMAIL_HELP,
+  LATE_FEE_HELP,
   PROCESSING_HELP,
   ROLE_HELP,
   STRIPE_KEY_HELP,
@@ -43,7 +44,7 @@ const association: Association = {
 const FEE_HELP =
   "This small fee covers the cost of the bank transfer. It's about 0.8%, never more than $5.00, and it doesn't count toward your dues. To avoid it, mail a check to the association.";
 
-const COPY = [FEE_HELP, PROCESSING_HELP, ELECTRONIC_NOTICE_HELP, STRIPE_KEY_HELP, WEBHOOK_HELP, ROLE_HELP, BOARD_ONLY_HELP, CLEAR_STUCK_HELP, INVOICE_EMAIL_HELP];
+const COPY = [FEE_HELP, PROCESSING_HELP, ELECTRONIC_NOTICE_HELP, STRIPE_KEY_HELP, WEBHOOK_HELP, ROLE_HELP, BOARD_ONLY_HELP, CLEAR_STUCK_HELP, INVOICE_EMAIL_HELP, LATE_FEE_HELP];
 
 function shown(text: string): string {
   return text.replaceAll("'", "&#39;");
@@ -216,6 +217,9 @@ describe("help placements", () => {
     expect(settings).toContain(INVOICE_EMAIL_HELP);
     expect(settings).toContain("Save invoice emails");
     expect(settings).not.toContain('name="invoice_emails" value="yes" checked');
+    expect(settings).toContain('aria-label="Help: Late fees"');
+    expect(settings).toContain(LATE_FEE_HELP);
+    expect(settings).toContain('id="late-fees"');
     expect(settings.slice(settings.indexOf("<h2>Webhook signing secret"), settings.indexOf("<h2>Webhook signing secret") + 80)).not.toContain("help-btn");
 
     const owner: OwnerListRow = {

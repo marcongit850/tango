@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
 import { DEFAULT_BANK_FEE, invoiceBankFeeLine } from "../src/lib/bank-fee";
 import { invoiceAmountDueCents, invoiceOwnerEmail, sampleInvoiceOwnerEmail } from "../src/lib/email";
-import { associationCheckMailLines, DEMO_INVOICE_BOARD_NOTE, invoiceMailSettings, mailedCheckAddressHint, mailLinesForEmail } from "../src/lib/invoice-mail";
+import { associationCheckMailLines, checksMailedToLine, DEMO_INVOICE_BOARD_NOTE, invoiceMailSettings, mailLinesForEmail } from "../src/lib/invoice-mail";
 import { MAILED_CHECKS_HELP } from "../src/views/help";
 import { sha256Hex } from "../src/lib/tokens";
 
@@ -232,11 +232,11 @@ describe("mailed check settings", () => {
     expect(demoHtml).toContain(MAILED_CHECKS_HELP);
     expect(demoHtml).toContain("Checks payable to");
     expect(demoHtml).toContain("Seaside Demo HOA");
-    expect(demoHtml).toContain("Attn: Treasurer");
-    expect(demoHtml).toContain("PO Box 123");
-    expect(demoHtml).toContain("Sample Harbor, FL 32550");
+    expect(demoHtml).not.toContain('name="mailing_address"');
+    expect(demoHtml).not.toContain("Up to 5 lines.");
+    expect(demoHtml).toContain("Checks are mailed to: Seaside Demo HOA, Attn: Board of Directors, 18 Dune Lane, Sample Harbor, FL 33021");
+    expect(demoHtml).toContain('href="/a/seaside-demo/board">Edit address on the Board page</a>');
     expect(demoHtml).toContain(DEMO_INVOICE_BOARD_NOTE);
-    expect(demoHtml).not.toContain("Blank uses the association address");
     expect(demoHtml).not.toContain("\u2014");
     expect(demoHtml).not.toContain("\u2013");
 
@@ -250,12 +250,18 @@ describe("mailed check settings", () => {
     expect(preview.status).toBe(200);
     expect(previewHtml).toContain(">View invoice</a>");
     expect(previewHtml).not.toContain(FEE_LINE);
+    expect(previewHtml).toContain("Attn: Board of Directors");
+    expect(previewHtml).toContain("18 Dune Lane, Sample Harbor, FL 33021");
+    expect(previewHtml).not.toContain("PO Box 123");
     expect(previewHtml).toContain("payable to <strong>Seaside Demo HOA</strong>");
     expect(previewHtml).toContain("Your 2027 Annual Assessment invoice is ready.");
     expect(previewHtml).toContain("#1d4e89");
     expect(previewHtml).toContain(DEMO_INVOICE_BOARD_NOTE);
     expect(previewHtml).toContain('width="560"');
 
+    sqlite
+      .prepare("INSERT INTO invoice_mail_settings (association_id, payable_to, mailing_address, board_note) VALUES ('assoc_tango_mar', '', 'Keep this PO Box', '')")
+      .run();
     const saved = await app.request(
       formRequest("/a/tango-mar/admin/payment-settings/mailed-checks", jordan, {
         payable_to: "Tang-O-Mar HOA",
@@ -273,7 +279,7 @@ describe("mailed check settings", () => {
       board_note: string;
     };
     expect(row.payable_to).toBe("Tang-O-Mar HOA");
-    expect(row.mailing_address).toBe("Tang-O-Mar\nAttn: Treasurer\nPO Box <9>");
+    expect(row.mailing_address).toBe("Keep this PO Box");
     expect(row.board_note).toBe("Bring a stamp & <thanks>");
 
     sqlite
@@ -287,22 +293,24 @@ describe("mailed check settings", () => {
     const tangoHtml = await tangoPreview.text();
     expect(tangoHtml).toContain(">Pay now</a>");
     expect(tangoHtml).toContain(FEE_LINE);
-    expect(tangoHtml).toContain("PO Box &lt;9&gt;");
+    expect(tangoHtml).toContain("Attn: Board of Directors");
+    expect(tangoHtml).toContain("31 Tang O Mar Drive, Miramar Beach, FL 32550");
+    expect(tangoHtml).not.toContain("Keep this PO Box");
     expect(tangoHtml).toContain("Bring a stamp &amp; &lt;thanks&gt;");
     expect(tangoHtml).not.toContain("<thanks>");
 
-    const tooMany = await app.request(
+    const again = await app.request(
       formRequest("/a/tango-mar/admin/payment-settings/mailed-checks", jordan, {
-        payable_to: "",
+        payable_to: "Tang-O-Mar HOA",
         mailing_address: "1\n2\n3\n4\n5\n6",
-        board_note: "",
+        board_note: "Bring a stamp & <thanks>",
       }),
       {},
       env,
     );
-    expect(flash(tooMany)).toContain("Mailing address can be at most 5 lines.");
+    expect(flash(again)).toBe("ok:Mailed checks saved.");
     expect(sqlite.prepare("SELECT mailing_address FROM invoice_mail_settings WHERE association_id = ?").get("assoc_tango_mar")).toEqual({
-      mailing_address: "Tang-O-Mar\nAttn: Treasurer\nPO Box <9>",
+      mailing_address: "Keep this PO Box",
     });
 
     const casey = await signIn("user_casey");
@@ -334,7 +342,7 @@ describe("mailed check settings", () => {
     expect(previewHtml).toContain(">View invoice</a>");
   });
 
-  it("falls back to the association address when the mailed check address is blank", async () => {
+  it("always uses the association address, including TBD, and hides the box when the street is blank", async () => {
     const opened = openPortal();
     sqlite = opened.sqlite;
     db = opened.db;
@@ -347,30 +355,30 @@ describe("mailed check settings", () => {
       state: "FL",
       postal_code: "32550",
     };
-    const empty = { ready: true, payableTo: "", mailingAddress: "", boardNote: "" };
-    expect(mailLinesForEmail(empty, tango)).toEqual([
+    expect(mailLinesForEmail(tango)).toEqual([
       "Tang-O-Mar",
       "Attn: Board of Directors",
       "31 Tang O Mar Drive, Miramar Beach, FL 32550",
     ]);
-    expect(mailedCheckAddressHint("PO Box 9", tango)).toBe("");
-    expect(mailLinesForEmail({ ...empty, mailingAddress: "PO Box 9" }, tango)).toEqual(["PO Box 9"]);
+    expect(checksMailedToLine(tango)).toBe(
+      "Checks are mailed to: Tang-O-Mar, Attn: Board of Directors, 31 Tang O Mar Drive, Miramar Beach, FL 32550",
+    );
     expect(associationCheckMailLines({ name: "Fish & Chips", address_line1: "TBD", city: "", state: "", postal_code: "" })).toEqual([
       "Fish & Chips",
       "Attn: Board of Directors",
       "TBD",
     ]);
-    expect(mailLinesForEmail(empty, { ...tango, address_line1: " " })).toEqual([]);
-    expect(mailLinesForEmail({ ...empty, ready: false }, tango)).toEqual(mailLinesForEmail(empty, tango));
-    expect(mailedCheckAddressHint("", { ...tango, address_line1: "" })).toBe("");
+    expect(mailLinesForEmail({ ...tango, address_line1: " " })).toEqual([]);
+    expect(checksMailedToLine({ ...tango, address_line1: "" })).toBe("No address yet. Add it on the Board page.");
 
     const app = createApp();
     const page = await app.request("http://localhost/a/tango-mar/admin/payment-settings", {
       headers: { Cookie: `tango_session=${jordan}` },
     }, env);
     const html = await page.text();
-    const hint = "Blank uses the association address: Tang-O-Mar, Attn: Board of Directors, 31 Tang O Mar Drive, Miramar Beach, FL 32550";
-    expect(html).toContain(hint);
+    expect(html).toContain("Checks are mailed to: Tang-O-Mar, Attn: Board of Directors, 31 Tang O Mar Drive, Miramar Beach, FL 32550");
+    expect(html).toContain('href="/a/tango-mar/board">Edit address on the Board page</a>');
+    expect(html).not.toContain('name="mailing_address"');
     expect(html).not.toContain("\u2014");
     expect(html).not.toContain("\u2013");
 
@@ -386,7 +394,7 @@ describe("mailed check settings", () => {
     const tbdPage = await app.request("http://localhost/a/tango-mar/admin/payment-settings", {
       headers: { Cookie: `tango_session=${jordan}` },
     }, env);
-    expect(await tbdPage.text()).toContain("Blank uses the association address: Tang-O-Mar, Attn: Board of Directors, TBD");
+    expect(await tbdPage.text()).toContain("Checks are mailed to: Tang-O-Mar, Attn: Board of Directors, TBD");
     const tbdPreview = await app.request("http://localhost/a/tango-mar/admin/payment-settings/invoice-email-preview", {
       headers: { Cookie: `tango_session=${jordan}` },
     }, env);
@@ -398,7 +406,9 @@ describe("mailed check settings", () => {
     const barePage = await app.request("http://localhost/a/tango-mar/admin/payment-settings", {
       headers: { Cookie: `tango_session=${jordan}` },
     }, env);
-    expect(await barePage.text()).not.toContain("Blank uses the association address");
+    const bareHtml = await barePage.text();
+    expect(bareHtml).toContain('href="/a/tango-mar/board">No address yet. Add it on the Board page.</a>');
+    expect(bareHtml).not.toContain("Checks are mailed to:");
     const barePreview = await app.request("http://localhost/a/tango-mar/admin/payment-settings/invoice-email-preview", {
       headers: { Cookie: `tango_session=${jordan}` },
     }, env);

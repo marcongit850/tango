@@ -288,7 +288,7 @@ async function deliverInvoiceLetter(
     payOnline,
     feeLine: feeLineForEmail(payOnline, fee),
     payableTo: mail.payableTo,
-    mailLines: mailLinesForEmail(mail, association),
+    mailLines: mailLinesForEmail(association),
     boardNote: mail.ready ? mail.boardNote : "",
   });
   const addressOk = new Map<string, boolean>();

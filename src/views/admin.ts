@@ -51,8 +51,9 @@ import {
   visibilityLabel,
 } from "./bits";
 import { supportPage, threadPage, type SupportFormValues } from "./resident";
+import { DEMO_INVOICE_EMAIL_MESSAGE, INVOICE_RESEND_MIGRATION_MESSAGE, type InvoiceResendRecord } from "../lib/invoice-emails";
 import { formatLateFeePercent, type LateFeeSettingsView } from "../lib/late-fees";
-import { CLEAR_STUCK_HELP, CLEAR_STUCK_TOPIC, INVOICE_EMAIL_HELP, INVOICE_EMAIL_TOPIC, LATE_FEE_HELP, LATE_FEE_TOPIC, ROLE_HELP, ROLE_TOPIC, STRIPE_KEY_HELP, STRIPE_KEY_TOPIC, WEBHOOK_HELP, WEBHOOK_TOPIC, helpTip } from "./help";
+import { CLEAR_STUCK_HELP, CLEAR_STUCK_TOPIC, INVOICE_EMAIL_HELP, INVOICE_EMAIL_TOPIC, LATE_FEE_HELP, LATE_FEE_TOPIC, RESEND_INVOICE_HELP, RESEND_INVOICE_TOPIC, ROLE_HELP, ROLE_TOPIC, STRIPE_KEY_HELP, STRIPE_KEY_TOPIC, WEBHOOK_HELP, WEBHOOK_TOPIC, helpTip } from "./help";
 
 function adminNav(slug: string, current: string, canEdit = true): string {
   const links = [
@@ -991,7 +992,7 @@ function invoiceEmailSection(options: {
     options.invoiceEmailsEnabled && options.invoiceEmailsEnabledOn
       ? `<p class="muted">Invoices issued before ${dateCell(options.invoiceEmailsEnabledOn, options.association.timezone)} are not emailed.</p>`
       : "";
-  const demo = options.demo ? `<p class="muted">This demo does not send invoice email.</p>` : "";
+  const demo = options.demo ? `<p class="muted">${esc(DEMO_INVOICE_EMAIL_MESSAGE)}</p>` : "";
   return `${heading}
     ${demo}
     ${cutoff}
@@ -1216,6 +1217,11 @@ export function invoiceAdminPage(options: {
   payments: InvoicePaymentRow[];
   canEdit?: boolean;
   lateFeeWaived?: boolean;
+  resend?: {
+    ready: boolean;
+    blockedReason: string | null;
+    last: InvoiceResendRecord | null;
+  };
 }): string {
   const { association, invoice } = options;
   const canEdit = options.canEdit !== false;
@@ -1299,6 +1305,7 @@ export function invoiceAdminPage(options: {
       <h1>${esc(invoice.invoice_number)}</h1>
       <p><span class="badge">${esc(invoice.status)}</span></p>
       ${invoice.emailed_at ? `<p>Emailed ${dateCell(invoice.emailed_at, association.timezone)}</p>` : ""}
+      ${invoiceResendControl(association, invoice, canEdit, options.resend)}
       <p>Amount ${moneySpan(Number(invoice.amount_cents))} · Late fee ${moneySpan(Number(invoice.late_fee_cents))} · Paid ${moneySpan(paid)} · Remaining ${moneySpan(remaining)}</p>
       ${Number(invoice.late_fee_cents) > 0 ? `<p>Late fee ${moneySpan(Number(invoice.late_fee_cents))}</p>` : ""}
       ${(invoice.lines ?? []).length > 0 ? invoiceLinesTable(invoice.lines ?? []) : ""}
@@ -1316,6 +1323,27 @@ export function invoiceAdminPage(options: {
       }
     </section>
     ${deleteSection}`;
+}
+
+function invoiceResendControl(
+  association: Association,
+  invoice: InvoiceRow,
+  canEdit: boolean,
+  resend: { ready: boolean; blockedReason: string | null; last: InvoiceResendRecord | null } | undefined,
+): string {
+  const last = resend?.last
+    ? `<p>Last emailed ${dateTimeCell(resend.last.sentAt, association.timezone)} by ${esc(resend.last.actorName.trim() || "an admin")} to ${esc(resend.last.recipientCount === 1 ? "1 owner" : `${resend.last.recipientCount} owners`)}.</p>`
+    : "";
+  if (!canEdit || !resend) return last;
+  const help = helpTip(RESEND_INVOICE_TOPIC, RESEND_INVOICE_HELP);
+  if (!resend.ready) {
+    if (resend.blockedReason) return `${last}<p class="muted">${esc(resend.blockedReason)}</p>`;
+    return `${last}<p class="muted">${esc(INVOICE_RESEND_MIGRATION_MESSAGE)}</p>`;
+  }
+  if (resend.blockedReason) {
+    return `${last}<div class="help-inline"><button type="button" disabled>Email this invoice</button>${help}</div><p class="muted">${esc(resend.blockedReason)}</p>`;
+  }
+  return `${last}<div class="help-inline"><form method="post" action="/a/${esc(association.slug)}/admin/invoices/${esc(invoice.id)}/email"><button type="submit">Email this invoice</button></form>${help}</div>`;
 }
 
 function paymentEditForm(slug: string, invoiceId: string, payment: InvoicePaymentRow, timeZone: string): string {

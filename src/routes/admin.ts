@@ -91,6 +91,15 @@ import { parseOwnersCsv } from "../lib/csv";
 import { ownerImportTemplateFor } from "../lib/owner-import-template";
 import { formatAddress, formatDateTime, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../lib/dates";
 import {
+  DEMO_INVOICE_EMAIL_MESSAGE,
+  emailedOwnersMessage,
+  invoiceResendBlock,
+  invoiceResendReason,
+  invoiceResendsReady,
+  latestInvoiceResend,
+  resendInvoiceEmail,
+} from "../lib/invoice-emails";
+import {
   allowSupportRequest,
   deliverOwnerEmails,
   fileToResendAttachment,
@@ -1151,6 +1160,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     if (!invoice) throw new NotFoundError();
     const payments = await paymentsForInvoice(c.env.DB, association.id, invoice.id);
     const waiver = await lateFeeWaiverState(c.env.DB, association.id, invoice.id);
+    const block = invoiceResendBlock(invoice, todayIso(association.timezone));
     return render(c, {
       title: invoice.invoice_number,
       active: "admin",
@@ -1160,8 +1170,26 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         payments,
         canEdit: canEditAdmin(membership),
         lateFeeWaived: waiver.waived,
+        resend: {
+          ready: await invoiceResendsReady(c.env.DB),
+          blockedReason: block ? invoiceResendReason(block) : null,
+          last: await latestInvoiceResend(c.env.DB, association.id, invoice.id),
+        },
       }),
     });
+  });
+
+  app.post("/a/:slug/admin/invoices/:invoiceId/email", async (c) => {
+    const { association, user } = requireEditor(c);
+    await readForm(c);
+    const id = c.req.param("invoiceId");
+    const existing = await invoiceById(c.env.DB, association.id, id);
+    if (!existing) throw new NotFoundError();
+    const back = `/a/${association.slug}/admin/invoices/${id}`;
+    if (isDemoAssociation(association)) return redirectTo(c, back, DEMO_INVOICE_EMAIL_MESSAGE, "warn");
+    const result = await resendInvoiceEmail(c.env, association, id, user, new Date());
+    if (!result.ok) return redirectTo(c, back, result.message, "warn");
+    return redirectTo(c, back, emailedOwnersMessage(result.sent, result.failed), result.failed > 0 ? "warn" : "ok");
   });
 
   app.post("/a/:slug/admin/invoices", async (c) => {

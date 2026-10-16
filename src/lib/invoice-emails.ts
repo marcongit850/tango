@@ -1,4 +1,4 @@
-import { listAssociations, notify, writeAudit } from "../db";
+import { invoiceById, listAssociations, notify, writeAudit } from "../db";
 import type { Association } from "../types";
 import { todayIso } from "./dates";
 import { isDemoAssociationId } from "./demo";
@@ -25,6 +25,48 @@ export type InvoiceEmailSave =
   | { ok: false; message: string };
 
 const MIGRATION_MESSAGE = "Apply migrations/0024_invoice_emails.sql in D1, then try again.";
+const RESEND_GAP_MS = 60_000;
+
+export const DEMO_INVOICE_EMAIL_MESSAGE = "This demo does not send invoice email.";
+export const INVOICE_RESEND_MIGRATION_MESSAGE =
+  "Apply migrations/0025_invoice_resend.sql in D1, then reload, before this invoice can be emailed.";
+export const INVOICE_RESEND_NO_EMAIL = "No owner on this lot has an email on file.";
+export const INVOICE_RESEND_NOT_CONFIGURED = "Invoice email is not set up yet, so this invoice was not sent.";
+export const INVOICE_RESEND_WAIT = "Wait a minute before emailing this invoice again.";
+export const INVOICE_RESEND_FAILED = "The email could not be sent.";
+
+export type InvoiceResendBlock = "void" | "not_issued" | "paid";
+
+export function invoiceResendBlock(
+  invoice: {
+    status: string;
+    issued_on: string;
+    amount_cents: number;
+    late_fee_cents: number;
+    paid_cents: number;
+  },
+  today: string,
+): InvoiceResendBlock | null {
+  if (invoice.status === "void") return "void";
+  if (invoice.issued_on > today) return "not_issued";
+  const remaining = Number(invoice.amount_cents) + Number(invoice.late_fee_cents) - Number(invoice.paid_cents);
+  if (invoice.status === "paid" || remaining <= 0) return "paid";
+  return null;
+}
+
+export function invoiceResendReason(block: InvoiceResendBlock): string {
+  if (block === "void") return "This invoice is void.";
+  if (block === "not_issued") return "This invoice is not issued yet.";
+  return "This invoice is paid.";
+}
+
+export function emailedOwnersMessage(sent: number, failed: number): string {
+  const noun = sent === 1 ? "owner" : "owners";
+  const base = `Emailed this invoice to ${sent} ${noun}.`;
+  if (failed <= 0) return base;
+  const missed = failed === 1 ? "1 could not be sent." : `${failed} could not be sent.`;
+  return `${base} ${missed}`;
+}
 
 export async function invoiceEmailSettings(db: D1Database, associationId: string): Promise<InvoiceEmailSettings> {
   if (!(await tableExists(db, "invoice_email_settings"))) {
@@ -191,6 +233,37 @@ async function emailInvoice(
     return { sent: 0, failed: 0, addresses: [] };
   }
   const already = await emailedUserIds(db, invoice.id);
+  const delivery = await deliverInvoiceLetter(env, association, invoice, owners, apiKey, fetchImpl, already, async (ownerId) => {
+    await db
+      .prepare(
+        `INSERT INTO invoice_email_events (id, association_id, invoice_id, user_id, sent_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .bind(crypto.randomUUID(), association.id, invoice.id, ownerId, sentAt)
+      .run();
+    already.add(ownerId);
+  });
+  const covered = owners.every((owner) => already.has(owner.id));
+  if (covered) {
+    await db
+      .prepare("UPDATE invoices SET emailed_at = ? WHERE association_id = ? AND id = ? AND emailed_at IS NULL")
+      .bind(sentAt, association.id, invoice.id)
+      .run();
+  }
+  return { sent: delivery.sent, failed: delivery.failed, addresses: delivery.addresses };
+}
+
+async function deliverInvoiceLetter(
+  env: Env,
+  association: Association,
+  invoice: DueInvoice,
+  owners: { id: string; email: string }[],
+  apiKey: string,
+  fetchImpl: typeof fetch | undefined,
+  skipUserIds: Set<string>,
+  onSent?: (ownerId: string) => Promise<void>,
+): Promise<{ sent: number; failed: number; addresses: string[] }> {
+  const db = env.DB;
   const description = assessmentDisplayName(invoice.description);
   const payUrl = canonicalPortalUrl(association, `/invoices/${invoice.id}`);
   const letter = invoiceOwnerEmail({
@@ -208,7 +281,7 @@ async function emailInvoice(
   let sent = 0;
   let failed = 0;
   for (const owner of owners) {
-    if (already.has(owner.id)) continue;
+    if (skipUserIds.has(owner.id)) continue;
     const key = owner.email.trim().toLowerCase();
     let ok = addressOk.get(key);
     if (ok === undefined) {
@@ -240,14 +313,7 @@ async function emailInvoice(
       }
     }
     if (!ok) continue;
-    await db
-      .prepare(
-        `INSERT INTO invoice_email_events (id, association_id, invoice_id, user_id, sent_at)
-         VALUES (?, ?, ?, ?, ?)`,
-      )
-      .bind(crypto.randomUUID(), association.id, invoice.id, owner.id, sentAt)
-      .run();
-    already.add(owner.id);
+    if (onSent) await onSent(owner.id);
     try {
       await notify(db, {
         associationId: association.id,
@@ -266,14 +332,114 @@ async function emailInvoice(
       });
     }
   }
-  const covered = owners.every((owner) => already.has(owner.id));
-  if (covered) {
-    await db
-      .prepare("UPDATE invoices SET emailed_at = ? WHERE association_id = ? AND id = ? AND emailed_at IS NULL")
-      .bind(sentAt, association.id, invoice.id)
-      .run();
-  }
   return { sent, failed, addresses };
+}
+
+export type InvoiceResendRecord = {
+  sentAt: string;
+  actorName: string;
+  recipientCount: number;
+};
+
+export type InvoiceResendResult = { ok: true; sent: number; failed: number } | { ok: false; message: string };
+
+export async function invoiceResendsReady(db: D1Database): Promise<boolean> {
+  return tableExists(db, "invoice_resends");
+}
+
+export async function latestInvoiceResend(db: D1Database, associationId: string, invoiceId: string): Promise<InvoiceResendRecord | null> {
+  if (!(await invoiceResendsReady(db))) return null;
+  const row = await db
+    .prepare(
+      `SELECT sent_at, actor_name, recipient_count
+       FROM invoice_resends
+       WHERE association_id = ? AND invoice_id = ?
+       ORDER BY sent_at DESC
+       LIMIT 1`,
+    )
+    .bind(associationId, invoiceId)
+    .first<{ sent_at: string; actor_name: string; recipient_count: number }>();
+  if (!row) return null;
+  return { sentAt: row.sent_at, actorName: row.actor_name, recipientCount: Number(row.recipient_count) };
+}
+
+/** Emails one issued invoice now. Does not set invoices.emailed_at or invoice_email_events. */
+export async function resendInvoiceEmail(
+  env: Env,
+  association: Association,
+  invoiceId: string,
+  actor: { id: string; name: string; email: string },
+  now: Date,
+  fetchImpl?: typeof fetch,
+): Promise<InvoiceResendResult> {
+  const db = env.DB;
+  if (!(await invoiceResendsReady(db))) return { ok: false, message: INVOICE_RESEND_MIGRATION_MESSAGE };
+  const invoice = await invoiceById(db, association.id, invoiceId);
+  if (!invoice) return { ok: false, message: "That invoice was not found." };
+  const today = todayIso(association.timezone, now);
+  const block = invoiceResendBlock(invoice, today);
+  if (block) return { ok: false, message: invoiceResendReason(block) };
+  const latest = await latestInvoiceResend(db, association.id, invoiceId);
+  if (latest) {
+    const elapsed = now.getTime() - Date.parse(latest.sentAt);
+    if (Number.isFinite(elapsed) && elapsed < RESEND_GAP_MS) return { ok: false, message: INVOICE_RESEND_WAIT };
+  }
+  const billed = await billedUserId(db, association.id, invoiceId);
+  const due: DueInvoice = {
+    id: invoice.id,
+    property_id: invoice.property_id,
+    invoice_number: invoice.invoice_number,
+    description: invoice.description,
+    amount_cents: Number(invoice.amount_cents),
+    late_fee_cents: Number(invoice.late_fee_cents),
+    due_on: invoice.due_on,
+    billed_user_id: billed,
+  };
+  const owners = await invoiceOwners(db, association.id, due);
+  if (owners.length === 0) return { ok: false, message: INVOICE_RESEND_NO_EMAIL };
+  const apiKey = resendApiKey(env);
+  if (!apiKey) {
+    logError("invoice_emails", { associationId: association.id, invoiceId, message: "RESEND_API_KEY is not set." });
+    return { ok: false, message: INVOICE_RESEND_NOT_CONFIGURED };
+  }
+  const sentAt = now.toISOString();
+  const delivery = await deliverInvoiceLetter(env, association, due, owners, apiKey, fetchImpl, new Set());
+  if (delivery.sent === 0) return { ok: false, message: INVOICE_RESEND_FAILED };
+  const actorName = actor.name.trim() || actor.email;
+  await db
+    .prepare(
+      `INSERT INTO invoice_resends (
+         id, association_id, invoice_id, actor_user_id, actor_name, sent_at, recipient_count
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(crypto.randomUUID(), association.id, invoice.id, actor.id, actorName, sentAt, delivery.sent)
+    .run();
+  try {
+    await writeAudit(db, {
+      associationId: association.id,
+      actorUserId: actor.id,
+      action: "invoice_resend",
+      entityType: "invoice",
+      entityId: invoice.id,
+      detail: `${emailedOwnersMessage(delivery.sent, delivery.failed)} ${actorName}. ${invoice.invoice_number}.`,
+    });
+  } catch (error) {
+    logError("invoice_resend_audit", {
+      associationId: association.id,
+      invoiceId: invoice.id,
+      message: error instanceof Error ? error.message : "unknown",
+    });
+  }
+  return { ok: true, sent: delivery.sent, failed: delivery.failed };
+}
+
+async function billedUserId(db: D1Database, associationId: string, invoiceId: string): Promise<string | null> {
+  if (!(await columnReady(db, "invoices", "billed_user_id"))) return null;
+  const row = await db
+    .prepare("SELECT billed_user_id FROM invoices WHERE association_id = ? AND id = ?")
+    .bind(associationId, invoiceId)
+    .first<{ billed_user_id: string | null }>();
+  return row?.billed_user_id ?? null;
 }
 
 async function unsentInvoices(db: D1Database, associationId: string, today: string, enabledOn: string): Promise<DueInvoice[]> {

@@ -35,8 +35,12 @@ export function isDemoPath(path: string): boolean {
   return path === prefix || path.startsWith(`${prefix}/`);
 }
 
+/** This one post is allowed through so the page can say the demo does not send email. The handler must not write. */
+const DEMO_INVOICE_RESEND = /^\/a\/seaside-demo\/admin\/invoices\/[^/]+\/email$/;
+
 export function isDemoWrite(method: string, path: string): boolean {
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
+  if (method === "POST" && DEMO_INVOICE_RESEND.test(path)) return false;
   return isDemoPath(path);
 }
 

@@ -608,7 +608,8 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
   .split { grid-template-columns: 1fr; }
   .account { margin-left: 0; }
   .brand img { height: 84px; }
-  table { display: block; overflow-x: auto; }
+  .panel, .dash, .dash-grid, .split { min-width: 0; max-width: 100%; }
+  table { display: block; width: max-content; min-width: 100%; max-width: 100%; overflow-x: auto; }
   .mark { width: min(12rem, 74%); }
   .shore { padding-top: 4.4rem; }
   .shore-inner { grid-template-columns: 1fr; width: min(40rem, 100%); justify-items: center; }

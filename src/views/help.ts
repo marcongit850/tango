@@ -21,15 +21,9 @@ export const STRIPE_KEY_HELP =
 export const WEBHOOK_HELP =
   "This tells the portal when a bank payment clears, fails, or is refunded. Copy the address shown into your Stripe webhook settings and paste Stripe's signing secret here.";
 
-/**
- * Approved users-tab copy. Kept as written. It does not fully match the code:
- * Board-only documents are visible to board members and to anyone with edit access (canViewAdmin).
- * Staff notices go to people with edit access (notifyStaff / listStaffContacts), not to every board member.
- * Edit access, not the Admin label, is what can change owners, lots, invoices, and settings.
- * A board member with edit access is still labeled Board member and can edit. Admin is a homeowner with edit access.
- */
+/** Users tab. Edit access is what can change records and what receives staff notices. */
 export const ROLE_HELP =
-  "Owners see their own account, invoices, and documents. Board members also see board-only documents and notices. Admins can edit owners, lots, invoices, and settings.";
+  "Owners see their own account, invoices, and documents. Board members also see board-only documents. Anyone with edit access, including admins, can edit owners, lots, invoices, and settings and gets staff notices.";
 
 export const BOARD_ONLY_HELP = "Only board members and admins can see these files. Owners never see this section.";
 

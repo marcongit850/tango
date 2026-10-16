@@ -1,4 +1,4 @@
-import { invoiceNetPaidSql, listStaffContacts, paymentReversalsReady } from "../db";
+import { invoiceNetPaidSql, listStaffContacts, paymentReversalsReady, paymentTestReady } from "../db";
 import { invoiceStatus } from "./money";
 import { formatMoney } from "./money";
 import { todayIso } from "./dates";
@@ -58,10 +58,12 @@ export type PayableInvoice = {
   propertyId: string;
   lotNumber: string;
   invoiceNumber: string;
+  description?: string;
   amountCents: number;
 };
 
 const ONLINE_NOTE = "Online (Stripe)";
+const TEST_NOTE = "Test payment, not applied";
 const CHECKOUT_START_LIMIT = 10;
 const CHECKOUT_START_WINDOW_MS = 10 * 60 * 1000;
 
@@ -236,11 +238,11 @@ export async function setPaymentsEnabled(
 }
 
 export async function payableInvoicesForUser(db: D1Database, associationId: string, userId: string, today: string): Promise<PayableInvoice[]> {
-  const reversals = await paymentReversalsReady(db);
+  const paidSql = await netPaidSql(db);
   const { results } = await db
     .prepare(
-      `SELECT i.id AS invoice_id, i.property_id, p.lot_number, i.invoice_number,
-              i.amount_cents + i.late_fee_cents - ${invoiceNetPaidSql(reversals)} AS remaining_cents
+      `SELECT i.id AS invoice_id, i.property_id, p.lot_number, i.invoice_number, i.description,
+              i.amount_cents + i.late_fee_cents - ${paidSql} AS remaining_cents
        FROM invoices i
        JOIN properties p ON p.id = i.property_id AND p.association_id = i.association_id
        JOIN property_owners po ON po.property_id = p.id AND po.association_id = p.association_id
@@ -249,7 +251,7 @@ export async function payableInvoicesForUser(db: D1Database, associationId: stri
        ORDER BY i.due_on, i.invoice_number`,
     )
     .bind(associationId, userId, today)
-    .all<{ invoice_id: string; property_id: string; lot_number: string; invoice_number: string; remaining_cents: number }>();
+    .all<{ invoice_id: string; property_id: string; lot_number: string; invoice_number: string; description: string; remaining_cents: number }>();
   return results
     .filter((row) => Number(row.remaining_cents) > 0)
     .map((row) => ({
@@ -257,8 +259,13 @@ export async function payableInvoicesForUser(db: D1Database, associationId: stri
       propertyId: row.property_id,
       lotNumber: row.lot_number,
       invoiceNumber: row.invoice_number,
+      description: row.description,
       amountCents: Number(row.remaining_cents),
     }));
+}
+
+async function netPaidSql(db: D1Database): Promise<string> {
+  return invoiceNetPaidSql(await paymentReversalsReady(db), await paymentTestReady(db));
 }
 
 export async function startCheckout(input: {
@@ -293,14 +300,38 @@ export async function startCheckout(input: {
   const lots = [...new Set(input.invoices.map((invoice) => invoice.lotNumber))];
   const invoiceIds = input.invoices.map((invoice) => invoice.invoiceId).join(",");
   const invoiceKey = input.invoices.map((invoice) => invoice.invoiceId).sort().join(",");
+  const allocation = input.invoices.map((invoice) => ({
+    invoiceId: invoice.invoiceId,
+    propertyId: invoice.propertyId,
+    lotNumber: invoice.lotNumber,
+    invoiceNumber: invoice.invoiceNumber,
+    amountCents: invoice.amountCents,
+  }));
   const nowSeconds = Math.floor(Date.now() / 1000);
   const reusable = await reusableIntent(input.db, input.association.id, input.userId, amountCents, invoiceKey);
-  if (!reusable) {
-    const allowed = await checkoutStartAllowed(input.db, input.association.id, input.userId);
-    if (!allowed) return { ok: false, message: "Too many checkout attempts. Wait a few minutes and try again." };
+  let intentId = reusable?.id ?? "";
+  let expiresAtSeconds = reusable ? Math.floor(Date.parse(reusable.expires_at) / 1000) : 0;
+  let reserved = false;
+  if (!intentId) {
+    intentId = crypto.randomUUID();
+    expiresAtSeconds = nowSeconds + CHECKOUT_TTL_SECONDS;
+    const reservedNow = await reserveCheckoutIntent(input.db, {
+      id: intentId,
+      associationId: input.association.id,
+      userId: input.userId,
+      amountCents,
+      allocationJson: JSON.stringify(allocation),
+      lotNumbers: lots.join(","),
+      expiresAt: new Date(expiresAtSeconds * 1000).toISOString(),
+    });
+    if (reservedNow) reserved = true;
+    else {
+      const raced = await reusableIntent(input.db, input.association.id, input.userId, amountCents, invoiceKey);
+      if (!raced) return { ok: false, message: "Too many checkout attempts. Wait a few minutes and try again." };
+      intentId = raced.id;
+      expiresAtSeconds = Math.floor(Date.parse(raced.expires_at) / 1000);
+    }
   }
-  const intentId = reusable?.id ?? crypto.randomUUID();
-  const expiresAtSeconds = reusable ? Math.floor(Date.parse(reusable.expires_at) / 1000) : nowSeconds + CHECKOUT_TTL_SECONDS;
   const idempotencyKey = await sha256Hex(
     `${input.association.id}:${input.userId}:${invoiceKey}:${amountCents}:${intentId}:${expiresAtSeconds}`,
   );
@@ -325,36 +356,18 @@ export async function startCheckout(input: {
     fetchImpl: input.fetchImpl,
     });
   } catch (error) {
+    if (reserved) await releaseCheckoutIntent(input.db, input.association.id, intentId);
     logError("payment_checkout", { message: redactSecrets(error instanceof Error ? error.message : "unknown") });
     return { ok: false, message: "Stripe did not start checkout. The treasurer can check Payment settings." };
   }
   secretKey = "";
-  if (!created.ok) return { ok: false, message: "Stripe did not start checkout. The treasurer can check Payment settings." };
-  const allocation = input.invoices.map((invoice) => ({
-    invoiceId: invoice.invoiceId,
-    propertyId: invoice.propertyId,
-    lotNumber: invoice.lotNumber,
-    amountCents: invoice.amountCents,
-  }));
-  const expiresAt = new Date(expiresAtSeconds * 1000).toISOString();
+  if (!created.ok) {
+    if (reserved) await releaseCheckoutIntent(input.db, input.association.id, intentId);
+    return { ok: false, message: "Stripe did not start checkout. The treasurer can check Payment settings." };
+  }
   await input.db
-    .prepare(
-      `INSERT INTO checkout_intents (
-         id, association_id, user_id, amount_cents, allocation_json, lot_numbers, stripe_session_id, expires_at, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET stripe_session_id = excluded.stripe_session_id`,
-    )
-    .bind(
-      created.clientReferenceId,
-      input.association.id,
-      input.userId,
-      amountCents,
-      JSON.stringify(allocation),
-      lots.join(","),
-      created.id,
-      expiresAt,
-      new Date().toISOString(),
-    )
+    .prepare("UPDATE checkout_intents SET stripe_session_id = ? WHERE association_id = ? AND id = ?")
+    .bind(created.id, input.association.id, intentId)
     .run();
   return { ok: true, url: created.url };
 }
@@ -370,6 +383,7 @@ export type AppliedStripePayment = {
   paymentIds: string[];
   ownerEmails: { email: string }[];
   emailed: boolean;
+  testOnly: boolean;
 };
 
 export async function applyStripeCheckout(input: {
@@ -415,9 +429,11 @@ export async function applyStripeCheckout(input: {
   }
   const allocation = parseAllocation(intent.allocation_json);
   if (!allocation) return { ok: false, review: true, detail: "Checkout could not be read. Payment was not recorded." };
-  const given = input.invoiceIds.split(",").filter(Boolean).sort().join(",");
+  const metadataList = input.invoiceIds.trim();
+  const metadataTruncated = metadataList.length >= 500;
+  const given = metadataTruncated ? "" : metadataList.split(",").map((id) => id.trim()).filter(Boolean).sort().join(",");
   const expected = allocation.map((row) => row.invoiceId).sort().join(",");
-  if (!given || given !== expected) {
+  if (!metadataTruncated && given && given !== expected) {
     return { ok: false, review: true, detail: "Stripe invoice list did not match the checkout. Payment was not recorded." };
   }
   const existing = await input.db
@@ -439,7 +455,17 @@ export async function applyStripeCheckout(input: {
         paymentIds: [],
         ownerEmails: [],
         emailed: Number(existing.receipt_emailed) === 1,
+        testOnly: input.livemode === false,
       },
+    };
+  }
+  const testOnly = input.livemode === false;
+  const testColumn = await paymentTestReady(input.db);
+  if (testOnly && !testColumn) {
+    return {
+      ok: false,
+      review: true,
+      detail: "Apply migrations/0021_test_payments.sql before a test-mode payment can be recorded. The invoice was not marked paid.",
     };
   }
   const paidOn = todayIso(input.association.timezone);
@@ -454,11 +480,13 @@ export async function applyStripeCheckout(input: {
   ];
   const paymentIds: string[] = [];
   const invoiceNumbers: string[] = [];
+  const paidSql = await netPaidSql(input.db);
+  const note = testOnly ? TEST_NOTE : ONLINE_NOTE;
   for (const item of allocation) {
     const invoice = await input.db
       .prepare(
         `SELECT i.invoice_number, i.amount_cents, i.late_fee_cents, i.status,
-                ${invoiceNetPaidSql(await paymentReversalsReady(input.db))} AS paid_cents
+                ${paidSql} AS paid_cents
          FROM invoices i WHERE i.association_id = ? AND i.id = ? AND i.property_id = ?`,
       )
       .bind(input.association.id, item.invoiceId, item.propertyId)
@@ -482,13 +510,17 @@ export async function applyStripeCheckout(input: {
         paidOn,
         userId: intent.user_id,
         now,
+        testOnly,
+        testColumn,
       }));
-      const status = invoiceStatus(Number(invoice?.amount_cents), Number(invoice?.late_fee_cents), Number(invoice?.paid_cents) + applied);
-      statements.push(
-        input.db
-          .prepare("UPDATE invoices SET status = ? WHERE association_id = ? AND id = ? AND status != 'void'")
-          .bind(status, input.association.id, item.invoiceId),
-      );
+      if (!testOnly) {
+        const status = invoiceStatus(Number(invoice?.amount_cents), Number(invoice?.late_fee_cents), Number(invoice?.paid_cents) + applied);
+        statements.push(
+          input.db
+            .prepare("UPDATE invoices SET status = ? WHERE association_id = ? AND id = ? AND status != 'void'")
+            .bind(status, input.association.id, item.invoiceId),
+        );
+      }
     }
     if (unapplied > 0) {
       const id = crypto.randomUUID();
@@ -503,13 +535,17 @@ export async function applyStripeCheckout(input: {
         paidOn,
         userId: intent.user_id,
         now,
+        testOnly,
+        testColumn,
       }));
     }
   }
   if (paymentIds.length === 0) return { ok: false, review: true, detail: "Nothing was recorded for this Stripe payment." };
-  const owners = await ownerRecipients(input.db, input.association.id, allocation.map((item) => item.propertyId));
+  const owners = testOnly ? [] : await ownerRecipients(input.db, input.association.id, allocation.map((item) => item.propertyId));
   const staff = await listStaffContacts(input.db, input.association.id);
-  const notice = `${formatMoney(input.amountTotal)} online payment for lot ${intent.lot_numbers}. Stripe ${input.paymentId}.`;
+  const notice = testOnly
+    ? `${formatMoney(input.amountTotal)} test payment for lot ${intent.lot_numbers}. Not applied to the balance. Stripe ${input.paymentId}.`
+    : `${formatMoney(input.amountTotal)} online payment for lot ${intent.lot_numbers}. Stripe ${input.paymentId}.`;
   for (const owner of owners) {
     statements.push(noticeInsert(input.db, {
       associationId: input.association.id,
@@ -524,7 +560,7 @@ export async function applyStripeCheckout(input: {
     statements.push(noticeInsert(input.db, {
       associationId: input.association.id,
       userId: person.user_id,
-      title: "Online payment",
+      title: testOnly ? TEST_NOTE : "Online payment",
       body: notice,
       href: `/a/${input.association.slug}/admin/ledger`,
       now,
@@ -541,7 +577,7 @@ export async function applyStripeCheckout(input: {
         input.association.id,
         intent.user_id,
         paymentIds[0],
-        clip(`Lot ${intent.lot_numbers}. ${formatMoney(input.amountTotal)}. ${ONLINE_NOTE}. ${input.paymentId}.`, 1000),
+        clip(`Lot ${intent.lot_numbers}. ${formatMoney(input.amountTotal)}. ${note}. ${input.paymentId}.`, 1000),
         now,
       ),
   );
@@ -568,6 +604,7 @@ export async function applyStripeCheckout(input: {
           paymentIds: [],
           ownerEmails: [],
           emailed: Number(raced.receipt_emailed) === 1,
+          testOnly,
         },
       };
     }
@@ -584,6 +621,7 @@ export async function applyStripeCheckout(input: {
       paymentIds,
       ownerEmails: owners.map((owner) => ({ email: owner.email })).filter((owner) => owner.email),
       emailed: false,
+      testOnly,
     },
   };
 }
@@ -720,11 +758,31 @@ export async function reencryptPaymentSecrets(
     logError("payment_settings_reencrypt", { message: redactSecrets(error instanceof Error ? error.message : "unknown") });
     return { ok: false, message: "The stored Stripe keys could not be read. Replace them before rotating the encryption key." };
   }
-  await writeRow(db, associationId, userId, {
-    ...current,
-    secret_key_ciphertext: secretCipher,
-    webhook_secret_ciphertext: webhookCipher,
-  });
+  const now = new Date().toISOString();
+  const saved = await db
+    .prepare(
+      `UPDATE payment_settings SET
+         secret_key_ciphertext = ?,
+         webhook_secret_ciphertext = ?,
+         updated_at = ?,
+         updated_by_user_id = ?
+       WHERE association_id = ?
+         AND secret_key_ciphertext = ?
+         AND webhook_secret_ciphertext = ?`,
+    )
+    .bind(
+      secretCipher,
+      webhookCipher,
+      now,
+      userId,
+      associationId,
+      current.secret_key_ciphertext,
+      current.webhook_secret_ciphertext,
+    )
+    .run();
+  if (Number(saved.meta.changes) === 0) {
+    return { ok: false, message: "Payment settings changed while re-encrypting. Nothing was overwritten. Try again." };
+  }
   return { ok: true, changed: true };
 }
 
@@ -828,6 +886,7 @@ export async function applyStripeAdjustment(input: {
   return postDispute(input.db, input.association, input.event);
 }
 
+// DOCUMENTS is a private R2 bucket. This file is not a public URL.
 export async function exportPaymentAudit(env: Env, now: Date): Promise<void> {
   try {
     const { results } = await env.DB
@@ -862,7 +921,21 @@ async function postRefund(
   event: ParsedRefundEvent,
 ): Promise<{ ok: true; duplicate: boolean } | { ok: false; detail: string; review: boolean }> {
   const payments = event.paymentId ? await stripePayments(db, association.id, event.paymentId) : [];
-  if (payments.length === 0) {
+  if (payments.length > 0 && ledgerPayments(payments).length === 0) {
+    await finishAdjustment(db, association, {
+      eventId: event.eventId,
+      kind: "refund",
+      stripePaymentId: event.paymentId,
+      title: TEST_NOTE,
+      body: `A test-mode refund was not applied to the ledger. ${event.paymentId}.`,
+      action: "payment_refund",
+      detail: `Test refund was not applied. ${event.paymentId}. ${event.chargeId}.`,
+      statements: [],
+    });
+    return { ok: true, duplicate: false };
+  }
+  const ledger = ledgerPayments(payments);
+  if (ledger.length === 0) {
     await finishAdjustment(db, association, {
       eventId: event.eventId,
       kind: "refund",
@@ -890,7 +963,7 @@ async function postRefund(
     });
     return { ok: true, duplicate: false };
   }
-  const slices = await reversalSlices(db, association.id, payments, delta);
+  const slices = await reversalSlices(db, association.id, ledger, delta);
   const statements: D1PreparedStatement[] = [];
   const deltas = new Map<string, number>();
   for (const slice of slices) {
@@ -927,8 +1000,43 @@ async function postDispute(
   event: ParsedDisputeEvent,
 ): Promise<{ ok: true; duplicate: boolean } | { ok: false; detail: string; review: boolean }> {
   if (event.action === "closed") return closeDispute(db, association, event);
+  const prior = await db
+    .prepare(
+      `SELECT id FROM payment_reversals
+       WHERE association_id = ? AND kind = 'dispute' AND stripe_object_id = ?
+       LIMIT 1`,
+    )
+    .bind(association.id, event.disputeId)
+    .first<{ id: string }>();
+  if (prior) {
+    await finishAdjustment(db, association, {
+      eventId: event.eventId,
+      kind: "dispute",
+      stripePaymentId: event.paymentId || event.disputeId,
+      title: "Online dispute",
+      body: `Stripe dispute ${event.disputeId} was already on the ledger.`,
+      action: "payment_dispute",
+      detail: `Dispute already recorded. ${event.disputeId}. ${event.paymentId}.`,
+      statements: [],
+    });
+    return { ok: true, duplicate: true };
+  }
   const payments = event.paymentId ? await stripePayments(db, association.id, event.paymentId) : [];
-  if (payments.length === 0) {
+  if (payments.length > 0 && ledgerPayments(payments).length === 0) {
+    await finishAdjustment(db, association, {
+      eventId: event.eventId,
+      kind: "dispute",
+      stripePaymentId: event.paymentId || event.disputeId,
+      title: TEST_NOTE,
+      body: `A test-mode dispute was not applied to the ledger. ${event.disputeId}.`,
+      action: "payment_dispute",
+      detail: `Test dispute was not applied. ${event.disputeId}. ${event.paymentId}.`,
+      statements: [],
+    });
+    return { ok: true, duplicate: false };
+  }
+  const ledger = ledgerPayments(payments);
+  if (ledger.length === 0) {
     await finishAdjustment(db, association, {
       eventId: event.eventId,
       kind: "dispute",
@@ -941,7 +1049,7 @@ async function postDispute(
     });
     return { ok: true, duplicate: false };
   }
-  const slices = await reversalSlices(db, association.id, payments, event.amount);
+  const slices = await reversalSlices(db, association.id, ledger, event.amount);
   const statements: D1PreparedStatement[] = [];
   const deltas = new Map<string, number>();
   for (const slice of slices) {
@@ -1086,13 +1194,18 @@ async function finishAdjustment(
   }
 }
 
-type StripeLedgerPayment = { id: string; property_id: string; invoice_id: string | null; amount_cents: number };
+type StripeLedgerPayment = { id: string; property_id: string; invoice_id: string | null; amount_cents: number; is_test: number };
+
+function ledgerPayments(payments: StripeLedgerPayment[]): StripeLedgerPayment[] {
+  return payments.filter((payment) => Number(payment.is_test) !== 1);
+}
 
 async function stripePayments(db: D1Database, associationId: string, paymentId: string): Promise<StripeLedgerPayment[]> {
   if (!paymentId) return [];
+  const testColumn = (await paymentTestReady(db)) ? "is_test" : "0 AS is_test";
   const { results } = await db
     .prepare(
-      `SELECT id, property_id, invoice_id, amount_cents
+      `SELECT id, property_id, invoice_id, amount_cents, ${testColumn}
        FROM payments
        WHERE association_id = ? AND method = 'stripe' AND reference = ?
        ORDER BY created_at`,
@@ -1183,10 +1296,9 @@ async function invoiceStatusUpdate(
   invoiceId: string,
   deltaCents: number,
 ): Promise<D1PreparedStatement> {
-  const reversals = await paymentReversalsReady(db);
   const invoice = await db
     .prepare(
-      `SELECT i.amount_cents, i.late_fee_cents, i.status, ${invoiceNetPaidSql(reversals)} AS paid_cents
+      `SELECT i.amount_cents, i.late_fee_cents, i.status, ${await netPaidSql(db)} AS paid_cents
        FROM invoices i WHERE i.association_id = ? AND i.id = ?`,
     )
     .bind(associationId, invoiceId)
@@ -1225,16 +1337,63 @@ async function reusableIntent(
   return null;
 }
 
-async function checkoutStartAllowed(db: D1Database, associationId: string, userId: string): Promise<boolean> {
+async function reserveCheckoutIntent(
+  db: D1Database,
+  row: {
+    id: string;
+    associationId: string;
+    userId: string;
+    amountCents: number;
+    allocationJson: string;
+    lotNumbers: string;
+    expiresAt: string;
+  },
+): Promise<boolean> {
+  const now = new Date().toISOString();
   const cutoff = new Date(Date.now() - CHECKOUT_START_WINDOW_MS).toISOString();
-  const row = await db
+  const saved = await db
     .prepare(
-      `SELECT COUNT(*) AS n FROM checkout_intents
-       WHERE association_id = ? AND user_id = ? AND created_at >= ?`,
+      `INSERT INTO checkout_intents (
+         id, association_id, user_id, amount_cents, allocation_json, lot_numbers, stripe_session_id, expires_at, created_at
+       )
+       SELECT ?, ?, ?, ?, ?, ?, '', ?, ?
+       WHERE (
+         SELECT COUNT(*) FROM checkout_intents
+         WHERE association_id = ? AND user_id = ? AND created_at >= ?
+       ) < ?
+       AND NOT EXISTS (
+         SELECT 1 FROM checkout_intents
+         WHERE association_id = ? AND user_id = ? AND amount_cents = ? AND expires_at > ? AND allocation_json = ?
+       )`,
     )
-    .bind(associationId, userId, cutoff)
-    .first<{ n: number }>();
-  return Number(row?.n ?? 0) < CHECKOUT_START_LIMIT;
+    .bind(
+      row.id,
+      row.associationId,
+      row.userId,
+      row.amountCents,
+      row.allocationJson,
+      row.lotNumbers,
+      row.expiresAt,
+      now,
+      row.associationId,
+      row.userId,
+      cutoff,
+      CHECKOUT_START_LIMIT,
+      row.associationId,
+      row.userId,
+      row.amountCents,
+      now,
+      row.allocationJson,
+    )
+    .run();
+  return Number(saved.meta.changes) > 0;
+}
+
+async function releaseCheckoutIntent(db: D1Database, associationId: string, intentId: string): Promise<void> {
+  await db
+    .prepare("DELETE FROM checkout_intents WHERE association_id = ? AND id = ? AND stripe_session_id = ''")
+    .bind(associationId, intentId)
+    .run();
 }
 
 async function savedKeyMode(db: D1Database, associationId: string): Promise<"" | StripeKeyMode> {
@@ -1261,15 +1420,39 @@ function paymentInsert(
     paidOn: string;
     userId: string;
     now: string;
+    testOnly: boolean;
+    testColumn: boolean;
   },
 ): D1PreparedStatement {
+  const note = row.testOnly ? TEST_NOTE : ONLINE_NOTE;
+  if (row.testColumn) {
+    return db
+      .prepare(
+        `INSERT INTO payments (
+           id, association_id, property_id, invoice_id, amount_cents, method, reference, paid_on, notes, recorded_by_user_id, created_at, is_test
+         ) VALUES (?, ?, ?, ?, ?, 'stripe', ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        row.id,
+        row.associationId,
+        row.propertyId,
+        row.invoiceId,
+        row.amountCents,
+        row.reference,
+        row.paidOn,
+        note,
+        row.userId,
+        row.now,
+        row.testOnly ? 1 : 0,
+      );
+  }
   return db
     .prepare(
       `INSERT INTO payments (
          id, association_id, property_id, invoice_id, amount_cents, method, reference, paid_on, notes, recorded_by_user_id, created_at
        ) VALUES (?, ?, ?, ?, ?, 'stripe', ?, ?, ?, ?, ?)`,
     )
-    .bind(row.id, row.associationId, row.propertyId, row.invoiceId, row.amountCents, row.reference, row.paidOn, ONLINE_NOTE, row.userId, row.now);
+    .bind(row.id, row.associationId, row.propertyId, row.invoiceId, row.amountCents, row.reference, row.paidOn, note, row.userId, row.now);
 }
 
 function noticeInsert(

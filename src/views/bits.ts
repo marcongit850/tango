@@ -53,6 +53,11 @@ export function methodLabel(method: string): string {
   return method;
 }
 
+export function paymentMethodLabel(method: string, isTest = false): string {
+  if (isTest) return "Test payment, not applied";
+  return methodLabel(method);
+}
+
 export function documentFileLinks(href: string, contentType: string | null | undefined): string {
   const safe = esc(href);
   const download = `<a href="${safe}?download=1">Download</a>`;

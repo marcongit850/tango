@@ -52,6 +52,8 @@
     {
       "binding": "DOCUMENTS",
       "bucket_name": "tango-documents"
+      // Private bucket. Do not enable a public r2.dev URL or a custom domain on this bucket.
+      // Documents and the payment activity export are read only through this Worker binding.
     }
   ],
   // Header logo and other public files. Matching URLs are served as assets; everything else hits the Worker.

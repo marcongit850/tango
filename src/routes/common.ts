@@ -55,7 +55,7 @@ export function redirectTo(c: AppContext, location: string, message?: string, to
   return c.redirect(location, 303);
 }
 
-export type FormFields = Record<string, string | File | File[]>;
+export type FormFields = Record<string, string | string[] | File | File[]>;
 
 export async function readForm(c: AppContext): Promise<FormFields> {
   assertSameOrigin(c.req.raw);
@@ -72,9 +72,15 @@ export async function readForm(c: AppContext): Promise<FormFields> {
         fields[key] = files[0];
         continue;
       }
-      const text = value.find((item): item is string => typeof item === "string");
-      if (text !== undefined) fields[key] = text;
-      continue;
+      const texts = value.filter((item): item is string => typeof item === "string");
+      if (texts.length > 1) {
+        fields[key] = texts;
+        continue;
+      }
+      if (texts.length === 1) {
+        fields[key] = texts[0];
+        continue;
+      }
     }
     if (typeof value === "string" || value instanceof File) fields[key] = value;
   }
@@ -84,6 +90,12 @@ export async function readForm(c: AppContext): Promise<FormFields> {
 export function textValue(fields: FormFields, name: string, max: number): string {
   const value = fields[name];
   return typeof value === "string" ? clip(value, max) : "";
+}
+
+export function textList(fields: FormFields, name: string, max: number): string[] {
+  const value = fields[name];
+  const items = typeof value === "string" ? [value] : Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  return [...new Set(items.map((item) => clip(item, max)).filter(Boolean))];
 }
 
 export function fileValue(fields: FormFields, name: string): File | null {

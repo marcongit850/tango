@@ -30,8 +30,8 @@ import { redactSecrets, isSecurePaymentRequest, parseStripeEvent, verifyStripeSi
 import type { AppBindings, Association } from "../types";
 import { paymentSettingsPage } from "../views/admin";
 import { render } from "../views/layout";
-import { payCancelPage, payStartPage, sampleCheckoutPage, paySuccessPage } from "../views/resident";
-import { readForm, redirectTo, requireEditor, requireMember, textValue } from "./common";
+import { payCancelPage, paySelectPage, payStartPage, sampleCheckoutPage, paySuccessPage } from "../views/resident";
+import { readForm, redirectTo, requireEditor, requireMember, textList, textValue } from "./common";
 
 const MAX_WEBHOOK_BYTES = 262144;
 
@@ -170,26 +170,38 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/a/:slug/pay", async (c) => {
-    const { association, user } = requireMember(c);
-    if (!isDemoAssociation(association)) {
+    const { association, user, membership } = requireMember(c);
+    const offer = await payOfferFor(c.env.DB, association, canEditAdmin(membership));
+    if (offer.kind === "off") {
       return render(c, {
         title: "Pay",
         active: "dashboard",
         body: payStartPage(association),
       });
     }
-    const invoices = await selectDemoInvoices(c.env.DB, association, user.id, c.req.query("invoice") ?? "", c.req.query("scope") ?? "");
+    const open = await payableInvoicesForUser(c.env.DB, association.id, user.id, todayIso(association.timezone));
+    return render(c, {
+      title: offer.kind === "demo" ? "Sample checkout" : "Pay now",
+      active: "dashboard",
+      body: paySelectPage({ association, invoices: open, offer, message: "" }),
+    });
+  });
+
+  app.get("/a/:slug/pay/sample", async (c) => {
+    const { association, user } = requireMember(c);
+    if (!isDemoAssociation(association)) return c.redirect(`/a/${association.slug}/pay`, 303);
+    const invoices = await selectDemoInvoices(c.env.DB, association, user.id, selectedInvoiceIds(c.req.queries("invoice_id"), c.req.query("invoice") ?? "", c.req.query("scope") ?? ""));
     if (invoices.length === 0) {
+      const open = await payableInvoicesForUser(c.env.DB, association.id, user.id, todayIso(association.timezone));
       return render(c, {
         title: "Sample checkout",
         active: "dashboard",
-        body: sampleCheckoutPage({ association, invoices: [], successHref: "", cancelHref: `/a/${association.slug}/dashboard` }),
+        body: paySelectPage({ association, invoices: open, offer: { kind: "demo" }, message: "Choose at least one invoice." }),
       });
     }
     const params = new URLSearchParams();
     params.set("sample", "1");
-    if (c.req.query("invoice")) params.set("invoice", c.req.query("invoice") ?? "");
-    if (c.req.query("scope") === "balance") params.set("scope", "balance");
+    for (const invoice of invoices) params.append("invoice_id", invoice.invoiceId);
     return render(c, {
       title: "Sample checkout",
       active: "dashboard",
@@ -206,15 +218,15 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
     const { association, user, membership } = requireMember(c);
     if (isDemoAssociation(association)) return redirectTo(c, `/a/${association.slug}/dashboard`, "Demo only, changes are not saved", "warn");
     const fields = await readForm(c);
-    const back = `/a/${association.slug}/dashboard`;
+    const back = `/a/${association.slug}/pay`;
     const offer = await payOfferFor(c.env.DB, association, canEditAdmin(membership));
-    if (offer.kind !== "stripe") return redirectTo(c, back, "Online payment is not available.", "warn");
+    if (offer.kind !== "stripe") return redirectTo(c, `/a/${association.slug}/dashboard`, "Online payment is not available.", "warn");
     if (!isSecurePaymentRequest(c.req.url)) return redirectTo(c, back, "Online payment has to start on a secure page.", "warn");
     const today = todayIso(association.timezone);
     const open = await payableInvoicesForUser(c.env.DB, association.id, user.id, today);
-    const invoiceId = textValue(fields, "invoice_id", 80);
-    const selected = invoiceId ? open.filter((invoice) => invoice.invoiceId === invoiceId) : textValue(fields, "scope", 20) === "balance" ? open : [];
-    if (selected.length === 0) return redirectTo(c, back, "Nothing is due on that invoice.", "warn");
+    const requested = new Set(textList(fields, "invoice_id", 80));
+    const selected = open.filter((invoice) => requested.has(invoice.invoiceId));
+    if (requested.size === 0 || selected.length === 0) return redirectTo(c, back, "Choose at least one invoice.", "warn");
     const started = await startCheckout({
       env: c.env,
       db: c.env.DB,
@@ -234,7 +246,7 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
     if (!sample) {
       return render(c, { title: "Payment submitted", active: "dashboard", body: paySuccessPage({ association, sample: null }) });
     }
-    const invoices = await selectDemoInvoices(c.env.DB, association, user.id, c.req.query("invoice") ?? "", c.req.query("scope") ?? "");
+    const invoices = await selectDemoInvoices(c.env.DB, association, user.id, selectedInvoiceIds(c.req.queries("invoice_id"), c.req.query("invoice") ?? "", c.req.query("scope") ?? ""));
     const appliedCents = invoices.reduce((sum, invoice) => sum + invoice.amountCents, 0);
     return render(c, {
       title: "Sample payment",
@@ -338,7 +350,7 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
       await reviewWebhook(c, association, applied.detail, applied.review);
       return c.json({ ok: true });
     }
-    if (!applied.applied.emailed) {
+    if (!applied.applied.testOnly && !applied.applied.emailed) {
       const recipients = applied.applied.duplicate
         ? await receiptRecipients(c.env.DB, association.id, applied.applied.stripePaymentId)
         : applied.applied.ownerEmails;
@@ -458,17 +470,23 @@ function settingsPath(slug: string): string {
   return `/a/${slug}/admin/payment-settings`;
 }
 
+function selectedInvoiceIds(listed: string[] | undefined, invoiceId: string, scope: string): string[] {
+  if (scope === "balance") return ["*"];
+  const ids = [...(listed ?? [])];
+  if (invoiceId) ids.push(invoiceId);
+  return ids;
+}
+
 async function selectDemoInvoices(
   db: D1Database,
   association: Association,
   userId: string,
-  invoiceId: string,
-  scope: string,
+  invoiceIds: string[],
 ): Promise<PayableInvoice[]> {
   const open = await payableInvoicesForUser(db, association.id, userId, todayIso(association.timezone));
-  if (scope === "balance") return open;
-  if (!invoiceId) return [];
-  return open.filter((invoice) => invoice.invoiceId === invoiceId);
+  if (invoiceIds.includes("*")) return open;
+  const wanted = new Set(invoiceIds);
+  return open.filter((invoice) => wanted.has(invoice.invoiceId));
 }
 
 export function paymentsStatusForView(canEdit: boolean, slug: string, status: "not enabled" | "test mode" | "live"): {

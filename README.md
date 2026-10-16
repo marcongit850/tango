@@ -579,7 +579,7 @@ Someone with a terminal can apply the same file with `npm run db:migrate:remote`
 
 ## Online payments (paste this before merge)
 
-`migrations/0019_online_payments.sql` adds encrypted Stripe settings, checkout intents, and webhook idempotency. It also allows the payment method `stripe`, shown as Online (Stripe). Paste it after `0018_fee_schedule.sql`. Then paste `migrations/0020_payment_controls.sql` so refunds, disputes, and the append-only activity log are in place. Deploy does not apply D1 migrations. Neither file stores a Stripe key.
+`migrations/0019_online_payments.sql` adds encrypted Stripe settings, checkout intents, and webhook idempotency. It also allows the payment method `stripe`, shown as Online (Stripe). Paste it after `0018_fee_schedule.sql`. Then paste `migrations/0020_payment_controls.sql` so refunds, disputes, and the append-only activity log are in place. Then paste `migrations/0021_test_payments.sql` so a test-mode payment is stored without changing a balance. Deploy does not apply D1 migrations. None of these files stores a Stripe key.
 
 Set the Worker secret `PAYMENT_ENCRYPTION_KEY` before a treasurer saves keys. It is a base64-encoded 32-byte key (`openssl rand -base64 32`, then `npx wrangler secret put PAYMENT_ENCRYPTION_KEY`). Do not put the value in git, email, or the activity log.
 
@@ -590,9 +590,9 @@ Dashboard steps for the migration:
 1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database**.
 2. Select the database named **tango**.
 3. Open **Console**.
-4. Paste the full contents of `migrations/0019_online_payments.sql`.
-5. Paste the full contents of `migrations/0020_payment_controls.sql`.
-5. Select **Execute**.
+4. Paste the full contents of `migrations/0019_online_payments.sql` and select **Execute**.
+5. Paste the full contents of `migrations/0020_payment_controls.sql` and select **Execute**.
+6. Paste the full contents of `migrations/0021_test_payments.sql` and select **Execute**.
 
 Run that file once, after `0018`. If the console says `online_payments_migration` already exists, this file was already applied. Stop. Do not paste it again.
 

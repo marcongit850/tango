@@ -19,7 +19,7 @@ import { clip, paragraphs, esc } from "../lib/html";
 import { formatMoney } from "../lib/money";
 import type { OwnerPayOffer } from "../lib/online-payments";
 import type { Association } from "../types";
-import { addressLine, addressLocality, confirmDeleteButton, contactPhones, dateCell, dateTimeCell, documentFileLinks, empty, invoiceLinesTable, mailingAddressHtml, methodLabel, moneySpan, propertyAddressHtml, selectField, textField, areaField } from "./bits";
+import { addressLine, addressLocality, confirmDeleteButton, contactPhones, dateCell, dateTimeCell, documentFileLinks, empty, invoiceLinesTable, mailingAddressHtml, moneySpan, paymentMethodLabel, propertyAddressHtml, selectField, textField, areaField } from "./bits";
 
 function remainingCents(row: InvoiceRow): number {
   return Number(row.amount_cents) + Number(row.late_fee_cents) - Number(row.paid_cents);
@@ -29,17 +29,9 @@ function canPayInvoice(row: InvoiceRow): boolean {
   return row.status !== "void" && row.status !== "paid" && remainingCents(row) > 0;
 }
 
-function payControl(slug: string, pay: OwnerPayOffer | undefined, input: { invoiceId?: string; scope?: "balance" }, label: string): string {
+function payControl(slug: string, pay: OwnerPayOffer | undefined, label: string): string {
   if (!pay || pay.kind === "off") return "";
-  const action = `/a/${esc(slug)}/pay`;
-  if (pay.kind === "demo") {
-    const query = input.invoiceId ? `invoice=${encodeURIComponent(input.invoiceId)}` : "scope=balance";
-    return `<a class="button" href="${action}?${query}">${esc(label)}</a>`;
-  }
-  const hidden = input.invoiceId
-    ? `<input type="hidden" name="invoice_id" value="${esc(input.invoiceId)}">`
-    : `<input type="hidden" name="scope" value="balance">`;
-  return `<form method="post" action="${action}">${hidden}<button type="submit">${esc(label)}</button></form>`;
+  return `<a class="button" href="/a/${esc(slug)}/pay">${esc(label)}</a>`;
 }
 
 function payNote(pay: OwnerPayOffer | undefined): string {
@@ -167,13 +159,13 @@ export function dashboardPage(options: {
   const invoices = options.invoices
     .slice(0, 6)
     .map(
-      (row) => `<tr><td><a href="${base}/invoices/${esc(row.id)}">${esc(row.invoice_number)}</a></td><td>${invoiceDescriptionCell(row)}</td><td>${dateCell(row.due_on, association.timezone)}</td><td>${moneySpan(row.amount_cents + row.late_fee_cents)}</td><td>${esc(row.status)}</td>${showPay ? `<td>${canPayInvoice(row) ? payControl(association.slug, options.pay, { invoiceId: row.id }, "Pay now") : ""}</td>` : ""}</tr>`,
+      (row) => `<tr><td><a href="${base}/invoices/${esc(row.id)}">${esc(row.invoice_number)}</a></td><td>${invoiceDescriptionCell(row)}</td><td>${dateCell(row.due_on, association.timezone)}</td><td>${moneySpan(row.amount_cents + row.late_fee_cents)}</td><td>${esc(row.status)}</td>${showPay ? `<td>${canPayInvoice(row) ? payControl(association.slug, options.pay, "Pay now") : ""}</td>` : ""}</tr>`,
     )
     .join("");
   const payments = options.payments
     .slice(0, 6)
     .map(
-      (row) => `<tr><td><a href="${base}/payments/${esc(row.id)}">${dateCell(row.paid_on, association.timezone)}</a></td><td>${esc(methodLabel(row.method))}</td><td>${esc(row.reference)}</td><td>${moneySpan(row.amount_cents)}</td></tr>`,
+      (row) => `<tr><td><a href="${base}/payments/${esc(row.id)}">${dateCell(row.paid_on, association.timezone)}</a></td><td>${esc(paymentMethodLabel(row.method, Number(row.is_test) === 1))}</td><td>${esc(row.reference)}</td><td>${moneySpan(row.amount_cents)}</td></tr>`,
     )
     .join("");
   const notices = options.notices
@@ -204,7 +196,7 @@ export function dashboardPage(options: {
         ${ledger.length ? `<p class="balance-figure">${moneySpan(total)}</p>` : ""}
         <p class="muted">${balanceCopy}</p>
         ${late > 0 ? `<p>Outstanding late fees ${moneySpan(late)}</p>` : ""}
-        ${showPay && payable.length > 0 ? `<div class="pay-actions">${payNote(options.pay)}${payControl(association.slug, options.pay, { scope: "balance" }, "Pay full balance")}</div>` : ""}
+        ${showPay && payable.length > 0 ? `<div class="pay-actions">${payNote(options.pay)}${payControl(association.slug, options.pay, "Pay now")}</div>` : ""}
       </article>
       <article class="panel">
         <h2>Lot dues</h2>
@@ -384,7 +376,7 @@ export function invoiceListPage(association: Association, invoices: InvoiceRow[]
         <td>${moneySpan(row.late_fee_cents)}</td>
         <td>${moneySpan(Number(row.paid_cents))}</td>
         <td>${esc(row.status)}</td>
-        ${showPay ? `<td>${canPayInvoice(row) ? payControl(association.slug, pay, { invoiceId: row.id }, "Pay now") : ""}</td>` : ""}
+        ${showPay ? `<td>${canPayInvoice(row) ? payControl(association.slug, pay, "Pay now") : ""}</td>` : ""}
       </tr>`,
     )
     .join("");
@@ -416,7 +408,7 @@ export function invoiceDetailPage(association: Association, invoice: InvoiceRow,
       pay && pay.kind !== "off"
         ? scheduled || !canPayInvoice(invoice)
           ? ""
-          : `<div class="pay-actions">${payNote(pay)}${payControl(association.slug, pay, { invoiceId: invoice.id }, "Pay now")}</div>`
+          : `<div class="pay-actions">${payNote(pay)}${payControl(association.slug, pay, "Pay now")}</div>`
         : `<p class="muted">Online payment is not available. Mail a check and the board will record it.</p>`
     }
   </section>`;
@@ -428,7 +420,7 @@ export function paymentListPage(association: Association, payments: PaymentRow[]
       (row) => `<tr>
         <td><a href="/a/${esc(association.slug)}/payments/${esc(row.id)}">${dateCell(row.paid_on, association.timezone)}</a></td>
         <td>Lot ${esc(row.lot_number)}</td>
-        <td>${esc(methodLabel(row.method))}</td>
+        <td>${esc(paymentMethodLabel(row.method, Number(row.is_test) === 1))}</td>
         <td>${esc(row.reference)}</td>
         <td>${esc(row.invoice_number ?? "Unapplied")}</td>
         <td>${moneySpan(row.amount_cents)}</td>
@@ -444,17 +436,59 @@ export function paymentDetailPage(association: Association, payment: PaymentRow)
   return `<section class="panel">
     <h1>Payment receipt</h1>
     <p>${moneySpan(payment.amount_cents)} recorded on ${dateCell(payment.paid_on, association.timezone)}</p>
-    <p>Lot ${esc(payment.lot_number)} · ${esc(methodLabel(payment.method))} ${esc(payment.reference)}</p>
-    <p>${payment.invoice_number ? `Applied to ${esc(payment.invoice_number)}` : "Not tied to one invoice. It still reduces the lot balance."}</p>
+    <p>Lot ${esc(payment.lot_number)} · ${esc(paymentMethodLabel(payment.method, Number(payment.is_test) === 1))} ${esc(payment.reference)}</p>
+    <p>${
+      Number(payment.is_test) === 1
+        ? "Test payment, not applied. This did not change the balance."
+        : payment.invoice_number
+          ? `Applied to ${esc(payment.invoice_number)}`
+          : "Not tied to one invoice. It still reduces the lot balance."
+    }</p>
     ${payment.notes ? paragraphs(payment.notes) : ""}
     <p class="muted">This is the association's record of a payment. It is not a bank receipt.</p>
+  </section>`;
+}
+
+export function paySelectPage(options: {
+  association: Association;
+  invoices: { invoiceId: string; lotNumber: string; invoiceNumber: string; description?: string; amountCents: number }[];
+  offer: OwnerPayOffer;
+  message: string;
+}): string {
+  const total = options.invoices.reduce((sum, invoice) => sum + invoice.amountCents, 0);
+  const demo = options.offer.kind === "demo";
+  const action = demo ? `/a/${esc(options.association.slug)}/pay/sample` : `/a/${esc(options.association.slug)}/pay`;
+  const method = demo ? "get" : "post";
+  const boxes = options.invoices
+    .map((invoice) => {
+      const label = invoice.description?.trim() ? `${invoice.invoiceNumber}, ${invoice.description}` : invoice.invoiceNumber;
+      return `<label><input type="checkbox" name="invoice_id" value="${esc(invoice.invoiceId)}" data-cents="${invoice.amountCents}" checked> Lot ${esc(invoice.lotNumber)}, ${esc(label)}, ${esc(formatMoney(invoice.amountCents))}</label>`;
+    })
+    .join("");
+  const form = options.invoices.length
+    ? `<form class="fields" method="${method}" action="${action}" data-pay-select>
+        ${boxes}
+        <p>Total <strong data-pay-total>${esc(formatMoney(total))}</strong></p>
+        <p class="muted">Uncheck an invoice to leave it for later. The amount is the total of the invoices still checked.</p>
+        <button type="submit">${demo ? "Continue sample checkout" : "Pay now"}</button>
+      </form>
+      <script src="/pay-select.js"></script>`
+    : empty("Nothing is due.");
+  return `<section class="panel">
+    <p class="kicker">${demo ? "Sample checkout" : "Pay now"}</p>
+    <h1>Choose invoices</h1>
+    ${demo ? "<p><strong>Nothing is charged. Nothing here is real or saved.</strong></p>" : ""}
+    ${payNote(options.offer)}
+    ${options.message ? `<p>${esc(options.message)}</p>` : ""}
+    ${form}
+    <p><a href="/a/${esc(options.association.slug)}/dashboard">Back to the dashboard</a></p>
   </section>`;
 }
 
 export function payStartPage(association: Association): string {
   return `<section class="panel">
     <h1>Pay an invoice</h1>
-    <p>Choose Pay now on an open invoice, or pay the full balance from your dashboard.</p>
+    <p>Online payment is not available. Mail a check and the board will record it.</p>
     <p><a href="/a/${esc(association.slug)}/dashboard">Back to the dashboard</a></p>
   </section>`;
 }

@@ -43,7 +43,7 @@ import {
   documentFileLinks,
   invoiceLinesTable,
   empty,
-  methodLabel,
+  paymentMethodLabel,
   moneySpan,
   roleLabel,
   selectField,
@@ -906,7 +906,7 @@ export function paymentSettingsPage(options: {
       <p>Payments: ${esc(options.status)}.</p>
       ${warnings}
       <p class="muted">Only an admin can change these keys. Officers and people with the admin flag share that access. There is no separate treasurer role. Keys are encrypted and are not shown again. Activity records that a key was saved, replaced, or removed, not the key itself. Card numbers are not collected on this site. A checkout page expires after 30 minutes.</p>
-      <p class="muted">Test mode shows Pay now only to an admin. Owners see Pay now after a live key is saved. A test event is recorded only when it matches test mode, and a live event only when it matches live mode.</p>
+      <p class="muted">Test mode shows Pay now only to an admin. Owners see Pay now after a live key is saved. A test-mode payment is saved as Test payment, not applied. It does not change the invoice or the balance. A live event is recorded only when the saved key is live.</p>
       <p class="muted">Card fees (about 2.9% + 30 cents) are absorbed by the association unless the board decides otherwise. No convenience fee is added.</p>
       <p class="muted">If two online payments for the same invoice finish at the same moment, the extra amount is recorded as unapplied credit on the lot.</p>
       <h2>Webhook</h2>
@@ -1114,7 +1114,7 @@ export function invoiceAdminPage(options: {
           : `<div class="actions"><a href="#edit-payment-${esc(payment.id)}">Edit</a>${confirmDeleteButton(`/a/${association.slug}/admin/invoices/${invoice.id}/payments/${payment.id}/delete`, "Delete payment", "Delete this payment")}</div>`;
       return `<tr>
         <td>${dateCell(payment.paid_on, association.timezone)}</td>
-        <td>${esc(methodLabel(payment.method))}</td>
+        <td>${esc(paymentMethodLabel(payment.method, Number(payment.is_test) === 1))}</td>
         <td>${esc(payment.reference)}</td>
         <td>${moneySpan(Number(payment.amount_cents))}</td>
         <td>${esc(payment.notes)}</td>

@@ -1,6 +1,6 @@
 import { invoiceById, listAssociations, notify, writeAudit } from "../db";
 import type { Association } from "../types";
-import { todayIso } from "./dates";
+import { formatCentralDateTime, todayIso } from "./dates";
 import { isDemoAssociationId } from "./demo";
 import { assessmentDisplayName } from "./dues";
 import { invoiceOwnerEmail, resendApiKey, sendResendEmail, uniqueLoginEmails } from "./email";
@@ -262,7 +262,7 @@ async function deliverInvoiceLetter(
   fetchImpl: typeof fetch | undefined,
   skipUserIds: Set<string>,
   onSent?: (ownerId: string) => Promise<void>,
-): Promise<{ sent: number; failed: number; addresses: string[] }> {
+): Promise<{ sent: number; failed: number; addresses: string[]; recipients: { id: string; email: string }[] }> {
   const db = env.DB;
   const description = assessmentDisplayName(invoice.description);
   const payUrl = canonicalPortalUrl(association, `/invoices/${invoice.id}`);
@@ -278,6 +278,7 @@ async function deliverInvoiceLetter(
   });
   const addressOk = new Map<string, boolean>();
   const addresses: string[] = [];
+  const recipients: { id: string; email: string }[] = [];
   let sent = 0;
   let failed = 0;
   for (const owner of owners) {
@@ -308,6 +309,7 @@ async function deliverInvoiceLetter(
       if (ok) {
         sent += 1;
         addresses.push(owner.email);
+        recipients.push({ id: owner.id, email: owner.email });
       } else {
         failed += 1;
       }
@@ -332,7 +334,7 @@ async function deliverInvoiceLetter(
       });
     }
   }
-  return { sent, failed, addresses };
+  return { sent, failed, addresses, recipients };
 }
 
 export type InvoiceResendRecord = {
@@ -340,6 +342,88 @@ export type InvoiceResendRecord = {
   actorName: string;
   recipientCount: number;
 };
+
+export type InvoiceEmailHistoryEntry = {
+  sentAt: string;
+  kind: "automatic" | "resent";
+  actorName: string | null;
+  emails: string[];
+  recipientCount: number;
+};
+
+export function invoiceEmailHistoryLine(entry: InvoiceEmailHistoryEntry): string {
+  const when = formatCentralDateTime(entry.sentAt);
+  const emails = [...new Set(entry.emails.map((email) => email.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const reached = emails.length > 0 ? emails.join(", ") : entry.recipientCount === 1 ? "1 owner" : `${entry.recipientCount} owners`;
+  if (entry.kind === "automatic") return `${when}. Automatic to ${reached}.`;
+  return `${when}. Resent by ${entry.actorName?.trim() || "an admin"} to ${reached}.`;
+}
+
+export async function invoiceEmailHistory(db: D1Database, associationId: string, invoiceId: string): Promise<InvoiceEmailHistoryEntry[]> {
+  const entries: InvoiceEmailHistoryEntry[] = [];
+  if (await tableExists(db, "invoice_email_events")) {
+    const { results } = await db
+      .prepare(
+        `SELECT e.sent_at, u.email
+         FROM invoice_email_events e
+         JOIN users u ON u.id = e.user_id
+         WHERE e.association_id = ? AND e.invoice_id = ?
+         ORDER BY e.sent_at DESC, u.email`,
+      )
+      .bind(associationId, invoiceId)
+      .all<{ sent_at: string; email: string }>();
+    const grouped = new Map<string, string[]>();
+    for (const row of results) {
+      const emails = grouped.get(row.sent_at) ?? [];
+      emails.push(row.email);
+      grouped.set(row.sent_at, emails);
+    }
+    for (const [sentAt, emails] of grouped) {
+      entries.push({ sentAt, kind: "automatic", actorName: null, emails, recipientCount: emails.length });
+    }
+  }
+  if (await invoiceResendsReady(db)) {
+    const recipientsReady = await tableExists(db, "invoice_resend_recipients");
+    const { results } = recipientsReady
+      ? await db
+          .prepare(
+            `SELECT r.id, r.sent_at, r.actor_name, r.recipient_count, p.email
+             FROM invoice_resends r
+             LEFT JOIN invoice_resend_recipients p ON p.resend_id = r.id
+             WHERE r.association_id = ? AND r.invoice_id = ?
+             ORDER BY r.sent_at DESC, p.email`,
+          )
+          .bind(associationId, invoiceId)
+          .all<{ id: string; sent_at: string; actor_name: string; recipient_count: number; email: string | null }>()
+      : await db
+          .prepare(
+            `SELECT id, sent_at, actor_name, recipient_count, NULL AS email
+             FROM invoice_resends
+             WHERE association_id = ? AND invoice_id = ?
+             ORDER BY sent_at DESC`,
+          )
+          .bind(associationId, invoiceId)
+          .all<{ id: string; sent_at: string; actor_name: string; recipient_count: number; email: string | null }>();
+    const grouped = new Map<string, InvoiceEmailHistoryEntry>();
+    for (const row of results) {
+      let entry = grouped.get(row.id);
+      if (!entry) {
+        entry = {
+          sentAt: row.sent_at,
+          kind: "resent",
+          actorName: row.actor_name,
+          emails: [],
+          recipientCount: Number(row.recipient_count),
+        };
+        grouped.set(row.id, entry);
+      }
+      if (row.email) entry.emails.push(row.email);
+    }
+    entries.push(...grouped.values());
+  }
+  entries.sort((a, b) => (a.sentAt < b.sentAt ? 1 : a.sentAt > b.sentAt ? -1 : a.kind === b.kind ? 0 : a.kind === "resent" ? -1 : 1));
+  return entries;
+}
 
 export type InvoiceResendResult = { ok: true; sent: number; failed: number } | { ok: false; message: string };
 
@@ -406,14 +490,35 @@ export async function resendInvoiceEmail(
   const delivery = await deliverInvoiceLetter(env, association, due, owners, apiKey, fetchImpl, new Set());
   if (delivery.sent === 0) return { ok: false, message: INVOICE_RESEND_FAILED };
   const actorName = actor.name.trim() || actor.email;
+  const resendId = crypto.randomUUID();
   await db
     .prepare(
       `INSERT INTO invoice_resends (
          id, association_id, invoice_id, actor_user_id, actor_name, sent_at, recipient_count
        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(crypto.randomUUID(), association.id, invoice.id, actor.id, actorName, sentAt, delivery.sent)
+    .bind(resendId, association.id, invoice.id, actor.id, actorName, sentAt, delivery.sent)
     .run();
+  if (await tableExists(db, "invoice_resend_recipients")) {
+    for (const recipient of delivery.recipients) {
+      try {
+        await db
+          .prepare(
+            `INSERT INTO invoice_resend_recipients (id, resend_id, association_id, invoice_id, user_id, email)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(crypto.randomUUID(), resendId, association.id, invoice.id, recipient.id, recipient.email)
+          .run();
+      } catch (error) {
+        logError("invoice_resend_recipient", {
+          associationId: association.id,
+          invoiceId: invoice.id,
+          userId: recipient.id,
+          message: error instanceof Error ? error.message : "unknown",
+        });
+      }
+    }
+  }
   try {
     await writeAudit(db, {
       associationId: association.id,

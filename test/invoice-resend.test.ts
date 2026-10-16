@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
 import { DEMO_INVOICE_EMAIL_MESSAGE, runDueInvoiceEmails, saveInvoiceEmailSetting } from "../src/lib/invoice-emails";
+import { formatCentralDateTime } from "../src/lib/dates";
 import { RESEND_INVOICE_HELP } from "../src/views/help";
 import { sha256Hex } from "../src/lib/tokens";
 
@@ -80,6 +81,7 @@ const MIGRATIONS = [
   "migrations/0023_late_fees.sql",
   "migrations/0024_invoice_emails.sql",
   "migrations/0025_invoice_resend.sql",
+  "migrations/0026_invoice_resend_recipients.sql",
 ];
 
 const FROM = "Tang-O-Mar <donotreply@mytangomar.com>";
@@ -182,6 +184,9 @@ describe("email this invoice", () => {
     expect(beforeHtml).toContain(">Email this invoice</button>");
     expect(beforeHtml).toContain('aria-label="Help: Email this invoice"');
     expect(beforeHtml).toContain(RESEND_INVOICE_HELP);
+    expect(beforeHtml).toContain("<h2>Email history</h2>");
+    expect(beforeHtml).toContain("Not emailed yet.");
+    expect(beforeHtml).not.toContain("Last emailed");
     expect(beforeHtml).not.toContain("\u2014");
     expect(beforeHtml).not.toContain("\u2013");
 
@@ -203,12 +208,15 @@ describe("email this invoice", () => {
       recipient_count: number;
     };
     expect(row).toEqual({ actor_user_id: "user_jordan", actor_name: "Jordan Lee", recipient_count: 1 });
+    expect(sqlite.prepare("SELECT user_id, email FROM invoice_resend_recipients").all()).toEqual([
+      { user_id: "user_casey", email: "casey.nguyen@example.com" },
+    ]);
 
     const after = await app.request(`http://localhost/a/tango-mar/admin/invoices/${OPEN}`, { headers: { Cookie: `tango_session=${jordan}` } }, env);
     const afterHtml = await after.text();
-    expect(afterHtml).toContain("Last emailed");
-    expect(afterHtml).toContain("by Jordan Lee");
-    expect(afterHtml).toContain("to 1 owner.");
+    expect(afterHtml).toContain("Resent by Jordan Lee to casey.nguyen@example.com.");
+    expect(afterHtml).toContain(" CT.");
+    expect(afterHtml).not.toContain("Last emailed");
     expect(afterHtml).not.toContain("\u2014");
     expect(afterHtml).not.toContain("\u2013");
 
@@ -302,6 +310,37 @@ describe("email this invoice", () => {
     const sent = await send();
     expect(flash(sent)).toBe("ok:Emailed this invoice to 2 owners.");
     expect(calls.map((mail) => mail.to[0]).sort()).toEqual(["casey.nguyen@example.com", "extra.owner@example.com"]);
+    const app = createApp();
+    const page = await app.request(`http://localhost/a/tango-mar/admin/invoices/${OPEN}`, { headers: { Cookie: `tango_session=${jordan}` } }, env);
+    expect(await page.text()).toContain("Resent by Jordan Lee to casey.nguyen@example.com, extra.owner@example.com.");
+    expect(
+      sqlite.prepare("SELECT email FROM invoice_resend_recipients ORDER BY email").all(),
+    ).toEqual([{ email: "casey.nguyen@example.com" }, { email: "extra.owner@example.com" }]);
+  });
+
+  it("lists automatic sends and resends newest first, and owners do not see the history", async () => {
+    expect(formatCentralDateTime("2026-10-16T20:42:00.000Z")).toBe("Oct 16, 2026, 3:42 PM CT");
+    sqlite
+      .prepare(
+        "INSERT INTO invoice_email_events (id, association_id, invoice_id, user_id, sent_at) VALUES ('evt_old', 'assoc_tango_mar', ?, 'user_casey', '2020-01-15T21:42:00.000Z')",
+      )
+      .run(OPEN);
+    expect((await send()).status).toBe(303);
+    const app = createApp();
+    const page = await app.request(`http://localhost/a/tango-mar/admin/invoices/${OPEN}`, { headers: { Cookie: `tango_session=${jordan}` } }, env);
+    const html = await page.text();
+    const automatic = "Jan 15, 2020, 3:42 PM CT. Automatic to casey.nguyen@example.com.";
+    const resentAt = html.indexOf("Resent by Jordan Lee to casey.nguyen@example.com.");
+    const automaticAt = html.indexOf(automatic);
+    expect(resentAt).toBeGreaterThan(-1);
+    expect(automaticAt).toBeGreaterThan(resentAt);
+    expect(html).not.toContain("\u2014");
+    expect(html).not.toContain("\u2013");
+
+    const casey = await signIn(sqlite, "user_casey");
+    const owner = await app.request(`http://localhost/a/tango-mar/invoices/${OPEN}`, { headers: { Cookie: `tango_session=${casey}` } }, env);
+    expect(owner.status).toBe(200);
+    expect(await owner.text()).not.toContain("Email history");
   });
 
   it("limits the button to edit access and does not send from the demo", async () => {
@@ -318,7 +357,10 @@ describe("email this invoice", () => {
     const board = await signIn(sqlite, "user_board_view");
     const viewer = await app.request(`http://localhost/a/tango-mar/admin/invoices/${OPEN}`, { headers: { Cookie: `tango_session=${board}` } }, env);
     expect(viewer.status).toBe(200);
-    expect(await viewer.text()).not.toContain("Email this invoice");
+    const viewerHtml = await viewer.text();
+    expect(viewerHtml).toContain("<h2>Email history</h2>");
+    expect(viewerHtml).toContain("Not emailed yet.");
+    expect(viewerHtml).not.toContain("Email this invoice");
 
     expect((await send(casey)).status).toBe(403);
     expect((await send(board)).status).toBe(403);

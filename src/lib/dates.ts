@@ -60,6 +60,24 @@ export function formatDateTime(iso: string, timeZone: string): string {
   }).format(date);
 }
 
+/** Short Central Time stamp, for example Oct 16, 2026, 3:42 PM CT. */
+export function formatCentralDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const formatted = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  })
+    .format(date)
+    .replace(/\u202f/g, " ")
+    .replace(/\u00a0/g, " ");
+  return `${formatted} CT`;
+}
+
 export function timeZoneLabel(timeZone: string): string {
   if (timeZone === "America/Chicago") return "Central Time";
   if (timeZone === "America/New_York") return "Eastern Time";

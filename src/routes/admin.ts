@@ -96,7 +96,7 @@ import {
   invoiceResendBlock,
   invoiceResendReason,
   invoiceResendsReady,
-  latestInvoiceResend,
+  invoiceEmailHistory,
   resendInvoiceEmail,
 } from "../lib/invoice-emails";
 import {
@@ -1173,7 +1173,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         resend: {
           ready: await invoiceResendsReady(c.env.DB),
           blockedReason: block ? invoiceResendReason(block) : null,
-          last: await latestInvoiceResend(c.env.DB, association.id, invoice.id),
+          history: await invoiceEmailHistory(c.env.DB, association.id, invoice.id),
         },
       }),
     });

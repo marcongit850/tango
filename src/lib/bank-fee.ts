@@ -37,6 +37,11 @@ export function bankTransferFeeRateNote(settings: BankFeeConfig): string {
   return `About ${formatFeePercent(settings.percentBps)}%, at most $${formatFeeCap(settings.capCents)}. ${BANK_TRANSFER_FEE_NOTE}`;
 }
 
+/** Pay now help. Uses the saved percent and cap, formatted the same way as the owner note. */
+export function bankTransferFeeHelp(settings: BankFeeConfig): string {
+  return `This small fee covers the cost of the bank transfer. It's about ${formatFeePercent(settings.percentBps)}%, never more than $${formatFeeCap(settings.capCents)}, and it doesn't count toward your dues. To avoid it, mail a check to the association.`;
+}
+
 /** The fee the Pay now form displayed. Null when it is missing or not a whole number of cents. */
 export function parseDisplayedFeeCents(input: string): number | null {
   const trimmed = input.trim();

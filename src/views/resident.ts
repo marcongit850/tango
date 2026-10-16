@@ -21,13 +21,25 @@ import {
   BANK_TRANSFER_FEE_NOTE,
   BANK_TRANSFER_PROCESSING_STATUS,
   bankTransferFeeCents,
+  bankTransferFeeHelp,
   bankTransferFeeRateNote,
+  DEFAULT_BANK_FEE,
   type BankFeeConfig,
 } from "../lib/bank-fee";
 import { formatMoney } from "../lib/money";
 import type { OwnerPayOffer, ProcessingCheckout } from "../lib/online-payments";
 import type { Association } from "../types";
 import { addressLine, addressLocality, confirmDeleteButton, contactPhones, dateCell, dateTimeCell, documentFileLinks, empty, invoiceLinesTable, mailingAddressHtml, moneySpan, paymentMethodLabel, propertyAddressHtml, selectField, textField, areaField } from "./bits";
+import {
+  BOARD_ONLY_HELP,
+  BOARD_ONLY_TOPIC,
+  ELECTRONIC_NOTICE_HELP,
+  ELECTRONIC_NOTICE_TOPIC,
+  PROCESSING_FEE_TOPIC,
+  PROCESSING_HELP,
+  PROCESSING_TOPIC,
+  helpTip,
+} from "./help";
 
 function remainingCents(row: InvoiceRow): number {
   return Number(row.amount_cents) + Number(row.late_fee_cents) - Number(row.paid_cents);
@@ -232,7 +244,7 @@ export function dashboardPage(options: {
       </article>
       <article class="panel">
         <h2>Payments</h2>
-        ${options.bankTransferProcessing ? `<p>${esc(BANK_TRANSFER_PROCESSING_STATUS)}</p>` : ""}
+        ${options.bankTransferProcessing ? `<p>${esc(BANK_TRANSFER_PROCESSING_STATUS)}${helpTip(PROCESSING_TOPIC, PROCESSING_HELP)}</p>` : ""}
         ${payments ? `<table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th></tr></thead><tbody>${payments}</tbody></table>` : empty("No recorded payments yet.")}
         <p><a href="${base}/payments">Payment history</a></p>
       </article>
@@ -352,7 +364,7 @@ export function profilePage(options: {
       <form class="fields email-prefs" method="post" action="${base}/profile/notices">
         ${noticesNote}
         <label><input type="checkbox" name="email_announcements" value="1"${announcementsOn ? " checked" : ""}> Email me portal announcements and updates</label>
-        <h2>Electronic Notice Consent</h2>
+        <h2>Electronic Notice Consent${helpTip(ELECTRONIC_NOTICE_TOPIC, ELECTRONIC_NOTICE_HELP)}</h2>
         <label><input type="checkbox" name="electronic_consent" value="1"${consentGranted ? " checked" : ""}> I consent to receiving official association notices electronically at this email address.</label>
         <button type="submit">Save email preferences</button>
       </form>
@@ -449,13 +461,13 @@ export function paymentListPage(
         <td>${moneySpan(row.amountCents)}</td>
         <td>${moneySpan(row.feeCents)}</td>
         <td>${moneySpan(row.amountCents + row.feeCents)}</td>
-        <td>${esc(BANK_TRANSFER_PROCESSING_STATUS)}</td>
+        <td>${esc(BANK_TRANSFER_PROCESSING_STATUS)}${helpTip(PROCESSING_TOPIC, PROCESSING_HELP)}</td>
       </tr>`,
     )
     .join("");
   const pendingTable = pending
     ? `<h2>Bank transfers still processing</h2>
-       <p>${esc(BANK_TRANSFER_PROCESSING_STATUS)}</p>
+       <p>${esc(BANK_TRANSFER_PROCESSING_STATUS)}${helpTip(PROCESSING_TOPIC, PROCESSING_HELP)}</p>
        <table><thead><tr><th>Lot</th><th>Invoices</th><th>${esc(BANK_TRANSFER_FEE_LABEL)}</th><th>Total</th><th>Status</th></tr></thead><tbody>${pending}</tbody></table>`
     : "";
   return `<section class="panel"><h1>Payment history</h1>
@@ -507,7 +519,7 @@ export function paySelectPage(options: {
     .join("");
   const feeLine = showFee
     ? `<p>Invoices <strong data-pay-subtotal>${esc(formatMoney(subtotal))}</strong></p>
-       <p>${esc(BANK_TRANSFER_FEE_LABEL)} <strong data-pay-fee>${esc(formatMoney(feeCents))}</strong></p>
+       <p>${esc(BANK_TRANSFER_FEE_LABEL)} <strong data-pay-fee>${esc(formatMoney(feeCents))}</strong>${helpTip(PROCESSING_FEE_TOPIC, bankTransferFeeHelp(fee))}</p>
        <p class="muted">${esc(bankTransferFeeRateNote(fee))}</p>`
     : "";
   const form = options.invoices.length
@@ -556,7 +568,7 @@ export function sampleCheckoutPage(options: {
     )
     .join("");
   const feeRow = feeCents > 0
-    ? `<tr><td></td><td>${esc(BANK_TRANSFER_FEE_LABEL)}</td><td>${moneySpan(feeCents)}</td></tr>`
+    ? `<tr><td></td><td>${esc(BANK_TRANSFER_FEE_LABEL)}${helpTip(PROCESSING_FEE_TOPIC, bankTransferFeeHelp(options.fee ?? DEFAULT_BANK_FEE))}</td><td>${moneySpan(feeCents)}</td></tr>`
     : "";
   const action = options.invoices.length
     ? `<p><a class="button" href="${esc(options.successHref)}">Complete sample payment</a> <a class="button secondary" href="${esc(options.cancelHref)}">Cancel</a></p>`
@@ -583,7 +595,7 @@ export function paySuccessPage(options: {
       ? "<p>This bank transfer has been recorded. The invoice credit is the amount due. The processing fee is not applied to the invoice.</p>"
       : state === "failed"
         ? "<p>This bank transfer did not go through. Nothing was applied to the invoice.</p>"
-        : `<p>${esc(BANK_TRANSFER_PROCESSING_STATUS)}</p><p>The invoice is credited after the bank transfer succeeds. It then shows in Payment history. Paying again is not required.</p>`;
+        : `<p>${esc(BANK_TRANSFER_PROCESSING_STATUS)}${helpTip(PROCESSING_TOPIC, PROCESSING_HELP)}</p><p>The invoice is credited after the bank transfer succeeds. It then shows in Payment history. Paying again is not required.</p>`;
     return `<section class="panel">
       <h1>Payment submitted</h1>
       ${detail}
@@ -757,7 +769,7 @@ export function documentsPage(association: Association, documents: DocumentRow[]
   );
   const boardSection = boardFolders
     ? `<section class="panel">
-      <h2>Board only</h2>
+      <h2>Board only${helpTip(BOARD_ONLY_TOPIC, BOARD_ONLY_HELP)}</h2>
       <p class="muted">Private to board members.</p>
       <div class="doc-folders">${boardFolders}</div>
     </section>`

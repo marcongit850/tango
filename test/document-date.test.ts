@@ -396,7 +396,7 @@ describe("signed-in documents page", () => {
       const boardPage = await app.request("http://localhost/a/tango-mar/documents", { headers: { Cookie: `tango_session=${jordan}` } }, env);
       expect(boardPage.status).toBe(200);
       const boardHtml = await boardPage.text();
-      const split = boardHtml.indexOf("<h2>Board only</h2>");
+      const split = boardHtml.indexOf("<h2>Board only");
       expect(split).toBeGreaterThan(boardHtml.indexOf("<h1>Documents</h1>"));
       const resident = boardHtml.slice(0, split);
       const board = boardHtml.slice(split);
@@ -427,7 +427,7 @@ describe("signed-in documents page", () => {
       const adminPage = await app.request("http://localhost/a/tango-mar/documents", { headers: { Cookie: `tango_session=${casey}` } }, env);
       expect(adminPage.status).toBe(200);
       const adminHtml = await adminPage.text();
-      const adminSplit = adminHtml.indexOf("<h2>Board only</h2>");
+      const adminSplit = adminHtml.indexOf("<h2>Board only");
       expect(adminSplit).toBeGreaterThan(adminHtml.indexOf("<h1>Documents</h1>"));
       expect(adminHtml.slice(0, adminSplit)).not.toContain("2026 budget (sample)");
       expect(adminHtml.slice(adminSplit)).toContain("Private to board members.");

@@ -197,9 +197,12 @@ describe("email this invoice", () => {
     expect(calls[0]?.from).toBe(FROM);
     expect(calls[0]?.to).toEqual(["casey.nguyen@example.com"]);
     expect(calls[0]?.subject).toBe("Tang-O-Mar: Opening balance (CSV import) invoice");
-    expect(calls[0]?.text).toContain("View and pay: " + PAY_URL);
+    expect(calls[0]?.text).toContain("View invoice: " + PAY_URL);
+    expect(calls[0]?.text).toContain("Lot: 27");
     expect(calls[0]?.text).toContain("Late fee: $25.00");
-    expect(calls[0]?.html).toContain(`<a href="${PAY_URL}">View and pay</a>`);
+    expect(calls[0]?.text).toContain("Amount due: $400.50");
+    expect(calls[0]?.html).toContain(`href="${PAY_URL}"`);
+    expect(calls[0]?.html).toContain(">View invoice</a>");
     expect(sqlite.prepare("SELECT emailed_at FROM invoices WHERE id = ?").get(OPEN)).toEqual({ emailed_at: null });
     expect(count(sqlite, "SELECT COUNT(*) AS n FROM invoice_email_events WHERE invoice_id = ?", OPEN)).toBe(0);
     const row = sqlite.prepare("SELECT actor_user_id, actor_name, recipient_count FROM invoice_resends WHERE invoice_id = ?").get(OPEN) as {

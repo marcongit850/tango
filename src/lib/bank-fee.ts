@@ -31,6 +31,15 @@ export const BANK_TRANSFER_PROCESSING_BLOCK =
   "A bank transfer for one of these invoices is still processing. It usually takes 4 business days.";
 export const PROCESSING_BLOCK_MS = 14 * 24 * 60 * 60 * 1000;
 
+/** Invoice email line when online payments are on. Uses the saved percent and cap, such as 0.8% up to $5. */
+export function invoiceBankFeeLine(settings: BankFeeConfig): string {
+  const capCents = Number.isSafeInteger(settings.capCents) && settings.capCents > 0 ? settings.capCents : 0;
+  const dollars = Math.floor(capCents / 100);
+  const cents = capCents % 100;
+  const cap = cents === 0 ? String(dollars) : `${dollars}.${String(cents).padStart(2, "0")}`;
+  return `Pay securely online by bank transfer. A bank fee of ${formatFeePercent(settings.percentBps)}% (up to $${cap}) is added.`;
+}
+
 /** Shown with the fee. Uses the saved percent and cap, such as about 0.8%, at most $5.00. */
 export function bankTransferFeeRateNote(settings: BankFeeConfig): string {
   if (!settings.enabled || settings.percentBps <= 0 || settings.capCents <= 0) return BANK_TRANSFER_FEE_NOTE;

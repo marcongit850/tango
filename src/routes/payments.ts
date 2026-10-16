@@ -4,6 +4,7 @@ import { isDemoAssociation } from "../lib/demo";
 import { isMissingTable } from "../lib/errors";
 import { canonicalPortalUrl } from "../lib/hosts";
 import { invoiceEmailSettings, saveInvoiceEmailSetting } from "../lib/invoice-emails";
+import { invoiceMailSettings, previewInvoiceEmail, saveInvoiceMailSettings } from "../lib/invoice-mail";
 import { todayIso } from "../lib/dates";
 import { BANK_TRANSFER_FEE_UPDATED, bankTransferFeeCents, parseDisplayedFeeCents } from "../lib/bank-fee";
 import { describeLateFeeSettings, lateFeeSettingsView, saveLateFeeSettings } from "../lib/late-fees";
@@ -66,8 +67,38 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
         invoiceEmailsEnabledOn: invoiceEmails.enabledOn,
         processing: await processingCheckoutsForAssociation(c.env.DB, association.id),
         lateFees: await lateFeeSettingsView(c.env.DB, association.id),
+        mail: await invoiceMailSettings(c.env.DB, association.id),
       }),
     });
+  });
+
+  app.get("/a/:slug/admin/payment-settings/invoice-email-preview", async (c) => {
+    const { association } = requireEditor(c);
+    const letter = await previewInvoiceEmail(c.env.DB, association);
+    return new Response(letter.html, {
+      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+    });
+  });
+
+  app.post("/a/:slug/admin/payment-settings/mailed-checks", async (c) => {
+    const { association, user } = requireEditor(c);
+    const fields = await readForm(c);
+    const back = `${settingsPath(association.slug)}#mailed-checks`;
+    const saved = await saveInvoiceMailSettings(c.env.DB, association.id, {
+      payableTo: textValue(fields, "payable_to", 200),
+      mailingAddress: textValue(fields, "mailing_address", 500),
+      boardNote: textValue(fields, "board_note", 400),
+    });
+    if (!saved.ok) return redirectTo(c, back, saved.message, "warn");
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "invoice_mail_settings",
+      entityType: "invoice_mail_settings",
+      entityId: association.id,
+      detail: "Mailed check details saved.",
+    });
+    return redirectTo(c, back, "Mailed checks saved.");
   });
 
   app.post("/a/:slug/admin/payment-settings/secret", async (c) => {

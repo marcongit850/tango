@@ -219,6 +219,7 @@ describe("help placements", () => {
     expect(settings).toContain('aria-label="Help: Mailed checks"');
     expect(settings).toContain(MAILED_CHECKS_HELP);
     expect(settings).toContain("Preview invoice email");
+    expect(settings).toContain("Blank uses the association address: Tang-O-Mar, Attn: Board of Directors, 31 Tang O Mar Drive, Miramar Beach, FL 32550");
     expect(settings).toContain('aria-label="Help: Invoice emails"');
     expect(settings).toContain(INVOICE_EMAIL_HELP);
     expect(settings).toContain("Save invoice emails");

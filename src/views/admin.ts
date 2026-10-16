@@ -792,7 +792,6 @@ const PAYMENT_METHODS = [
   { value: "cash", label: "Cash" },
   { value: "ach_recorded", label: "ACH (recorded)" },
   { value: "other", label: "Other" },
-  { value: "stripe", label: "Online (Stripe)" },
 ];
 
 export function paymentInvoiceVisible(selectedLotId: string, propertyId: string): boolean {
@@ -906,10 +905,12 @@ export function paymentSettingsPage(options: {
       <h1>Payment settings</h1>
       <p>Payments: ${esc(options.status)}.</p>
       ${warnings}
-      <p class="muted">Only an admin can change these keys. Keys are encrypted and are not shown again. Activity records that a key was saved, replaced, or removed, not the key itself. Card numbers are not collected on this site. A checkout page expires after 30 minutes.</p>
+      <p class="muted">Only an admin can change these keys. Officers and people with the admin flag share that access. There is no separate treasurer role. Keys are encrypted and are not shown again. Activity records that a key was saved, replaced, or removed, not the key itself. Card numbers are not collected on this site. A checkout page expires after 30 minutes.</p>
+      <p class="muted">Test mode shows Pay now only to an admin. Owners see Pay now after a live key is saved. A test event is recorded only when it matches test mode, and a live event only when it matches live mode.</p>
       <p class="muted">Card fees (about 2.9% + 30 cents) are absorbed by the association unless the board decides otherwise. No convenience fee is added.</p>
+      <p class="muted">If two online payments for the same invoice finish at the same moment, the extra amount is recorded as unapplied credit on the lot.</p>
       <h2>Webhook</h2>
-      <p>In Stripe, open Developers, Webhooks, and add an endpoint. Paste this URL. Select <code>checkout.session.completed</code> and <code>checkout.session.async_payment_succeeded</code>.</p>
+      <p>In Stripe, open Developers, Webhooks, and add an endpoint. Paste this URL. Select <code>checkout.session.completed</code>, <code>checkout.session.async_payment_succeeded</code>, <code>charge.refunded</code>, <code>charge.dispute.created</code>, and <code>charge.dispute.closed</code>.</p>
       <p><code>${esc(options.webhookUrl)}</code></p>
       ${secretField({
         title: "Stripe secret key",
@@ -933,9 +934,14 @@ export function paymentSettingsPage(options: {
       })}
       <h2>Accept online payments</h2>
       <form class="fields" method="post" action="${base}/enabled">
-        <label><input type="checkbox" name="enabled" value="yes"${options.status === "not enabled" ? "" : " checked"}> Owners see Pay now</label>
+        <label><input type="checkbox" name="enabled" value="yes"${options.status === "not enabled" ? "" : " checked"}> Turn on Pay now</label>
         <button type="submit">Save</button>
       </form>
+      ${options.ready && options.encryptionReady && (options.secretLast4 || options.webhookLast4)
+        ? `<h2>Encryption key rotation</h2>
+           <p class="muted">After the encryption key is rotated, re-encrypt the stored keys. This does not show the keys.</p>
+           <form method="post" action="${base}/reencrypt"><button type="submit">Re-encrypt stored keys</button></form>`
+        : ""}
     </section>`;
 }
 
@@ -1100,9 +1106,12 @@ export function invoiceAdminPage(options: {
   const remaining = Number(invoice.amount_cents) + Number(invoice.late_fee_cents) - paid;
   const paymentRows = options.payments
     .map((payment) => {
-      const actions = canEdit
-        ? `<div class="actions"><a href="#edit-payment-${esc(payment.id)}">Edit</a>${confirmDeleteButton(`/a/${association.slug}/admin/invoices/${invoice.id}/payments/${payment.id}/delete`, "Delete payment", "Delete this payment")}</div>`
-        : "";
+      const stripeRecorded = payment.method === "stripe";
+      const actions = !canEdit
+        ? ""
+        : stripeRecorded
+          ? `<span class="muted">Recorded from Stripe</span>`
+          : `<div class="actions"><a href="#edit-payment-${esc(payment.id)}">Edit</a>${confirmDeleteButton(`/a/${association.slug}/admin/invoices/${invoice.id}/payments/${payment.id}/delete`, "Delete payment", "Delete this payment")}</div>`;
       return `<tr>
         <td>${dateCell(payment.paid_on, association.timezone)}</td>
         <td>${esc(methodLabel(payment.method))}</td>
@@ -1114,7 +1123,10 @@ export function invoiceAdminPage(options: {
     })
     .join("");
   const paymentForms = canEdit
-    ? options.payments.map((payment) => paymentEditForm(association.slug, invoice.id, payment, association.timezone)).join("")
+    ? options.payments
+        .filter((payment) => payment.method !== "stripe")
+        .map((payment) => paymentEditForm(association.slug, invoice.id, payment, association.timezone))
+        .join("")
     : "";
   const remove =
     options.payments.length > 0

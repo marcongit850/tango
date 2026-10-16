@@ -1,10 +1,11 @@
 import type { Hono } from "hono";
-import { writeAudit } from "../db";
+import { notifyStaff, writeAudit } from "../db";
 import { isDemoAssociation } from "../lib/demo";
 import { isMissingTable } from "../lib/errors";
 import { canonicalPortalUrl } from "../lib/hosts";
 import { todayIso } from "../lib/dates";
 import {
+  applyStripeAdjustment,
   applyStripeCheckout,
   emailStripeReceipt,
   markReceiptEmailed,
@@ -12,6 +13,7 @@ import {
   paymentSettingsView,
   paymentsReady,
   payOfferFor,
+  reencryptPaymentSecrets,
   receiptRecipients,
   removeStripeSecret,
   removeWebhookSecret,
@@ -22,8 +24,9 @@ import {
   webhookSecret,
   type PayableInvoice,
 } from "../lib/online-payments";
-import { logError } from "../lib/log";
-import { redactSecrets, isSecurePaymentRequest, parseCheckoutEvent, verifyStripeSignature } from "../lib/stripe";
+import { canEditAdmin } from "../lib/access";
+import { logError, logInfo } from "../lib/log";
+import { redactSecrets, isSecurePaymentRequest, parseStripeEvent, verifyStripeSignature } from "../lib/stripe";
 import type { AppBindings, Association } from "../types";
 import { paymentSettingsPage } from "../views/admin";
 import { render } from "../views/layout";
@@ -147,6 +150,25 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
     return redirectTo(c, back, enabled ? "Online payments turned on." : "Online payments turned off.");
   });
 
+  app.post("/a/:slug/admin/payment-settings/reencrypt", async (c) => {
+    const { association, user } = requireEditor(c);
+    await readForm(c);
+    const back = settingsPath(association.slug);
+    const saved = await reencryptPaymentSecrets(c.env, c.env.DB, association.id, user.id);
+    if (!saved.ok) return redirectTo(c, back, saved.message, "warn");
+    if (saved.changed) {
+      await writeAudit(c.env.DB, {
+        associationId: association.id,
+        actorUserId: user.id,
+        action: "payment_settings_reencrypted",
+        entityType: "payment_settings",
+        entityId: association.id,
+        detail: "Stored payment keys were re-encrypted with the current encryption key.",
+      });
+    }
+    return redirectTo(c, back, saved.changed ? "Stored payment keys were re-encrypted." : "Stored payment keys already use the current encryption key.");
+  });
+
   app.get("/a/:slug/pay", async (c) => {
     const { association, user } = requireMember(c);
     if (!isDemoAssociation(association)) {
@@ -181,11 +203,11 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/a/:slug/pay", async (c) => {
-    const { association, user } = requireMember(c);
+    const { association, user, membership } = requireMember(c);
     if (isDemoAssociation(association)) return redirectTo(c, `/a/${association.slug}/dashboard`, "Demo only, changes are not saved", "warn");
     const fields = await readForm(c);
     const back = `/a/${association.slug}/dashboard`;
-    const offer = await payOfferFor(c.env.DB, association);
+    const offer = await payOfferFor(c.env.DB, association, canEditAdmin(membership));
     if (offer.kind !== "stripe") return redirectTo(c, back, "Online payment is not available.", "warn");
     if (!isSecurePaymentRequest(c.req.url)) return redirectTo(c, back, "Online payment has to start on a secure page.", "warn");
     const today = todayIso(association.timezone);
@@ -240,10 +262,10 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
 
   app.post("/a/:slug/webhooks/stripe", async (c) => {
     const association = c.get("association");
-    if (!association || isDemoAssociation(association)) return c.json({ error: "not found" }, 404);
+    if (!association || isDemoAssociation(association)) return invalidWebhook();
     if (!isSecurePaymentRequest(c.req.url)) {
       await rejectWebhook(c, association.id, "Rejected insecure request.");
-      return c.json({ error: "https required" }, 400);
+      return invalidWebhook();
     }
     let ready = false;
     try {
@@ -251,45 +273,56 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
     } catch (error) {
       if (!isMissingTable(error)) throw error;
     }
-    if (!ready) return c.json({ error: "not found" }, 404);
+    if (!ready) return invalidWebhook();
     const declared = Number(c.req.header("content-length") ?? "");
     if (Number.isFinite(declared) && declared > MAX_WEBHOOK_BYTES) {
       await rejectWebhook(c, association.id, "Webhook body was too large.");
-      return c.json({ error: "payload too large" }, 413);
+      return invalidWebhook();
     }
-    const payload = await c.req.text();
-    if (payload.length > MAX_WEBHOOK_BYTES) {
+    const bytes = new Uint8Array(await c.req.arrayBuffer());
+    if (bytes.byteLength > MAX_WEBHOOK_BYTES) {
       await rejectWebhook(c, association.id, "Webhook body was too large.");
-      return c.json({ error: "payload too large" }, 413);
+      return invalidWebhook();
     }
     const secret = await webhookSecret(c.env, c.env.DB, association.id);
     if (!secret) {
-      const view = await paymentSettingsView(c.env, c.env.DB, association.id);
-      if (!view.webhookLast4) return c.json({ error: "not found" }, 404);
       await rejectWebhook(c, association.id, "Webhook secret could not be read.");
-      return c.json({ error: "not ready" }, 500);
+      return invalidWebhook();
     }
     const verified = await verifyStripeSignature({
       secret,
       header: c.req.header("stripe-signature") ?? null,
-      payload,
+      payload: bytes,
     });
     if (!verified.ok) {
       await rejectWebhook(c, association.id, `Stripe webhook signature rejected. Reason: ${verified.reason}.`);
-      return c.json({ error: "invalid signature" }, 400);
+      return invalidWebhook();
     }
-    const event = parseCheckoutEvent(payload);
+    const payload = new TextDecoder().decode(bytes);
+    const event = parseStripeEvent(payload);
     if (event === null) {
       await rejectWebhook(c, association.id, "Stripe webhook body could not be read. Payment was not recorded.");
       return c.json({ error: "unreadable" }, 400);
     }
-    if (event === "ignore") return c.json({ ok: true });
+    if (event.kind === "ignore") return c.json({ ok: true });
+    if (event.kind === "refund" || event.kind === "dispute") {
+      try {
+        const adjusted = await applyStripeAdjustment({ db: c.env.DB, association, event });
+        if (!adjusted.ok) await reviewWebhook(c, association, adjusted.detail, adjusted.review);
+      } catch (error) {
+        logError("payment_webhook", { message: redactSecrets(error instanceof Error ? error.message : "unknown") });
+        return c.json({ error: "not recorded" }, 500);
+      }
+      return c.json({ ok: true });
+    }
     let applied;
     try {
       applied = await applyStripeCheckout({
         db: c.env.DB,
         association,
+        livemode: event.livemode,
         eventId: event.eventId,
+        sessionId: event.sessionId,
         paymentId: event.paymentId,
         amountTotal: event.amountTotal,
         clientReferenceId: event.clientReferenceId,
@@ -302,7 +335,7 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
       return c.json({ error: "not recorded" }, 500);
     }
     if (!applied.ok) {
-      await rejectWebhook(c, association.id, applied.detail);
+      await reviewWebhook(c, association, applied.detail, applied.review);
       return c.json({ ok: true });
     }
     if (!applied.applied.emailed) {
@@ -332,8 +365,27 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
   });
 }
 
+function invalidWebhook(): Response {
+  return Response.json({ error: "invalid request" }, { status: 400 });
+}
+
+const WEBHOOK_AUDIT_WINDOW_MS = 60 * 1000;
+
 async function rejectWebhook(c: { env: Env }, associationId: string, detail: string): Promise<void> {
   try {
+    const cutoff = new Date(Date.now() - WEBHOOK_AUDIT_WINDOW_MS).toISOString();
+    const recent = await c.env.DB
+      .prepare(
+        `SELECT id FROM audit_log
+         WHERE association_id = ? AND action = 'payment_webhook_rejected' AND created_at >= ?
+         LIMIT 1`,
+      )
+      .bind(associationId, cutoff)
+      .first<{ id: string }>();
+    if (recent) {
+      logInfo("payment_webhook_rejected_suppressed", { associationId });
+      return;
+    }
     await writeAudit(c.env.DB, {
       associationId,
       actorUserId: null,
@@ -344,6 +396,50 @@ async function rejectWebhook(c: { env: Env }, associationId: string, detail: str
     });
   } catch (error) {
     logError("payment_webhook_audit", { message: redactSecrets(error instanceof Error ? error.message : "unknown") });
+  }
+}
+
+async function reviewWebhook(
+  c: { env: Env },
+  association: Association,
+  detail: string,
+  review: boolean,
+): Promise<void> {
+  const action = review ? "payment_needs_review" : "payment_livemode_mismatch";
+  try {
+    if (!review) {
+      const cutoff = new Date(Date.now() - WEBHOOK_AUDIT_WINDOW_MS).toISOString();
+      const recent = await c.env.DB
+        .prepare(
+          `SELECT id FROM audit_log
+           WHERE association_id = ? AND action = ? AND created_at >= ?
+           LIMIT 1`,
+        )
+        .bind(association.id, action, cutoff)
+        .first<{ id: string }>();
+      if (recent) {
+        logInfo("payment_webhook_rejected_suppressed", { associationId: association.id });
+        return;
+      }
+    }
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: null,
+      action,
+      entityType: "payment",
+      entityId: "webhook",
+      detail,
+    });
+    if (!review) return;
+    await notifyStaff(c.env.DB, {
+      associationId: association.id,
+      kind: "account",
+      title: "Online payment needs review",
+      body: detail,
+      href: `/a/${association.slug}/admin/ledger`,
+    });
+  } catch (error) {
+    logError("payment_webhook_notice", { message: redactSecrets(error instanceof Error ? error.message : "unknown") });
   }
 }
 

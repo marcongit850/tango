@@ -74,21 +74,13 @@ export function isStripeCheckoutUrl(value: string): boolean {
 }
 
 export async function stripeSignatureHex(secret: string, timestamp: number, payload: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signed = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${timestamp}.${payload}`));
-  return [...new Uint8Array(signed)].map((value) => value.toString(16).padStart(2, "0")).join("");
+  return hmacHex(secret, signedMessage(timestamp, payload));
 }
 
 export async function verifyStripeSignature(input: {
   secret: string;
   header: string | null;
-  payload: string;
+  payload: string | Uint8Array;
   nowSeconds?: number;
   toleranceSeconds?: number;
 }): Promise<{ ok: true } | { ok: false; reason: SignatureFailure }> {
@@ -98,7 +90,7 @@ export async function verifyStripeSignature(input: {
   const now = input.nowSeconds ?? Math.floor(Date.now() / 1000);
   const tolerance = input.toleranceSeconds ?? SIGNATURE_TOLERANCE_SECONDS;
   if (Math.abs(now - parsed.timestamp) > tolerance) return { ok: false, reason: "stale timestamp" };
-  const expected = await stripeSignatureHex(input.secret, parsed.timestamp, input.payload);
+  const expected = await hmacHex(input.secret, signedMessage(parsed.timestamp, input.payload));
   let match = false;
   for (const candidate of parsed.signatures) {
     const equal = await fixedTimeEqual(expected, candidate);
@@ -106,6 +98,35 @@ export async function verifyStripeSignature(input: {
   }
   if (!match) return { ok: false, reason: "signature mismatch" };
   return { ok: true };
+}
+
+/** True when a Stripe event's livemode matches the saved secret key. A missing livemode does not match. */
+export function livemodeMatchesKey(livemode: boolean | null, mode: StripeKeyMode | ""): boolean {
+  if (livemode === null) return false;
+  if (mode === "live") return livemode;
+  if (mode === "test") return !livemode;
+  return false;
+}
+
+async function hmacHex(secret: string, message: Uint8Array): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signed = await crypto.subtle.sign("HMAC", key, message);
+  return [...new Uint8Array(signed)].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+function signedMessage(timestamp: number, payload: string | Uint8Array): Uint8Array {
+  if (typeof payload === "string") return new TextEncoder().encode(`${timestamp}.${payload}`);
+  const prefix = new TextEncoder().encode(`${timestamp}.`);
+  const message = new Uint8Array(prefix.length + payload.length);
+  message.set(prefix, 0);
+  message.set(payload, prefix.length);
+  return message;
 }
 
 function parseSignatureHeader(header: string): { timestamp: number; signatures: string[] } | null {
@@ -195,6 +216,8 @@ export async function createCheckoutSession(
 }
 
 export type ParsedCheckoutEvent = {
+  kind: "checkout";
+  livemode: boolean | null;
   eventId: string;
   paid: boolean;
   sessionId: string;
@@ -208,8 +231,34 @@ export type ParsedCheckoutEvent = {
   userId: string;
 };
 
+export type ParsedRefundEvent = {
+  kind: "refund";
+  livemode: boolean | null;
+  eventId: string;
+  paymentId: string;
+  chargeId: string;
+  amountRefunded: number;
+  currency: string;
+  neighborhoodId: string;
+};
+
+export type ParsedDisputeEvent = {
+  kind: "dispute";
+  livemode: boolean | null;
+  eventId: string;
+  action: "created" | "closed";
+  disputeId: string;
+  paymentId: string;
+  amount: number;
+  status: string;
+  currency: string;
+  neighborhoodId: string;
+};
+
+export type ParsedStripeEvent = { kind: "ignore" } | ParsedCheckoutEvent | ParsedRefundEvent | ParsedDisputeEvent;
+
 /** Reads only the fields we record. Card numbers and payment method details are ignored. */
-export function parseCheckoutEvent(payload: string): ParsedCheckoutEvent | "ignore" | null {
+export function parseStripeEvent(payload: string): ParsedStripeEvent | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(payload);
@@ -217,12 +266,20 @@ export function parseCheckoutEvent(payload: string): ParsedCheckoutEvent | "igno
     return null;
   }
   if (!parsed || typeof parsed !== "object") return null;
-  const event = parsed as { id?: unknown; type?: unknown; data?: { object?: unknown } };
+  const event = parsed as { id?: unknown; type?: unknown; livemode?: unknown; data?: { object?: unknown } };
   if (typeof event.id !== "string" || event.id.length < 4 || event.id.length > 255) return null;
-  if (event.type !== "checkout.session.completed" && event.type !== "checkout.session.async_payment_succeeded") {
-    return "ignore";
+  const livemode = typeof event.livemode === "boolean" ? event.livemode : null;
+  if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
+    return parseCheckout(event.id, livemode, event.data?.object);
   }
-  const session = event.data?.object;
+  if (event.type === "charge.refunded") return parseRefund(event.id, livemode, event.data?.object);
+  if (event.type === "charge.dispute.created" || event.type === "charge.dispute.closed") {
+    return parseDispute(event.id, livemode, event.type === "charge.dispute.created" ? "created" : "closed", event.data?.object);
+  }
+  return { kind: "ignore" };
+}
+
+function parseCheckout(eventId: string, livemode: boolean | null, session: unknown): ParsedStripeEvent | null {
   if (!session || typeof session !== "object") return null;
   const row = session as {
     id?: unknown;
@@ -234,16 +291,16 @@ export function parseCheckoutEvent(payload: string): ParsedCheckoutEvent | "igno
     metadata?: unknown;
   };
   if (typeof row.id !== "string" || !row.id.startsWith("cs_")) return null;
-  const paid = row.payment_status === "paid";
-  if (!paid) return "ignore";
+  if (row.payment_status !== "paid") return { kind: "ignore" };
   if (typeof row.amount_total !== "number" || !Number.isSafeInteger(row.amount_total) || row.amount_total <= 0) return null;
   if (row.currency !== "usd") return null;
-  const paymentIntent = row.payment_intent;
-  const paymentId = typeof paymentIntent === "string" && paymentIntent.startsWith("pi_") ? paymentIntent : row.id;
+  const paymentId = paymentIntentId(row.payment_intent) || row.id;
   if (typeof row.client_reference_id !== "string" || !row.client_reference_id) return null;
   const metadata = metadataStrings(row.metadata);
   return {
-    eventId: event.id,
+    kind: "checkout",
+    livemode,
+    eventId,
     paid: true,
     sessionId: row.id,
     amountTotal: row.amount_total,
@@ -255,6 +312,74 @@ export function parseCheckoutEvent(payload: string): ParsedCheckoutEvent | "igno
     invoiceIds: metadata.invoice_ids,
     userId: metadata.user_id,
   };
+}
+
+function parseRefund(eventId: string, livemode: boolean | null, charge: unknown): ParsedStripeEvent | null {
+  if (!charge || typeof charge !== "object") return null;
+  const row = charge as {
+    id?: unknown;
+    amount_refunded?: unknown;
+    currency?: unknown;
+    payment_intent?: unknown;
+    metadata?: unknown;
+  };
+  if (typeof row.id !== "string" || !row.id.startsWith("ch_")) return null;
+  if (typeof row.amount_refunded !== "number" || !Number.isSafeInteger(row.amount_refunded) || row.amount_refunded < 0) return null;
+  if (row.currency !== "usd") return null;
+  const metadata = metadataStrings(row.metadata);
+  return {
+    kind: "refund",
+    livemode,
+    eventId,
+    paymentId: paymentIntentId(row.payment_intent),
+    chargeId: row.id,
+    amountRefunded: row.amount_refunded,
+    currency: "usd",
+    neighborhoodId: metadata.neighborhood_id || metadata.association_id,
+  };
+}
+
+function parseDispute(
+  eventId: string,
+  livemode: boolean | null,
+  action: "created" | "closed",
+  dispute: unknown,
+): ParsedStripeEvent | null {
+  if (!dispute || typeof dispute !== "object") return null;
+  const row = dispute as {
+    id?: unknown;
+    amount?: unknown;
+    currency?: unknown;
+    status?: unknown;
+    payment_intent?: unknown;
+    metadata?: unknown;
+  };
+  if (typeof row.id !== "string" || !row.id.startsWith("dp_")) return null;
+  if (typeof row.amount !== "number" || !Number.isSafeInteger(row.amount) || row.amount <= 0) return null;
+  if (row.currency !== "usd") return null;
+  if (typeof row.status !== "string" || !row.status) return null;
+  const metadata = metadataStrings(row.metadata);
+  return {
+    kind: "dispute",
+    livemode,
+    eventId,
+    action,
+    disputeId: row.id,
+    paymentId: paymentIntentId(row.payment_intent),
+    amount: row.amount,
+    status: row.status,
+    currency: "usd",
+    neighborhoodId: metadata.neighborhood_id || metadata.association_id,
+  };
+}
+
+function paymentIntentId(value: unknown): string {
+  if (typeof value === "string" && value.startsWith("pi_")) return value;
+  if (value && typeof value === "object" && "id" in value) {
+    const id = (value as { id?: unknown }).id;
+    if (typeof id === "string" && id.startsWith("pi_")) return id;
+  }
+  return "";
 }
 
 function metadataStrings(value: unknown): Record<string, string> {

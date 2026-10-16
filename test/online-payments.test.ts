@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
-import { decryptPaymentSecret, encryptPaymentSecret } from "../src/lib/payment-crypto";
+import { decryptPaymentSecret, encryptPaymentSecret, paymentKeyRing } from "../src/lib/payment-crypto";
 import { checkoutAmountCents, checkoutUrls, stripeSignatureHex, verifyStripeSignature } from "../src/lib/stripe";
 import { sha256Hex } from "../src/lib/tokens";
 
@@ -74,6 +74,7 @@ const MIGRATIONS = [
   "migrations/0017_neighborhood_codes.sql",
   "migrations/0018_fee_schedule.sql",
   "migrations/0019_online_payments.sql",
+  "migrations/0020_payment_controls.sql",
 ];
 
 const SECRET_KEY = "sk_test_5123456789abcdef";
@@ -179,13 +180,18 @@ describe("stripe signature", () => {
     });
   });
 
-  it("encrypts a stripe key so the stored value is not the key", async () => {
+  it("encrypts a stripe key so the stored value is not the key and is bound to the neighborhood", async () => {
     const material = encryptionKey();
-    const stored = await encryptPaymentSecret(material, SECRET_KEY);
+    const ring = paymentKeyRing({ PAYMENT_ENCRYPTION_KEY: material } as unknown as Env);
+    expect(ring?.currentKid).toBe("1");
+    const stored = await encryptPaymentSecret(ring!, "assoc_tango_mar", "secret_key", SECRET_KEY);
     expect(stored).not.toContain(SECRET_KEY);
-    expect(stored.startsWith("v1.")).toBe(true);
-    expect(await decryptPaymentSecret(material, stored)).toBe(SECRET_KEY);
-    await expect(decryptPaymentSecret(encryptionKey(), stored)).rejects.toThrow();
+    expect(stored.startsWith("v2.1.")).toBe(true);
+    expect(await decryptPaymentSecret(ring!, "assoc_tango_mar", "secret_key", stored)).toBe(SECRET_KEY);
+    await expect(decryptPaymentSecret(ring!, "assoc_other", "secret_key", stored)).rejects.toThrow();
+    await expect(decryptPaymentSecret(ring!, "assoc_tango_mar", "webhook_secret", stored)).rejects.toThrow();
+    const other = paymentKeyRing({ PAYMENT_ENCRYPTION_KEY: encryptionKey() } as unknown as Env);
+    await expect(decryptPaymentSecret(other!, "assoc_tango_mar", "secret_key", stored)).rejects.toThrow();
   });
 });
 
@@ -286,15 +292,46 @@ describe("online payments", () => {
       expect(row.detail).not.toContain(WEBHOOK_SECRET);
     }
 
-    const dashboard = await app.request("http://localhost/a/tango-mar/dashboard", { headers: { Cookie: `tango_session=${casey}` } }, env);
-    expect(await dashboard.text()).toContain("Pay now");
+    const ownerDash = await app.request("http://localhost/a/tango-mar/dashboard", { headers: { Cookie: `tango_session=${casey}` } }, env);
+    expect(ownerDash.headers.get("Content-Security-Policy")).toContain("form-action 'self' https://checkout.stripe.com");
+    expect(await ownerDash.text()).not.toContain("Pay now");
+    const ownerPay = await app.request(formRequest("/a/tango-mar/pay", casey, { invoice_id: "invoice_casey_open" }), {}, env);
+    expect(ownerPay.status).toBe(303);
+    expect(ownerPay.headers.get("Location") ?? "").not.toContain("checkout.stripe.com");
+
+    sqlite.prepare("UPDATE memberships SET is_admin = 1 WHERE user_id = 'user_casey'").run();
+    const adminDash = await app.request("http://localhost/a/tango-mar/dashboard", { headers: { Cookie: `tango_session=${casey}` } }, env);
+    expect(await adminDash.text()).toContain("Pay now");
+
+    const nowIso = new Date().toISOString();
+    const laterIso = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+    for (let index = 0; index < 10; index += 1) {
+      sqlite
+        .prepare(
+          `INSERT INTO checkout_intents (
+             id, association_id, user_id, amount_cents, allocation_json, lot_numbers, stripe_session_id, expires_at, created_at
+           ) VALUES (?, 'assoc_tango_mar', 'user_casey', 1, ?, '1', '', ?, ?)`,
+        )
+        .run(
+          `intent_limit_${index}`,
+          JSON.stringify([{ invoiceId: `other_${index}`, propertyId: "prop_x", lotNumber: "1", invoiceNumber: "n", amountCents: 1 }]),
+          laterIso,
+          nowIso,
+        );
+    }
+    const limited = await app.request(formRequest("/a/tango-mar/pay", casey, { invoice_id: "invoice_casey_open" }), {}, env);
+    expect(limited.status).toBe(303);
+    expect(limited.headers.get("Location") ?? "").not.toContain("checkout.stripe.com");
+    sqlite.prepare("DELETE FROM checkout_intents").run();
 
     let stripeBody = "";
     let stripeAuth = "";
+    const idempotencyKeys: string[] = [];
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).includes("api.stripe.com")) {
         stripeBody = String(init?.body ?? "");
         stripeAuth = new Headers(init?.headers).get("Authorization") ?? "";
+        idempotencyKeys.push(new Headers(init?.headers).get("Idempotency-Key") ?? "");
       }
       return new Response(JSON.stringify({ id: "cs_test_session", url: "https://checkout.stripe.com/c/pay/cs_test_session" }), {
         status: 200,
@@ -317,8 +354,14 @@ describe("online payments", () => {
     expect(stripeBody).not.toContain("card%5Bnumber%5D");
     expect(stripeBody).not.toContain(SECRET_KEY);
     expect(stripeAuth).toBe(`Bearer ${SECRET_KEY}`);
+    const payAgain = await app.request(formRequest("/a/tango-mar/pay", casey, { invoice_id: "invoice_casey_open" }), {}, env);
+    expect(payAgain.status).toBe(303);
+    expect(payAgain.headers.get("Location")).toBe("https://checkout.stripe.com/c/pay/cs_test_session");
+    expect(idempotencyKeys).toHaveLength(2);
+    expect(idempotencyKeys[0]).toBe(idempotencyKeys[1]);
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM checkout_intents")).toBe(1);
 
-    const intent = sqlite.prepare("SELECT id, amount_cents, expires_at FROM checkout_intents").get() as {
+    const intent = sqlite.prepare("SELECT id, amount_cents, expires_at, stripe_session_id FROM checkout_intents").get() as {
       id: string;
       amount_cents: number;
       expires_at: string;
@@ -328,6 +371,7 @@ describe("online payments", () => {
 
     const payload = JSON.stringify({
       id: "evt_test_paid",
+      livemode: false,
       type: "checkout.session.completed",
       data: {
         object: {
@@ -382,6 +426,7 @@ describe("online payments", () => {
 
     const replay = JSON.stringify({
       id: "evt_test_paid_replay",
+      livemode: false,
       type: "checkout.session.completed",
       data: {
         object: {
@@ -410,6 +455,107 @@ describe("online payments", () => {
     expect(rejected.detail).toContain("signature mismatch");
     expect(rejected.detail).not.toContain(WEBHOOK_SECRET);
     expect(rejected.detail).not.toContain(SECRET_KEY);
+    const flooded = await postWebhook(payload, `t=${timestamp},v1=${"cd".repeat(32)}`);
+    expect(flooded.status).toBe(400);
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'payment_webhook_rejected'")).toBe(1);
+
+    const liveMode = JSON.stringify({
+      id: "evt_live_mismatch",
+      livemode: true,
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_test_session",
+          payment_status: "paid",
+          amount_total: 40050,
+          currency: "usd",
+          payment_intent: "pi_live_should_not_post",
+          client_reference_id: intent.id,
+          metadata: { neighborhood_id: "assoc_tango_mar", invoice_ids: "invoice_casey_open", user_id: "user_casey" },
+        },
+      },
+    });
+    const liveSignature = await stripeSignatureHex(WEBHOOK_SECRET, timestamp, liveMode);
+    const ignored = await postWebhook(liveMode, `t=${timestamp},v1=${liveSignature}`);
+    expect(ignored.status).toBe(200);
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM payments WHERE method = 'stripe'")).toBe(1);
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'payment_livemode_mismatch'")).toBe(1);
+
+    const opened = JSON.stringify({
+      id: "evt_dispute_open",
+      livemode: false,
+      type: "charge.dispute.created",
+      data: {
+        object: {
+          id: "dp_test_open",
+          amount: 40050,
+          currency: "usd",
+          status: "needs_response",
+          payment_intent: "pi_test_recorded",
+        },
+      },
+    });
+    const openSignature = await stripeSignatureHex(WEBHOOK_SECRET, timestamp, opened);
+    expect((await postWebhook(opened, `t=${timestamp},v1=${openSignature}`)).status).toBe(200);
+    expect((sqlite.prepare("SELECT status FROM invoices WHERE id = 'invoice_casey_open'").get() as { status: string }).status).toBe("open");
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM payment_reversals WHERE status = 'open'")).toBe(1);
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE title = 'Online dispute'")).toBeGreaterThan(0);
+
+    const closed = JSON.stringify({
+      id: "evt_dispute_won",
+      livemode: false,
+      type: "charge.dispute.closed",
+      data: {
+        object: {
+          id: "dp_test_open",
+          amount: 40050,
+          currency: "usd",
+          status: "won",
+          payment_intent: "pi_test_recorded",
+        },
+      },
+    });
+    const closedSignature = await stripeSignatureHex(WEBHOOK_SECRET, timestamp, closed);
+    expect((await postWebhook(closed, `t=${timestamp},v1=${closedSignature}`)).status).toBe(200);
+    expect((sqlite.prepare("SELECT status FROM invoices WHERE id = 'invoice_casey_open'").get() as { status: string }).status).toBe("paid");
+    expect((sqlite.prepare("SELECT status FROM payment_reversals WHERE stripe_object_id = 'dp_test_open'").get() as { status: string }).status).toBe("won");
+
+    const refund = JSON.stringify({
+      id: "evt_refund",
+      livemode: false,
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_test_refund",
+          amount_refunded: 40050,
+          currency: "usd",
+          payment_intent: "pi_test_recorded",
+        },
+      },
+    });
+    const refundSignature = await stripeSignatureHex(WEBHOOK_SECRET, timestamp, refund);
+    expect((await postWebhook(refund, `t=${timestamp},v1=${refundSignature}`)).status).toBe(200);
+    expect((await postWebhook(refund, `t=${timestamp},v1=${refundSignature}`)).status).toBe(200);
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM payment_reversals WHERE kind = 'refund'")).toBe(1);
+    expect((sqlite.prepare("SELECT status FROM invoices WHERE id = 'invoice_casey_open'").get() as { status: string }).status).toBe("open");
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE title = 'Online refund'")).toBeGreaterThan(0);
+
+    const hand = await app.request(
+      formRequest("/a/tango-mar/admin/payments", jordan, {
+        property_id: "prop_27",
+        amount: "10.00",
+        method: "stripe",
+        paid_on: "2026-10-16",
+      }),
+      {},
+      env,
+    );
+    expect(hand.status).toBe(303);
+    expect(count(sqlite, "SELECT COUNT(*) AS n FROM payments WHERE method = 'stripe'")).toBe(1);
+
+    expect(() => sqlite.exec("DELETE FROM audit_log")).toThrow();
+    expect(() => sqlite.exec("UPDATE audit_log SET detail = 'changed'")).toThrow();
+    sqlite.exec("UPDATE audit_log SET actor_user_id = NULL WHERE action = 'payment_record'");
   });
 
   it("shows the demo sample checkout without saving a payment", async () => {

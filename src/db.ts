@@ -21,6 +21,7 @@ import {
   loadBillingInputs,
   propertyFeeBlockCount,
   clearPropertyFeeLinks,
+  tableExists,
   type InvoiceLineRecord,
 } from "./lib/fee-schedule-store";
 import { isForeignKey, isMissingColumn, isMissingTable } from "./lib/errors";
@@ -385,12 +386,34 @@ function mapBalance(row: BalanceQueryRow): BalanceRow {
 // amount stays off the balance until the assessment opens. Recorded payments
 // still count immediately. Past due requires both the issue date and the due
 // date to have passed, so a scheduled future year is never past due.
-function balanceSqlTail(excludeLinedInvoices: boolean): string {
+export async function paymentReversalsReady(db: D1Database): Promise<boolean> {
+  return tableExists(db, "payment_reversals");
+}
+
+/** Net cents paid on invoice alias i. Won disputes are not subtracted. */
+export function invoiceNetPaidSql(reversals: boolean): string {
+  const paid = `COALESCE((SELECT SUM(amount_cents) FROM payments pay WHERE pay.invoice_id = i.id AND pay.association_id = i.association_id), 0)`;
+  if (!reversals) return paid;
+  const reversed = `COALESCE((SELECT SUM(amount_cents) FROM payment_reversals rev WHERE rev.invoice_id = i.id AND rev.association_id = i.association_id AND rev.status != 'won'), 0)`;
+  return `(${paid} - ${reversed})`;
+}
+
+function balanceSqlTail(excludeLinedInvoices: boolean, reversals: boolean): string {
   const excludeInvoice = excludeLinedInvoices
     ? "AND NOT EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = i.id AND l.association_id = i.association_id)"
     : "";
   const excludePayment = excludeLinedInvoices
     ? "AND (pay.invoice_id IS NULL OR NOT EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = pay.invoice_id AND l.association_id = pay.association_id))"
+    : "";
+  const excludeReversal = excludeLinedInvoices
+    ? "AND (rev.invoice_id IS NULL OR NOT EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = rev.invoice_id AND l.association_id = rev.association_id))"
+    : "";
+  const reversalSql = reversals
+    ? `- COALESCE((
+      SELECT SUM(amount_cents) FROM payment_reversals rev
+      WHERE rev.property_id = p.id AND rev.association_id = p.association_id AND rev.status != 'won'
+        ${excludeReversal}
+    ), 0)`
     : "";
   return `
     COALESCE((
@@ -409,7 +432,7 @@ function balanceSqlTail(excludeLinedInvoices: boolean): string {
       SELECT SUM(amount_cents) FROM payments pay
       WHERE pay.property_id = p.id AND pay.association_id = p.association_id
         ${excludePayment}
-    ), 0) AS payment_cents,
+    ), 0) ${reversalSql} AS payment_cents,
     CASE WHEN EXISTS (
       SELECT 1 FROM invoices i
       WHERE i.property_id = p.id AND i.association_id = p.association_id
@@ -421,6 +444,7 @@ function balanceSqlTail(excludeLinedInvoices: boolean): string {
 }
 
 async function balanceSql(db: D1Database, excludeLinedInvoices: boolean): Promise<string> {
+  const reversals = await tableExists(db, "payment_reversals");
   const names = await columnNames(db, "properties");
   const place = ["city", "state", "postal_code"]
     .map((column) => (names.has(column) ? `p.${column}` : `'' AS ${column}`))
@@ -435,7 +459,7 @@ async function balanceSql(db: D1Database, excludeLinedInvoices: boolean): Promis
     p.street_address,
     ${place},
     ${extra},
-    ${balanceSqlTail(excludeLinedInvoices)}`;
+    ${balanceSqlTail(excludeLinedInvoices, reversals)}`;
 }
 
 async function withLineBalances(db: D1Database, associationId: string, rows: BalanceRow[], today: string): Promise<BalanceRow[]> {
@@ -499,6 +523,34 @@ async function withLineBalances(db: D1Database, associationId: string, rows: Bal
   }));
   const paidByInvoice = new Map(paidRows.map((row) => [row.invoice_id, Number(row.paid_cents)]));
   const futurePaid = new Map(futureRows.map((row) => [row.property_id, Number(row.paid_cents)]));
+  if (await tableExists(db, "payment_reversals")) {
+    const { results: reversedRows } = await db
+      .prepare(
+        `SELECT invoice_id, SUM(amount_cents) AS reversed_cents
+         FROM payment_reversals
+         WHERE association_id = ? AND status != 'won' AND invoice_id IS NOT NULL
+         GROUP BY invoice_id`,
+      )
+      .bind(associationId)
+      .all<{ invoice_id: string; reversed_cents: number }>();
+    for (const row of reversedRows) {
+      paidByInvoice.set(row.invoice_id, (paidByInvoice.get(row.invoice_id) ?? 0) - Number(row.reversed_cents));
+    }
+    const { results: futureReversed } = await db
+      .prepare(
+        `SELECT i.property_id AS property_id, SUM(rev.amount_cents) AS reversed_cents
+         FROM payment_reversals rev
+         JOIN invoices i ON i.id = rev.invoice_id AND i.association_id = rev.association_id
+         WHERE rev.association_id = ? AND rev.status != 'won' AND i.issued_on > ?
+           AND EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = i.id AND l.association_id = i.association_id)
+         GROUP BY i.property_id`,
+      )
+      .bind(associationId, today)
+      .all<{ property_id: string; reversed_cents: number }>();
+    for (const row of futureReversed) {
+      futurePaid.set(row.property_id, (futurePaid.get(row.property_id) ?? 0) - Number(row.reversed_cents));
+    }
+  }
   return adjustBalancesForLines(rows, lines, paidByInvoice, futurePaid, today);
 }
 
@@ -609,11 +661,12 @@ export async function invoicesForUser(
   userId: string,
   today: string,
 ): Promise<InvoiceRow[]> {
+  const reversals = await paymentReversalsReady(db);
   const { results } = await db
     .prepare(
       `SELECT i.id, i.property_id, p.lot_number, i.invoice_number, i.description, i.amount_cents,
               i.late_fee_cents, i.issued_on, i.due_on, i.status,
-              COALESCE((SELECT SUM(amount_cents) FROM payments pay WHERE pay.invoice_id = i.id AND pay.association_id = i.association_id), 0) AS paid_cents
+              ${invoiceNetPaidSql(reversals)} AS paid_cents
        FROM invoices i
        JOIN properties p ON p.id = i.property_id AND p.association_id = i.association_id
        JOIN property_owners po ON po.property_id = p.id AND po.association_id = p.association_id
@@ -631,11 +684,12 @@ export async function invoiceById(
   associationId: string,
   invoiceId: string,
 ): Promise<InvoiceRow | null> {
+  const reversals = await paymentReversalsReady(db);
   const row = await db
     .prepare(
       `SELECT i.id, i.property_id, p.lot_number, i.invoice_number, i.description, i.amount_cents,
               i.late_fee_cents, i.issued_on, i.due_on, i.status,
-              COALESCE((SELECT SUM(amount_cents) FROM payments pay WHERE pay.invoice_id = i.id AND pay.association_id = i.association_id), 0) AS paid_cents
+              ${invoiceNetPaidSql(reversals)} AS paid_cents
        FROM invoices i
        JOIN properties p ON p.id = i.property_id AND p.association_id = i.association_id
        WHERE i.association_id = ? AND i.id = ?`,
@@ -648,13 +702,11 @@ export async function invoiceById(
 }
 
 export async function outstandingInvoiceCents(db: D1Database, associationId: string, today: string): Promise<number> {
+  const reversals = await paymentReversalsReady(db);
   const row = await db
     .prepare(
       `SELECT COALESCE(SUM(
-         i.amount_cents + i.late_fee_cents - COALESCE((
-           SELECT SUM(pay.amount_cents) FROM payments pay
-           WHERE pay.invoice_id = i.id AND pay.association_id = i.association_id
-         ), 0)
+         i.amount_cents + i.late_fee_cents - ${invoiceNetPaidSql(reversals)}
        ), 0) AS outstanding_cents
        FROM invoices i
        WHERE i.association_id = ? AND i.status IN ('open', 'partial')
@@ -671,6 +723,7 @@ export async function invoicesForProperty(
   propertyId: string,
 ): Promise<InvoiceRow[]> {
   const lined = await invoiceLinesReady(db);
+  const reversals = await paymentReversalsReady(db);
   const lineMatch = lined
     ? `OR EXISTS (
          SELECT 1 FROM invoice_lines l
@@ -681,7 +734,7 @@ export async function invoicesForProperty(
     .prepare(
       `SELECT i.id, i.property_id, p.lot_number, i.invoice_number, i.description, i.amount_cents,
               i.late_fee_cents, i.issued_on, i.due_on, i.status,
-              COALESCE((SELECT SUM(amount_cents) FROM payments pay WHERE pay.invoice_id = i.id AND pay.association_id = i.association_id), 0) AS paid_cents
+              ${invoiceNetPaidSql(reversals)} AS paid_cents
        FROM invoices i
        JOIN properties p ON p.id = i.property_id AND p.association_id = i.association_id
        WHERE i.association_id = ? AND (i.property_id = ? ${lineMatch})

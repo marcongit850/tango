@@ -45,7 +45,7 @@ function payControl(slug: string, pay: OwnerPayOffer | undefined, input: { invoi
 function payNote(pay: OwnerPayOffer | undefined): string {
   if (!pay || pay.kind === "off") return "";
   if (pay.kind === "demo") return `<p class="muted">Sample checkout. Nothing is charged. Nothing here is real or saved.</p>`;
-  if (pay.mode === "test") return `<p class="muted">Test mode. No real charge.</p>`;
+  if (pay.mode === "test") return `<p class="muted">Test mode. No real charge. Owners do not see Pay now until the key is live.</p>`;
   return "";
 }
 

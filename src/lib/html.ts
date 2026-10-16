@@ -23,7 +23,10 @@ export function htmlResponse(body: string, status = 200, extra?: HeadersInit): R
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("Referrer-Policy", "same-origin");
   headers.set("X-Frame-Options", "DENY");
-  headers.set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+  headers.set(
+    "Content-Security-Policy",
+    "default-src 'self'; style-src 'unsafe-inline'; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'; base-uri 'none'",
+  );
   return new Response(body, { status, headers });
 }
 

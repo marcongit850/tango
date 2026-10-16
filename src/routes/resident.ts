@@ -81,7 +81,7 @@ const MESSAGE_FILES_UNAVAILABLE =
 
 export function registerResidentRoutes(app: Hono<AppBindings>): void {
   app.get("/a/:slug/dashboard", async (c) => {
-    const { association, user } = requireMember(c);
+    const { association, user, membership } = requireMember(c);
     const today = todayIso(association.timezone);
     const now = new Date().toISOString();
     const [ledger, upcoming, invoices, payments, notices, announcements, events] = await Promise.all([
@@ -113,7 +113,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
         news: announcements.filter((item) => item.kind !== "emergency"),
         events: upcomingEvents,
         today,
-        pay: await payOfferFor(c.env.DB, association),
+        pay: await payOfferFor(c.env.DB, association, canEditAdmin(membership)),
       }),
     });
   });
@@ -435,21 +435,26 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
   });
 
   app.get("/a/:slug/invoices", async (c) => {
-    const { association, user } = requireMember(c);
+    const { association, user, membership } = requireMember(c);
     const invoices = await invoicesForUser(c.env.DB, association.id, user.id, todayIso(association.timezone));
-    const pay = await payOfferFor(c.env.DB, association);
+    const pay = await payOfferFor(c.env.DB, association, canEditAdmin(membership));
     return render(c, { title: "Invoices", active: "dashboard", body: invoiceListPage(association, invoices, pay) });
   });
 
   app.get("/a/:slug/invoices/:invoiceId", async (c) => {
-    const { association } = requireMember(c);
+    const { association, membership } = requireMember(c);
     const invoice = await invoiceById(c.env.DB, association.id, c.req.param("invoiceId"));
     if (!invoice) throw new NotFoundError();
     await assertPropertyAccess(c, association.id, invoice.property_id);
     return render(c, {
       title: invoice.invoice_number,
       active: "dashboard",
-      body: invoiceDetailPage(association, invoice, todayIso(association.timezone), await payOfferFor(c.env.DB, association)),
+      body: invoiceDetailPage(
+        association,
+        invoice,
+        todayIso(association.timezone),
+        await payOfferFor(c.env.DB, association, canEditAdmin(membership)),
+      ),
     });
   });
 

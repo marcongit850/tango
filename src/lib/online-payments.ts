@@ -1,4 +1,4 @@
-import { listStaffContacts } from "../db";
+import { invoiceNetPaidSql, listStaffContacts, paymentReversalsReady } from "../db";
 import { invoiceStatus } from "./money";
 import { formatMoney } from "./money";
 import { todayIso } from "./dates";
@@ -9,16 +9,19 @@ import { tableExists } from "./fee-schedule-store";
 import { canonicalPortalUrl } from "./hosts";
 import { clip } from "./html";
 import { logError } from "./log";
-import { decryptPaymentSecret, encryptPaymentSecret, paymentEncryptionKey } from "./payment-crypto";
+import { decryptPaymentSecret, encryptPaymentSecret, paymentKeyRing } from "./payment-crypto";
 import {
   checkoutAmountCents,
   checkoutUrls,
   CHECKOUT_TTL_SECONDS,
   createCheckoutSession,
   isWebhookSecret,
+  livemodeMatchesKey,
   redactSecrets,
   secretLast4,
   stripeSecretMode,
+  type ParsedDisputeEvent,
+  type ParsedRefundEvent,
   type StripeKeyMode,
 } from "./stripe";
 import { sha256Hex } from "./tokens";
@@ -59,14 +62,17 @@ export type PayableInvoice = {
 };
 
 const ONLINE_NOTE = "Online (Stripe)";
+const CHECKOUT_START_LIMIT = 10;
+const CHECKOUT_START_WINDOW_MS = 10 * 60 * 1000;
 
-export async function payOfferFor(db: D1Database, association: Association): Promise<OwnerPayOffer> {
+export async function payOfferFor(db: D1Database, association: Association, canEdit: boolean): Promise<OwnerPayOffer> {
   if (isDemoAssociation(association)) return { kind: "demo" };
   try {
     const row = await settingsRow(db, association.id);
     if (!row || Number(row.enabled) !== 1) return { kind: "off" };
     if (row.secret_key_mode !== "test" && row.secret_key_mode !== "live") return { kind: "off" };
     if (!row.secret_key_ciphertext || !row.webhook_secret_ciphertext) return { kind: "off" };
+    if (row.secret_key_mode === "test" && !canEdit) return { kind: "off" };
     return { kind: "stripe", mode: row.secret_key_mode };
   } catch (error) {
     if (isMissingTable(error)) return { kind: "off" };
@@ -75,7 +81,7 @@ export async function payOfferFor(db: D1Database, association: Association): Pro
 }
 
 export async function paymentSettingsView(env: Env, db: D1Database, associationId: string): Promise<PaymentSettingsView> {
-  const encryptionReady = Boolean(paymentEncryptionKey(env));
+  const encryptionReady = Boolean(paymentKeyRing(env));
   if (!(await paymentsReady(db))) {
     return { ready: false, encryptionReady, enabled: false, status: "not enabled", secretLast4: "", secretMode: "", webhookLast4: "" };
   }
@@ -99,12 +105,12 @@ export async function saveStripeSecret(
 ): Promise<{ ok: true; action: "payment_settings_secret_set" | "payment_settings_secret_replaced"; mode: StripeKeyMode } | { ok: false; message: string }> {
   const mode = stripeSecretMode(secret);
   if (!mode) return { ok: false, message: "That does not look like a Stripe secret key." };
-  const material = paymentEncryptionKey(env);
-  if (!material) return { ok: false, message: "Online payments cannot be saved yet. The encryption secret is not set. No key was stored." };
+  const ring = paymentKeyRing(env);
+  if (!ring) return { ok: false, message: "Online payments cannot be saved yet. The encryption secret is not set. No key was stored." };
   if (!(await paymentsReady(db))) return { ok: false, message: migrationMessage() };
   let ciphertext = "";
   try {
-    ciphertext = await encryptPaymentSecret(material, secret.trim());
+    ciphertext = await encryptPaymentSecret(ring, associationId, "secret_key", secret.trim());
   } catch (error) {
     logError("payment_secret_encrypt", { message: redactSecrets(error instanceof Error ? error.message : "unknown") });
     return { ok: false, message: "Online payments cannot be saved yet. The encryption secret is not set. No key was stored." };
@@ -150,12 +156,12 @@ export async function saveWebhookSecret(
   secret: string,
 ): Promise<{ ok: true; action: "payment_settings_webhook_set" | "payment_settings_webhook_replaced" } | { ok: false; message: string }> {
   if (!isWebhookSecret(secret)) return { ok: false, message: "That does not look like a Stripe webhook signing secret." };
-  const material = paymentEncryptionKey(env);
-  if (!material) return { ok: false, message: "Online payments cannot be saved yet. The encryption secret is not set. No key was stored." };
+  const ring = paymentKeyRing(env);
+  if (!ring) return { ok: false, message: "Online payments cannot be saved yet. The encryption secret is not set. No key was stored." };
   if (!(await paymentsReady(db))) return { ok: false, message: migrationMessage() };
   let ciphertext = "";
   try {
-    ciphertext = await encryptPaymentSecret(material, secret.trim());
+    ciphertext = await encryptPaymentSecret(ring, associationId, "webhook_secret", secret.trim());
   } catch (error) {
     logError("payment_webhook_encrypt", { message: redactSecrets(error instanceof Error ? error.message : "unknown") });
     return { ok: false, message: "Online payments cannot be saved yet. The encryption secret is not set. No key was stored." };
@@ -212,11 +218,11 @@ export async function setPaymentsEnabled(
   if (!current?.secret_key_ciphertext || !current.webhook_secret_ciphertext) {
     return { ok: false, message: "Save both keys before turning payments on." };
   }
-  const material = paymentEncryptionKey(env);
-  if (!material) return { ok: false, message: "Online payments cannot be saved yet. The encryption secret is not set. No key was stored." };
+  const ring = paymentKeyRing(env);
+  if (!ring) return { ok: false, message: "Online payments cannot be saved yet. The encryption secret is not set. No key was stored." };
   try {
-    const secret = await decryptPaymentSecret(material, current.secret_key_ciphertext);
-    const webhook = await decryptPaymentSecret(material, current.webhook_secret_ciphertext);
+    const secret = await decryptPaymentSecret(ring, associationId, "secret_key", current.secret_key_ciphertext);
+    const webhook = await decryptPaymentSecret(ring, associationId, "webhook_secret", current.webhook_secret_ciphertext);
     const mode = stripeSecretMode(secret);
     if (!mode || !isWebhookSecret(webhook) || mode !== current.secret_key_mode) {
       return { ok: false, message: "The stored Stripe keys could not be read. Replace them, then turn payments on." };
@@ -230,13 +236,11 @@ export async function setPaymentsEnabled(
 }
 
 export async function payableInvoicesForUser(db: D1Database, associationId: string, userId: string, today: string): Promise<PayableInvoice[]> {
+  const reversals = await paymentReversalsReady(db);
   const { results } = await db
     .prepare(
       `SELECT i.id AS invoice_id, i.property_id, p.lot_number, i.invoice_number,
-              i.amount_cents + i.late_fee_cents - COALESCE((
-                SELECT SUM(pay.amount_cents) FROM payments pay
-                WHERE pay.invoice_id = i.id AND pay.association_id = i.association_id
-              ), 0) AS remaining_cents
+              i.amount_cents + i.late_fee_cents - ${invoiceNetPaidSql(reversals)} AS remaining_cents
        FROM invoices i
        JOIN properties p ON p.id = i.property_id AND p.association_id = i.association_id
        JOIN property_owners po ON po.property_id = p.id AND po.association_id = p.association_id
@@ -271,13 +275,13 @@ export async function startCheckout(input: {
   const ledgerCents = input.invoices.reduce((sum, row) => sum + row.amountCents, 0);
   const amountCents = checkoutAmountCents(ledgerCents);
   if (amountCents !== ledgerCents || amountCents <= 0) return { ok: false, message: "Nothing is due." };
-  const material = paymentEncryptionKey(input.env);
-  if (!material) return { ok: false, message: "Online payment is not available." };
+  const ring = paymentKeyRing(input.env);
+  if (!ring) return { ok: false, message: "Online payment is not available." };
   const row = await settingsRow(input.db, input.association.id);
   if (!row || Number(row.enabled) !== 1 || !row.secret_key_ciphertext) return { ok: false, message: "Online payment is not available." };
   let secretKey = "";
   try {
-    secretKey = await decryptPaymentSecret(material, row.secret_key_ciphertext);
+    secretKey = await decryptPaymentSecret(ring, input.association.id, "secret_key", row.secret_key_ciphertext);
   } catch (error) {
     logError("payment_checkout_key", { message: redactSecrets(error instanceof Error ? error.message : "unknown") });
     return { ok: false, message: "Online payment is not available." };
@@ -288,10 +292,18 @@ export async function startCheckout(input: {
   if (!urls) return { ok: false, message: "Online payment has to start on a secure page." };
   const lots = [...new Set(input.invoices.map((invoice) => invoice.lotNumber))];
   const invoiceIds = input.invoices.map((invoice) => invoice.invoiceId).join(",");
-  const intentId = crypto.randomUUID();
+  const invoiceKey = input.invoices.map((invoice) => invoice.invoiceId).sort().join(",");
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const bucket = Math.floor(nowSeconds / CHECKOUT_TTL_SECONDS);
-  const idempotencyKey = await sha256Hex(`${input.association.id}:${input.userId}:${invoiceIds}:${amountCents}:${bucket}`);
+  const reusable = await reusableIntent(input.db, input.association.id, input.userId, amountCents, invoiceKey);
+  if (!reusable) {
+    const allowed = await checkoutStartAllowed(input.db, input.association.id, input.userId);
+    if (!allowed) return { ok: false, message: "Too many checkout attempts. Wait a few minutes and try again." };
+  }
+  const intentId = reusable?.id ?? crypto.randomUUID();
+  const expiresAtSeconds = reusable ? Math.floor(Date.parse(reusable.expires_at) / 1000) : nowSeconds + CHECKOUT_TTL_SECONDS;
+  const idempotencyKey = await sha256Hex(
+    `${input.association.id}:${input.userId}:${invoiceKey}:${amountCents}:${intentId}:${expiresAtSeconds}`,
+  );
   let created: Awaited<ReturnType<typeof createCheckoutSession>>;
   try {
     created = await createCheckoutSession({
@@ -303,7 +315,7 @@ export async function startCheckout(input: {
     cancelUrl: urls.cancelUrl,
     intentId,
     idempotencyKey,
-    expiresAt: nowSeconds + CHECKOUT_TTL_SECONDS,
+    expiresAt: expiresAtSeconds,
     metadata: {
       neighborhoodId: input.association.id,
       lot: lots.join(",").slice(0, 500),
@@ -324,7 +336,7 @@ export async function startCheckout(input: {
     lotNumber: invoice.lotNumber,
     amountCents: invoice.amountCents,
   }));
-  const expiresAt = new Date((nowSeconds + CHECKOUT_TTL_SECONDS) * 1000).toISOString();
+  const expiresAt = new Date(expiresAtSeconds * 1000).toISOString();
   await input.db
     .prepare(
       `INSERT INTO checkout_intents (
@@ -363,37 +375,50 @@ export type AppliedStripePayment = {
 export async function applyStripeCheckout(input: {
   db: D1Database;
   association: Association;
+  livemode: boolean | null;
   eventId: string;
+  sessionId: string;
   paymentId: string;
   amountTotal: number;
   clientReferenceId: string;
   neighborhoodId: string;
   invoiceIds: string;
   userId: string;
-}): Promise<{ ok: true; applied: AppliedStripePayment } | { ok: false; detail: string }> {
-  if (input.neighborhoodId && input.neighborhoodId !== input.association.id) {
-    return { ok: false, detail: "Stripe neighborhood did not match this portal. Payment was not recorded." };
+}): Promise<{ ok: true; applied: AppliedStripePayment } | { ok: false; detail: string; review: boolean }> {
+  const mode = await savedKeyMode(input.db, input.association.id);
+  if (!livemodeMatchesKey(input.livemode, mode)) {
+    return {
+      ok: false,
+      review: false,
+      detail: `Stripe livemode did not match the saved key. Payment was not recorded. ${input.paymentId}`,
+    };
+  }
+  if (!input.neighborhoodId || input.neighborhoodId !== input.association.id) {
+    return { ok: false, review: true, detail: "Stripe neighborhood did not match this portal. Payment was not recorded." };
   }
   const intent = await input.db
     .prepare(
-      `SELECT id, user_id, amount_cents, allocation_json, lot_numbers, expires_at
+      `SELECT id, user_id, amount_cents, allocation_json, lot_numbers, stripe_session_id
        FROM checkout_intents WHERE association_id = ? AND id = ?`,
     )
     .bind(input.association.id, input.clientReferenceId)
-    .first<{ id: string; user_id: string; amount_cents: number; allocation_json: string; lot_numbers: string; expires_at: string }>();
-  if (!intent) return { ok: false, detail: `Checkout was not found. Payment was not recorded. ${input.paymentId}` };
+    .first<{ id: string; user_id: string; amount_cents: number; allocation_json: string; lot_numbers: string; stripe_session_id: string }>();
+  if (!intent) return { ok: false, review: true, detail: `Checkout was not found. Payment was not recorded. ${input.paymentId}` };
+  if (!intent.stripe_session_id || intent.stripe_session_id !== input.sessionId) {
+    return { ok: false, review: true, detail: `Stripe session did not match the checkout. Payment was not recorded. ${input.paymentId}` };
+  }
   if (input.userId && input.userId !== intent.user_id) {
-    return { ok: false, detail: "Stripe payer did not match the checkout. Payment was not recorded." };
+    return { ok: false, review: true, detail: "Stripe payer did not match the checkout. Payment was not recorded." };
   }
   if (Number(intent.amount_cents) !== input.amountTotal) {
-    return { ok: false, detail: `Stripe amount did not match the checkout. Payment was not recorded. ${input.paymentId}` };
+    return { ok: false, review: true, detail: `Stripe amount did not match the checkout. Payment was not recorded. ${input.paymentId}` };
   }
   const allocation = parseAllocation(intent.allocation_json);
-  if (!allocation) return { ok: false, detail: "Checkout could not be read. Payment was not recorded." };
-  if (input.invoiceIds) {
-    const given = input.invoiceIds.split(",").filter(Boolean).sort().join(",");
-    const expected = allocation.map((row) => row.invoiceId).sort().join(",");
-    if (given !== expected) return { ok: false, detail: "Stripe invoice list did not match the checkout. Payment was not recorded." };
+  if (!allocation) return { ok: false, review: true, detail: "Checkout could not be read. Payment was not recorded." };
+  const given = input.invoiceIds.split(",").filter(Boolean).sort().join(",");
+  const expected = allocation.map((row) => row.invoiceId).sort().join(",");
+  if (!given || given !== expected) {
+    return { ok: false, review: true, detail: "Stripe invoice list did not match the checkout. Payment was not recorded." };
   }
   const existing = await input.db
     .prepare(
@@ -433,7 +458,7 @@ export async function applyStripeCheckout(input: {
     const invoice = await input.db
       .prepare(
         `SELECT i.invoice_number, i.amount_cents, i.late_fee_cents, i.status,
-                COALESCE((SELECT SUM(amount_cents) FROM payments pay WHERE pay.invoice_id = i.id AND pay.association_id = i.association_id), 0) AS paid_cents
+                ${invoiceNetPaidSql(await paymentReversalsReady(input.db))} AS paid_cents
          FROM invoices i WHERE i.association_id = ? AND i.id = ? AND i.property_id = ?`,
       )
       .bind(input.association.id, item.invoiceId, item.propertyId)
@@ -481,7 +506,7 @@ export async function applyStripeCheckout(input: {
       }));
     }
   }
-  if (paymentIds.length === 0) return { ok: false, detail: "Nothing was recorded for this Stripe payment." };
+  if (paymentIds.length === 0) return { ok: false, review: true, detail: "Nothing was recorded for this Stripe payment." };
   const owners = await ownerRecipients(input.db, input.association.id, allocation.map((item) => item.propertyId));
   const staff = await listStaffContacts(input.db, input.association.id);
   const notice = `${formatMoney(input.amountTotal)} online payment for lot ${intent.lot_numbers}. Stripe ${input.paymentId}.`;
@@ -649,17 +674,58 @@ export async function receiptRecipients(db: D1Database, associationId: string, s
 }
 
 export async function webhookSecret(env: Env, db: D1Database, associationId: string): Promise<string | null> {
-  const material = paymentEncryptionKey(env);
-  if (!material) return null;
+  const ring = paymentKeyRing(env);
+  if (!ring) return null;
   const row = await settingsRow(db, associationId);
   if (!row?.webhook_secret_ciphertext) return null;
   try {
-    const secret = await decryptPaymentSecret(material, row.webhook_secret_ciphertext);
+    const secret = await decryptPaymentSecret(ring, associationId, "webhook_secret", row.webhook_secret_ciphertext);
     return isWebhookSecret(secret) ? secret : null;
   } catch (error) {
     logError("payment_webhook_decrypt", { message: redactSecrets(error instanceof Error ? error.message : "unknown") });
     return null;
   }
+}
+
+export async function reencryptPaymentSecrets(
+  env: Env,
+  db: D1Database,
+  associationId: string,
+  userId: string,
+): Promise<{ ok: true; changed: boolean } | { ok: false; message: string }> {
+  const ring = paymentKeyRing(env);
+  if (!ring) return { ok: false, message: "Online payments cannot be saved yet. The encryption secret is not set. No key was stored." };
+  if (!(await paymentsReady(db))) return { ok: false, message: migrationMessage() };
+  const current = await settingsRow(db, associationId);
+  if (!current?.secret_key_ciphertext && !current?.webhook_secret_ciphertext) {
+    return { ok: false, message: "No Stripe keys are stored." };
+  }
+  const secretOnCurrent = !current.secret_key_ciphertext || ciphertextKid(current.secret_key_ciphertext) === ring.currentKid;
+  const webhookOnCurrent = !current.webhook_secret_ciphertext || ciphertextKid(current.webhook_secret_ciphertext) === ring.currentKid;
+  if (secretOnCurrent && webhookOnCurrent && current.secret_key_ciphertext.startsWith("v2.") && (!current.webhook_secret_ciphertext || current.webhook_secret_ciphertext.startsWith("v2."))) {
+    return { ok: true, changed: false };
+  }
+  let secretCipher = current.secret_key_ciphertext;
+  let webhookCipher = current.webhook_secret_ciphertext;
+  try {
+    if (current.secret_key_ciphertext) {
+      const plain = await decryptPaymentSecret(ring, associationId, "secret_key", current.secret_key_ciphertext);
+      secretCipher = await encryptPaymentSecret(ring, associationId, "secret_key", plain);
+    }
+    if (current.webhook_secret_ciphertext) {
+      const plain = await decryptPaymentSecret(ring, associationId, "webhook_secret", current.webhook_secret_ciphertext);
+      webhookCipher = await encryptPaymentSecret(ring, associationId, "webhook_secret", plain);
+    }
+  } catch (error) {
+    logError("payment_settings_reencrypt", { message: redactSecrets(error instanceof Error ? error.message : "unknown") });
+    return { ok: false, message: "The stored Stripe keys could not be read. Replace them before rotating the encryption key." };
+  }
+  await writeRow(db, associationId, userId, {
+    ...current,
+    secret_key_ciphertext: secretCipher,
+    webhook_secret_ciphertext: webhookCipher,
+  });
+  return { ok: true, changed: true };
 }
 
 export async function paymentsReady(db: D1Database): Promise<boolean> {
@@ -735,6 +801,452 @@ async function writeRow(
       userId,
     )
     .run();
+}
+
+export async function applyStripeAdjustment(input: {
+  db: D1Database;
+  association: Association;
+  event: ParsedRefundEvent | ParsedDisputeEvent;
+}): Promise<{ ok: true; duplicate: boolean } | { ok: false; detail: string; review: boolean }> {
+  const mode = await savedKeyMode(input.db, input.association.id);
+  const label = input.event.paymentId || (input.event.kind === "refund" ? input.event.chargeId : input.event.disputeId);
+  if (!livemodeMatchesKey(input.event.livemode, mode)) {
+    return { ok: false, review: false, detail: `Stripe livemode did not match the saved key. Adjustment was not recorded. ${label}` };
+  }
+  if (input.event.neighborhoodId && input.event.neighborhoodId !== input.association.id) {
+    return { ok: false, review: true, detail: "Stripe neighborhood did not match this portal. Adjustment was not recorded." };
+  }
+  if (!(await paymentReversalsReady(input.db))) {
+    return { ok: false, review: true, detail: "Apply migrations/0020_payment_controls.sql before this Stripe event can reach the ledger." };
+  }
+  const seen = await input.db
+    .prepare("SELECT event_id FROM stripe_adjustment_events WHERE association_id = ? AND event_id = ?")
+    .bind(input.association.id, input.event.eventId)
+    .first<{ event_id: string }>();
+  if (seen) return { ok: true, duplicate: true };
+  if (input.event.kind === "refund") return postRefund(input.db, input.association, input.event);
+  return postDispute(input.db, input.association, input.event);
+}
+
+export async function exportPaymentAudit(env: Env, now: Date): Promise<void> {
+  try {
+    const { results } = await env.DB
+      .prepare(
+        `SELECT id, association_id, action, entity_type, entity_id, detail, created_at
+         FROM audit_log WHERE action LIKE 'payment%' ORDER BY created_at`,
+      )
+      .all<{ id: string; association_id: string; action: string; entity_type: string; entity_id: string; detail: string; created_at: string }>();
+    const day = now.toISOString().slice(0, 10);
+    const body = results
+      .map((row) =>
+        JSON.stringify({
+          id: row.id,
+          associationId: row.association_id,
+          action: row.action,
+          entityType: row.entity_type,
+          entityId: row.entity_id,
+          detail: row.detail,
+          createdAt: row.created_at,
+        }),
+      )
+      .join("\n");
+    await env.DOCUMENTS.put(`audit/payment-activity-${day}.jsonl`, body ? `${body}\n` : "\n");
+  } catch (error) {
+    logError("payment_audit_export", { message: redactSecrets(error instanceof Error ? error.message : "unknown") });
+  }
+}
+
+async function postRefund(
+  db: D1Database,
+  association: Association,
+  event: ParsedRefundEvent,
+): Promise<{ ok: true; duplicate: boolean } | { ok: false; detail: string; review: boolean }> {
+  const payments = event.paymentId ? await stripePayments(db, association.id, event.paymentId) : [];
+  if (payments.length === 0) {
+    await finishAdjustment(db, association, {
+      eventId: event.eventId,
+      kind: "refund",
+      stripePaymentId: event.paymentId || event.chargeId,
+      title: "Online refund needs review",
+      body: `Stripe refund ${event.chargeId} could not be matched to a ledger payment.`,
+      action: "payment_refund",
+      detail: `Refund was not matched. ${event.chargeId}. ${event.paymentId}.`,
+      statements: [],
+    });
+    return { ok: true, duplicate: false };
+  }
+  const already = await reversedCents(db, association.id, event.paymentId, "refund");
+  const delta = event.amountRefunded - already;
+  if (delta <= 0) {
+    await finishAdjustment(db, association, {
+      eventId: event.eventId,
+      kind: "refund",
+      stripePaymentId: event.paymentId,
+      title: "Online refund",
+      body: `Stripe reported a refund that was already on the ledger. ${event.paymentId}.`,
+      action: "payment_refund",
+      detail: `Refund already recorded. ${event.paymentId}.`,
+      statements: [],
+    });
+    return { ok: true, duplicate: false };
+  }
+  const slices = await reversalSlices(db, association.id, payments, delta);
+  const statements: D1PreparedStatement[] = [];
+  const deltas = new Map<string, number>();
+  for (const slice of slices) {
+    statements.push(reversalInsert(db, association.id, slice, {
+      kind: "refund",
+      status: "refunded",
+      stripePaymentId: event.paymentId,
+      stripeObjectId: event.chargeId,
+      eventId: event.eventId,
+    }));
+    if (slice.invoiceId) deltas.set(slice.invoiceId, (deltas.get(slice.invoiceId) ?? 0) - slice.amountCents);
+  }
+  for (const [invoiceId, change] of deltas) {
+    statements.push(await invoiceStatusUpdate(db, association.id, invoiceId, change));
+  }
+  const applied = slices.reduce((sum, slice) => sum + slice.amountCents, 0);
+  await finishAdjustment(db, association, {
+    eventId: event.eventId,
+    kind: "refund",
+    stripePaymentId: event.paymentId,
+    title: "Online refund",
+    body: `${formatMoney(applied)} refunded in Stripe. ${event.paymentId}.`,
+    action: "payment_refund",
+    detail: `Refund ${formatMoney(applied)}. ${event.paymentId}. ${event.chargeId}.`,
+    statements,
+    propertyIds: slices.map((slice) => slice.propertyId),
+  });
+  return { ok: true, duplicate: false };
+}
+
+async function postDispute(
+  db: D1Database,
+  association: Association,
+  event: ParsedDisputeEvent,
+): Promise<{ ok: true; duplicate: boolean } | { ok: false; detail: string; review: boolean }> {
+  if (event.action === "closed") return closeDispute(db, association, event);
+  const payments = event.paymentId ? await stripePayments(db, association.id, event.paymentId) : [];
+  if (payments.length === 0) {
+    await finishAdjustment(db, association, {
+      eventId: event.eventId,
+      kind: "dispute",
+      stripePaymentId: event.paymentId || event.disputeId,
+      title: "Online dispute needs review",
+      body: `Stripe dispute ${event.disputeId} could not be matched to a ledger payment.`,
+      action: "payment_dispute",
+      detail: `Dispute was not matched. ${event.disputeId}. ${event.paymentId}.`,
+      statements: [],
+    });
+    return { ok: true, duplicate: false };
+  }
+  const slices = await reversalSlices(db, association.id, payments, event.amount);
+  const statements: D1PreparedStatement[] = [];
+  const deltas = new Map<string, number>();
+  for (const slice of slices) {
+    statements.push(reversalInsert(db, association.id, slice, {
+      kind: "dispute",
+      status: "open",
+      stripePaymentId: event.paymentId,
+      stripeObjectId: event.disputeId,
+      eventId: event.eventId,
+    }));
+    if (slice.invoiceId) deltas.set(slice.invoiceId, (deltas.get(slice.invoiceId) ?? 0) - slice.amountCents);
+  }
+  for (const [invoiceId, change] of deltas) {
+    statements.push(await invoiceStatusUpdate(db, association.id, invoiceId, change));
+  }
+  const applied = slices.reduce((sum, slice) => sum + slice.amountCents, 0);
+  await finishAdjustment(db, association, {
+    eventId: event.eventId,
+    kind: "dispute",
+    stripePaymentId: event.paymentId,
+    title: "Online dispute",
+    body: `${formatMoney(applied)} is in dispute at Stripe. ${event.paymentId}.`,
+    action: "payment_dispute",
+    detail: `Dispute opened ${formatMoney(applied)}. ${event.disputeId}. ${event.paymentId}.`,
+    statements,
+    propertyIds: slices.map((slice) => slice.propertyId),
+  });
+  return { ok: true, duplicate: false };
+}
+
+async function closeDispute(
+  db: D1Database,
+  association: Association,
+  event: ParsedDisputeEvent,
+): Promise<{ ok: true; duplicate: boolean }> {
+  const won = event.status === "won" || event.status === "warning_closed";
+  const { results } = await db
+    .prepare(
+      `SELECT id, invoice_id, amount_cents, status
+       FROM payment_reversals
+       WHERE association_id = ? AND stripe_object_id = ? AND kind = 'dispute'`,
+    )
+    .bind(association.id, event.disputeId)
+    .all<{ id: string; invoice_id: string | null; amount_cents: number; status: string }>();
+  const statements: D1PreparedStatement[] = [];
+  const deltas = new Map<string, number>();
+  if (won) {
+    for (const row of results) {
+      if (row.status === "won") continue;
+      statements.push(
+        db.prepare("UPDATE payment_reversals SET status = 'won' WHERE association_id = ? AND id = ?").bind(association.id, row.id),
+      );
+      if (row.invoice_id) deltas.set(row.invoice_id, (deltas.get(row.invoice_id) ?? 0) + Number(row.amount_cents));
+    }
+    for (const [invoiceId, change] of deltas) {
+      statements.push(await invoiceStatusUpdate(db, association.id, invoiceId, change));
+    }
+  } else {
+    for (const row of results) {
+      if (row.status === "won" || row.status === "lost") continue;
+      statements.push(
+        db.prepare("UPDATE payment_reversals SET status = 'lost' WHERE association_id = ? AND id = ?").bind(association.id, row.id),
+      );
+    }
+  }
+  const outcome = won ? "won" : "lost";
+  await finishAdjustment(db, association, {
+    eventId: event.eventId,
+    kind: "dispute",
+    stripePaymentId: event.paymentId || event.disputeId,
+    title: "Online dispute closed",
+    body: results.length
+      ? `Stripe dispute ${event.disputeId} closed as ${outcome}. ${event.paymentId}.`
+      : `Stripe dispute ${event.disputeId} closed and was not matched to a ledger reversal.`,
+    action: "payment_dispute_closed",
+    detail: `Dispute ${outcome}. ${event.disputeId}. ${event.paymentId}.`,
+    statements,
+  });
+  return { ok: true, duplicate: false };
+}
+
+async function finishAdjustment(
+  db: D1Database,
+  association: Association,
+  input: {
+    eventId: string;
+    kind: string;
+    stripePaymentId: string;
+    title: string;
+    body: string;
+    action: string;
+    detail: string;
+    statements: D1PreparedStatement[];
+    propertyIds?: string[];
+  },
+): Promise<void> {
+  const now = new Date().toISOString();
+  const statements = [
+    db
+      .prepare(
+        `INSERT INTO stripe_adjustment_events (association_id, event_id, kind, stripe_payment_id, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .bind(association.id, input.eventId, input.kind, input.stripePaymentId, now),
+    ...input.statements,
+  ];
+  const owners = await ownerRecipients(db, association.id, input.propertyIds ?? []);
+  const staff = await listStaffContacts(db, association.id);
+  for (const owner of owners) {
+    statements.push(noticeInsert(db, {
+      associationId: association.id,
+      userId: owner.user_id,
+      title: input.title,
+      body: input.body,
+      href: `/a/${association.slug}/dashboard`,
+      now,
+    }));
+  }
+  for (const person of staff) {
+    statements.push(noticeInsert(db, {
+      associationId: association.id,
+      userId: person.user_id,
+      title: input.title,
+      body: input.body,
+      href: `/a/${association.slug}/admin/ledger`,
+      now,
+    }));
+  }
+  statements.push(
+    db
+      .prepare(
+        `INSERT INTO audit_log (id, association_id, actor_user_id, action, entity_type, entity_id, detail, created_at)
+         VALUES (?, ?, NULL, ?, 'payment', ?, ?, ?)`,
+      )
+      .bind(crypto.randomUUID(), association.id, input.action, input.eventId, clip(input.detail, 1000), now),
+  );
+  try {
+    await db.batch(statements);
+  } catch (error) {
+    if (isUniqueConstraint(error)) return;
+    throw error;
+  }
+}
+
+type StripeLedgerPayment = { id: string; property_id: string; invoice_id: string | null; amount_cents: number };
+
+async function stripePayments(db: D1Database, associationId: string, paymentId: string): Promise<StripeLedgerPayment[]> {
+  if (!paymentId) return [];
+  const { results } = await db
+    .prepare(
+      `SELECT id, property_id, invoice_id, amount_cents
+       FROM payments
+       WHERE association_id = ? AND method = 'stripe' AND reference = ?
+       ORDER BY created_at`,
+    )
+    .bind(associationId, paymentId)
+    .all<StripeLedgerPayment>();
+  return results;
+}
+
+async function reversedCents(db: D1Database, associationId: string, paymentId: string, kind: "refund" | "dispute"): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COALESCE(SUM(amount_cents), 0) AS n
+       FROM payment_reversals
+       WHERE association_id = ? AND stripe_payment_id = ? AND kind = ? AND status != 'won'`,
+    )
+    .bind(associationId, paymentId, kind)
+    .first<{ n: number }>();
+  return Number(row?.n ?? 0);
+}
+
+async function reversalSlices(
+  db: D1Database,
+  associationId: string,
+  payments: StripeLedgerPayment[],
+  amountCents: number,
+): Promise<{ paymentId: string; propertyId: string; invoiceId: string | null; amountCents: number }[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT payment_id, COALESCE(SUM(amount_cents), 0) AS n
+       FROM payment_reversals
+       WHERE association_id = ? AND status != 'won' AND payment_id IS NOT NULL
+       GROUP BY payment_id`,
+    )
+    .bind(associationId)
+    .all<{ payment_id: string; n: number }>();
+  const used = new Map(results.map((row) => [row.payment_id, Number(row.n)]));
+  const slices: { paymentId: string; propertyId: string; invoiceId: string | null; amountCents: number }[] = [];
+  let left = amountCents;
+  for (const payment of payments) {
+    if (left <= 0) break;
+    const room = Number(payment.amount_cents) - (used.get(payment.id) ?? 0);
+    if (room <= 0) continue;
+    const take = Math.min(room, left);
+    slices.push({
+      paymentId: payment.id,
+      propertyId: payment.property_id,
+      invoiceId: payment.invoice_id,
+      amountCents: take,
+    });
+    left -= take;
+  }
+  return slices;
+}
+
+function reversalInsert(
+  db: D1Database,
+  associationId: string,
+  slice: { paymentId: string; propertyId: string; invoiceId: string | null; amountCents: number },
+  meta: { kind: "refund" | "dispute"; status: string; stripePaymentId: string; stripeObjectId: string; eventId: string },
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO payment_reversals (
+         id, association_id, payment_id, property_id, invoice_id, amount_cents, kind, status,
+         stripe_payment_id, stripe_object_id, event_id, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      associationId,
+      slice.paymentId,
+      slice.propertyId,
+      slice.invoiceId,
+      slice.amountCents,
+      meta.kind,
+      meta.status,
+      meta.stripePaymentId,
+      meta.stripeObjectId,
+      meta.eventId,
+      new Date().toISOString(),
+    );
+}
+
+async function invoiceStatusUpdate(
+  db: D1Database,
+  associationId: string,
+  invoiceId: string,
+  deltaCents: number,
+): Promise<D1PreparedStatement> {
+  const reversals = await paymentReversalsReady(db);
+  const invoice = await db
+    .prepare(
+      `SELECT i.amount_cents, i.late_fee_cents, i.status, ${invoiceNetPaidSql(reversals)} AS paid_cents
+       FROM invoices i WHERE i.association_id = ? AND i.id = ?`,
+    )
+    .bind(associationId, invoiceId)
+    .first<{ amount_cents: number; late_fee_cents: number; status: string; paid_cents: number }>();
+  const status = !invoice || invoice.status === "void"
+    ? "void"
+    : invoiceStatus(Number(invoice.amount_cents), Number(invoice.late_fee_cents), Number(invoice.paid_cents) + deltaCents);
+  return db
+    .prepare("UPDATE invoices SET status = ? WHERE association_id = ? AND id = ? AND status != 'void'")
+    .bind(status, associationId, invoiceId);
+}
+
+async function reusableIntent(
+  db: D1Database,
+  associationId: string,
+  userId: string,
+  amountCents: number,
+  invoiceKey: string,
+): Promise<{ id: string; expires_at: string } | null> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, expires_at, allocation_json
+       FROM checkout_intents
+       WHERE association_id = ? AND user_id = ? AND amount_cents = ? AND expires_at > ?
+       ORDER BY created_at DESC
+       LIMIT 5`,
+    )
+    .bind(associationId, userId, amountCents, new Date().toISOString())
+    .all<{ id: string; expires_at: string; allocation_json: string }>();
+  for (const row of results) {
+    const allocation = parseAllocation(row.allocation_json);
+    if (!allocation) continue;
+    const key = allocation.map((item) => item.invoiceId).sort().join(",");
+    if (key === invoiceKey && Number.isFinite(Date.parse(row.expires_at))) return { id: row.id, expires_at: row.expires_at };
+  }
+  return null;
+}
+
+async function checkoutStartAllowed(db: D1Database, associationId: string, userId: string): Promise<boolean> {
+  const cutoff = new Date(Date.now() - CHECKOUT_START_WINDOW_MS).toISOString();
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM checkout_intents
+       WHERE association_id = ? AND user_id = ? AND created_at >= ?`,
+    )
+    .bind(associationId, userId, cutoff)
+    .first<{ n: number }>();
+  return Number(row?.n ?? 0) < CHECKOUT_START_LIMIT;
+}
+
+async function savedKeyMode(db: D1Database, associationId: string): Promise<"" | StripeKeyMode> {
+  const row = await settingsRow(db, associationId);
+  if (row?.secret_key_mode === "test" || row?.secret_key_mode === "live") return row.secret_key_mode;
+  return "";
+}
+
+function ciphertextKid(stored: string): string | null {
+  const parts = stored.split(".");
+  if (parts[0] === "v2" && parts.length === 4 && parts[1]) return parts[1];
+  return null;
 }
 
 function paymentInsert(

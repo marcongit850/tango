@@ -240,6 +240,7 @@ SELECT
   0, '2026-10-03T15:00:00Z', NULL, 'user_demo_admin', '2026-10-03T15:00:00Z'
 WHERE NOT EXISTS (SELECT 1 FROM announcements WHERE id = 'ann_demo_meeting');
 
+-- 6:00 p.m. to 7:30 p.m. Central on November 12, 2026. That date is standard time (CST, UTC-6), not CDT.
 INSERT INTO events (
   id, association_id, title, description, location, starts_at, ends_at, kind, created_by_user_id, created_at
 )
@@ -247,7 +248,7 @@ SELECT
   'event_demo_meeting', 'assoc_seaside_demo', 'Sample annual meeting',
   'Budget review for the fictional association. This portal does not collect proxies.',
   'Seaside Demo clubhouse, 18 Dune Lane, Sample Harbor',
-  '2026-11-12T23:00:00Z', '2026-11-13T00:30:00Z', 'meeting', 'user_demo_admin', '2026-10-01T15:00:00Z'
+  '2026-11-13T00:00:00Z', '2026-11-13T01:30:00Z', 'meeting', 'user_demo_admin', '2026-10-01T15:00:00Z'
 WHERE NOT EXISTS (SELECT 1 FROM events WHERE id = 'event_demo_meeting');
 
 INSERT INTO faqs (id, association_id, question, answer, sort_order)

@@ -49,6 +49,7 @@ export function methodLabel(method: string): string {
   if (method === "cash") return "Cash";
   if (method === "ach_recorded") return "ACH (recorded)";
   if (method === "other") return "Other";
+  if (method === "stripe") return "Online (Stripe)";
   return method;
 }
 

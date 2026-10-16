@@ -1,3 +1,6 @@
 # Copy to .dev.vars for local secrets. Never commit .dev.vars.
 # Leave RESEND_API_KEY unset to use the on-screen magic link at http://localhost:8787.
 RESEND_API_KEY=
+# Base64-encoded 32-byte AES-GCM key. Generate one locally. Do not commit a value.
+# openssl rand -base64 32
+PAYMENT_ENCRYPTION_KEY=

@@ -6,6 +6,7 @@ import { ForbiddenError, isMissingColumn, isMissingTable, NotFoundError } from "
 import { logInfo } from "../lib/log";
 import { isValidEmail, normalizeEmail } from "../lib/homeowner-account";
 import { demoFileResponse, isDemoAssociation } from "../lib/demo";
+import { payOfferFor } from "../lib/online-payments";
 import { ensureSeedFiles } from "../lib/seed-files";
 import { sha256Hex } from "../lib/tokens";
 import { issueEmailChangeLink } from "./auth";
@@ -112,6 +113,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
         news: announcements.filter((item) => item.kind !== "emergency"),
         events: upcomingEvents,
         today,
+        pay: await payOfferFor(c.env.DB, association),
       }),
     });
   });
@@ -435,7 +437,8 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
   app.get("/a/:slug/invoices", async (c) => {
     const { association, user } = requireMember(c);
     const invoices = await invoicesForUser(c.env.DB, association.id, user.id, todayIso(association.timezone));
-    return render(c, { title: "Invoices", active: "dashboard", body: invoiceListPage(association, invoices) });
+    const pay = await payOfferFor(c.env.DB, association);
+    return render(c, { title: "Invoices", active: "dashboard", body: invoiceListPage(association, invoices, pay) });
   });
 
   app.get("/a/:slug/invoices/:invoiceId", async (c) => {
@@ -446,7 +449,7 @@ export function registerResidentRoutes(app: Hono<AppBindings>): void {
     return render(c, {
       title: invoice.invoice_number,
       active: "dashboard",
-      body: invoiceDetailPage(association, invoice, todayIso(association.timezone)),
+      body: invoiceDetailPage(association, invoice, todayIso(association.timezone), await payOfferFor(c.env.DB, association)),
     });
   });
 

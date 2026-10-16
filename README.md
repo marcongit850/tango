@@ -563,7 +563,7 @@ Tang-O-Mar starts with these amounts for one assessment period. Admins can chang
 
 The first improved lot is the lowest improved lot number, unless an admin picks a different improved lot for that owner. Annual dues use these amounts once a year. Quarterly dues use the same amounts each quarter.
 
-Add a year, while a schedule is saved, creates one assessment per period with billing mode `schedule`. On the open date, or when an admin assigns early, each owner gets one invoice. The lines look like `Lot 43, first improved`, `Lot 44, additional improved`, `Lot 12, vacant`, and `Beach box`. An owner with 2 improved lots, 1 vacant lot, and 1 beach box is billed $625 + $315 + $220 + $150 = $1,310. The invoice total is that sum. A processing fee added only when someone pays online applies to the total. Changing the schedule later does not rewrite invoices already assigned. Older flat assessments and their invoices stay as they are.
+Add a year, while a schedule is saved, creates one assessment per period with billing mode `schedule`. On the open date, or when an admin assigns early, each owner gets one invoice. The lines look like `Lot 43, first improved`, `Lot 44, additional improved`, `Lot 12, vacant`, and `Beach box`. An owner with 2 improved lots, 1 vacant lot, and 1 beach box is billed $625 + $315 + $220 + $150 = $1,310. The invoice total is that sum. Online card fees (about 2.9% + 30 cents) are absorbed by the association unless the board decides otherwise. No convenience fee is added today. Changing the schedule later does not rewrite invoices already assigned. Older flat assessments and their invoices stay as they are.
 
 Dashboard steps:
 
@@ -577,13 +577,33 @@ Run that file once, after `0017`. If the console says a column already exists, t
 
 Someone with a terminal can apply the same file with `npm run db:migrate:remote` after `0017` is already on the remote database.
 
+## Online payments (paste this before merge)
+
+`migrations/0019_online_payments.sql` adds encrypted Stripe settings, checkout intents, and webhook idempotency. It also allows the payment method `stripe`, shown as Online (Stripe). Paste it after `0018_fee_schedule.sql`. Deploy does not apply D1 migrations. The file does not store a Stripe key.
+
+Set the Worker secret `PAYMENT_ENCRYPTION_KEY` before a treasurer saves keys. It is a base64-encoded 32-byte key (`openssl rand -base64 32`, then `npx wrangler secret put PAYMENT_ENCRYPTION_KEY`). Do not put the value in git, email, or the activity log.
+
+Until a neighborhood turns payments on, owners do not see Pay now. The demo neighborhood shows a sample checkout that does not call Stripe and does not save.
+
+Dashboard steps for the migration:
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com) and go to **D1 SQL database**.
+2. Select the database named **tango**.
+3. Open **Console**.
+4. Paste the full contents of `migrations/0019_online_payments.sql`.
+5. Select **Execute**.
+
+Run that file once, after `0018`. If the console says `online_payments_migration` already exists, this file was already applied. Stop. Do not paste it again.
+
+Treasurer steps to turn payments on are in `ARCHITECTURE.md` under Online payments.
+
 ## Data model
 
 Migrations live in `migrations/`.
 
 - `associations`, `users`, `roles`, `memberships` (`is_admin` is edit access on a homeowner or a board member; a board member without it is view-only; `is_master` is the one locked master admin for that association)
 - `properties` (lots, with `lot_type` of `improved` or `unimproved`, plus `house_name`, mailing address, and `admin_notes`) and `property_owners`
-- `assessments` (`opens_on`, `lot_type`, `billing_mode` of `flat` or `schedule`, amount, due date), `invoices` (optional `billed_user_id` when one owner invoice covers several lots), `invoice_lines`, `payments` (amounts in cents; payments are recorded, not charged online)
+- `assessments` (`opens_on`, `lot_type`, `billing_mode` of `flat` or `schedule`, amount, due date), `invoices` (optional `billed_user_id` when one owner invoice covers several lots), `invoice_lines`, `payments` (amounts in cents; method `stripe` is an online Stripe payment marked Online (Stripe))
 - `fee_schedules` (first improved, additional improved, and vacant amounts for one period), `fee_addon_types`, `owner_addons` (quantity on an owner, optional nearby lot), `owner_primary_lots` (which improved lot is the first one)
 - `documents` and `document_versions` (`current_version_id` is what residents see; `visibility` is `residents` or `board`; `folder` is an optional subfolder; `document_date` is the date that files Meeting Minutes, Budgets, and Insurance into a year folder)
 - `announcements`, `events`, `faqs`, `board_contacts`

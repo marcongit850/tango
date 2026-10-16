@@ -1,6 +1,6 @@
 # Tango Mar owner portal: architecture
 
-Last checked against the code and Cloudflare on Oct 14, 2026.
+Last checked against the code and Cloudflare on Oct 16, 2026.
 
 ## What it does
 
@@ -36,10 +36,12 @@ Do these in the dashboard or on deploy. Deploy does not apply D1 migrations.
 4. Paste `migrations/0017_neighborhood_codes.sql` into the D1 console for database `tango` (after `0016`), or run `npm run db:migrate:remote`. Until this runs, codes do not resolve and new email links stay on mytangomar.com. Those old links still 301 onto `/tangomar` once the flag is on.
 5. Paste `migrations/0018_fee_schedule.sql` after `0017`, or run `npm run db:migrate:remote`. Until this runs, dues stay one flat invoice per lot. After it runs, Tang-O-Mar has a fee schedule (first improved $625, additional improved $315, vacant $220, Beach box $150) and new dues years bill one itemized invoice per owner. Existing invoices are left as they are.
 6. `EMAIL_FROM` stays `Tang-O-Mar <donotreply@mytangomar.com>` until a sender on myhoadashboard.com is verified in Resend. The link in the message can already point at myhoadashboard.com.
+7. Paste `migrations/0019_online_payments.sql` after `0018`, or run `npm run db:migrate:remote`. Until this runs, owners see no Pay now button and Payment settings explains the paste. Online receipt mail uses the existing `EMAIL_FROM` sender. No new Resend domain.
+8. Set the Worker secret `PAYMENT_ENCRYPTION_KEY` (name only; never commit a value). It is a base64-encoded 32-byte AES-GCM key. `openssl rand -base64 32`, then `npx wrangler secret put PAYMENT_ENCRYPTION_KEY`. Stripe keys cannot be saved until this secret exists.
 
 ## Data and images
 
-- Database: D1 `tango` (id `d3f6cfd2-cae0-42ef-843f-b5465efebd2b`), binding `DB`. Schema is in `migrations/` (0001 to 0018 so far). `0016_seed_seaside_demo.sql` adds the public demo association only. It does not read or update Tang-O-Mar rows. `0017_neighborhood_codes.sql` adds unique `neighborhood_code` and `vanity_slug` on `associations`, sets Tang-O-Mar to code `850` and slug `tangomar`, and sets the demo to code `100` and slug `seaside`. `0018_fee_schedule.sql` adds fee rates, add-ons, owner primary lots, and invoice lines. It seeds Tang-O-Mar only and does not rewrite existing invoices.
+- Database: D1 `tango` (id `d3f6cfd2-cae0-42ef-843f-b5465efebd2b`), binding `DB`. Schema is in `migrations/` (0001 to 0019 so far). `0016_seed_seaside_demo.sql` adds the public demo association only. It does not read or update Tang-O-Mar rows. `0017_neighborhood_codes.sql` adds unique `neighborhood_code` and `vanity_slug` on `associations`, sets Tang-O-Mar to code `850` and slug `tangomar`, and sets the demo to code `100` and slug `seaside`. `0018_fee_schedule.sql` adds fee rates, add-ons, owner primary lots, and invoice lines. It seeds Tang-O-Mar only and does not rewrite existing invoices. `0019_online_payments.sql` adds `payment_settings`, `stripe_event_receipts`, and `checkout_intents`, and allows payment method `stripe`. It copies existing payments and does not change their amounts.
 - Document files: R2 bucket `tango-documents`, binding `DOCUMENTS`. D1 stores version metadata and the object key.
 - Logo, images, video, and small browser scripts: `public/`, served as static assets (matching URLs are served before the Worker runs).
 - Email: Resend (`https://api.resend.com/emails`).
@@ -48,8 +50,9 @@ Do these in the dashboard or on deploy. Deploy does not apply D1 migrations.
 ## Secrets and env vars (names only)
 
 - Secret: `RESEND_API_KEY`
+- Secret: `PAYMENT_ENCRYPTION_KEY` (base64-encoded 32-byte AES-GCM key). Decrypts each neighborhood's Stripe secret key and webhook signing secret. Those Stripe values are stored only as ciphertext in `payment_settings`. They are not emailed, logged, or sent back to the browser. The page shows "Set, ending in" plus the last four characters, and Replace or Remove.
 - Vars in `wrangler.jsonc`: `APP_ENV` (`production`), `EMAIL_FROM` (`Tang-O-Mar <donotreply@mytangomar.com>`), `LEGACY_HOST_REDIRECT` (`1`), `PLATFORM_ADMIN_EMAILS` (`marc@whpinc.com`)
-- Local only: `.dev.vars` (gitignored, see `.dev.vars.example`).
+- Local only: `.dev.vars` (gitignored, see `.dev.vars.example`). Do not put a real key value in that example.
 
 ## Cron and scheduled jobs
 
@@ -72,9 +75,34 @@ Anyone can open a fictional association from the public home page without a magi
 - Sample covenant, budget, and minutes files are static text in `src/lib/demo.ts`. Opening them does not read or write Tang-O-Mar objects in R2, and it does not run the Tang-O-Mar seed-file writer.
 - Demo pages show the banner "Demo site, sample data, read only", with links to view as Owner or as Board admin.
 
+## Online payments
+
+Owners pay open invoices with Stripe Checkout (hosted page). Card numbers never touch this Worker. The amount is the ledger remainder (dues, late fees, and fee-schedule lines already on the invoice). Card fees, about 2.9% + 30 cents, are absorbed by the association. There is no convenience fee. `CARD_FEE_POLICY.absorbCardFees` in `src/lib/stripe.ts` is the hook if the board later decides otherwise.
+
+Pay now is hidden until that neighborhood has payments turned on and a valid secret key. The demo association (`seaside`, code `100`) always shows Pay now. It opens a sample checkout, records nothing, and does not call Stripe.
+
+Routes, on the internal `/a/<slug>` path and on the public vanity path (Tang-O-Mar: `https://myhoadashboard.com/tangomar/...`):
+
+- `GET /admin/payment-settings` and the `POST` actions under it. Admin edit access only (the treasurer path). Board members without edit access do not see stored key material.
+- `POST /pay` starts Checkout. `GET /pay/success` and `GET /pay/cancel` are the return pages.
+- `POST /webhooks/stripe` is the Stripe webhook. Tang-O-Mar's URL is `https://myhoadashboard.com/tangomar/webhooks/stripe`.
+
+Checkout metadata includes `neighborhood_id`, `lot`, and `invoice_ids`. Checkout sessions expire after 30 minutes. Return URLs are HTTPS except on localhost. The webhook checks the Stripe signature, ignores unpaid sessions, and records a ledger payment with method `stripe` (shown as Online (Stripe)) and the Stripe payment id as the reference. The same Stripe event or payment id does not post twice. The owner gets a receipt from `EMAIL_FROM` (`donotreply@mytangomar.com`). The board notice uses the existing staff notice list.
+
+Florida F.S. 501.171 controls in this feature: Stripe secrets are encrypted at rest with `PAYMENT_ENCRYPTION_KEY`; secret values are not logged, emailed, or returned to the browser; payment settings are limited to admin edit access; card data is not stored; checkout links expire; payment pages and webhooks require HTTPS (localhost excepted for development); activity log entries cover each recorded payment, each settings change (key saved, replaced, or removed, and payments turned on or off), and each failed webhook signature check. Those activity details do not include key values.
+
+Treasurer steps, after `0019` is applied and `PAYMENT_ENCRYPTION_KEY` is set:
+
+1. In Stripe, open the HOA's own account (test mode first). Developers, API keys. Reveal the secret key (`sk_test_...` or, later, `sk_live_...`). Restricted keys (`rk_test_...` / `rk_live_...`) also work.
+2. In the portal, Board admin, Ledger, Payment settings (or Board admin, Payment settings). Paste the secret key and choose Save. The page then shows Set, ending in, plus the last four characters, and Replace. It also shows Test mode or Live mode from the key prefix.
+3. Copy the webhook URL shown on that page. For Tang-O-Mar it is `https://myhoadashboard.com/tangomar/webhooks/stripe`.
+4. In Stripe, Developers, Webhooks, Add endpoint. Paste the URL. Select `checkout.session.completed` and `checkout.session.async_payment_succeeded`.
+5. Open the new endpoint and reveal the signing secret (`whsec_...`). Paste it into Webhook signing secret and choose Save.
+6. Check Accept online payments and choose Save. The status line reads test mode, or live after a live key is saved. Owners then see Pay now. Turn the checkbox off to hide Pay now again. Remove deletes the stored key and turns payments off.
+
 ## Known gotchas
 
-- D1 migrations are NOT applied by deploy. Each new `migrations/00NN_*.sql` is applied by hand (paste into the D1 console for database `tango`, or `npm run db:migrate:remote`) before the PR that needs it is merged. `migrations/0016_seed_seaside_demo.sql` is required for the public demo. Until it is applied, `/demo` says the demo is not ready and does not show Tang-O-Mar data. `migrations/0017_neighborhood_codes.sql` is required for neighborhood codes and `/tangomar`. Until it is applied, `/a/tango-mar` still works and email links stay on mytangomar.com. `migrations/0018_fee_schedule.sql` is required for the fee schedule. Until it is applied, Admin, Ledger shows the paste steps and dues stay one flat invoice per lot.
+- D1 migrations are NOT applied by deploy. Each new `migrations/00NN_*.sql` is applied by hand (paste into the D1 console for database `tango`, or `npm run db:migrate:remote`) before the PR that needs it is merged. `migrations/0016_seed_seaside_demo.sql` is required for the public demo. Until it is applied, `/demo` says the demo is not ready and does not show Tang-O-Mar data. `migrations/0017_neighborhood_codes.sql` is required for neighborhood codes and `/tangomar`. Until it is applied, `/a/tango-mar` still works and email links stay on mytangomar.com. `migrations/0018_fee_schedule.sql` is required for the fee schedule. Until it is applied, Admin, Ledger shows the paste steps and dues stay one flat invoice per lot. `migrations/0019_online_payments.sql` is required before a treasurer can save Stripe keys. Until it is applied, owners see no Pay now button. The demo sample checkout does not need this migration.
 - The cron list in `wrangler.jsonc` replaces any cron added in the dashboard on every deploy. Change schedules in the file, not the dashboard.
 - Estoppel requests go to `ESTOPPEL_INBOX` in `src/lib/estoppel.ts` (marc@whpinc.com for now, to be changed later). The page links Florida Statute 720.30851.
 - Demo requests go to `DEMO_INBOX` in `src/lib/demo-request.ts` (marc@whpinc.com).

@@ -116,6 +116,8 @@ import { ensureHomeownerAccount, isValidEmail, linkLotOwner, unlinkLotOwner } fr
 import { importOwners } from "../lib/import-owners";
 import { csvText, formatDollarsPlain, formatMoney, parseMoneyToCents } from "../lib/money";
 import { demoFileResponse, isDemoAssociation } from "../lib/demo";
+import { paymentSettingsView } from "../lib/online-payments";
+import { paymentsStatusForView } from "./payments";
 import { ensureSeedFiles } from "../lib/seed-files";
 import { isCheckConstraint, isMissingColumn, isMissingTable, NotFoundError } from "../lib/errors";
 import { logError, logInfo } from "../lib/log";
@@ -149,7 +151,7 @@ import { fileValue, readForm, redirectTo, requireEditor, requireStaff, streamMes
 
 const ROLES = new Set<MembershipRole>(["homeowner", "board"]);
 const STATUSES = new Set<MembershipStatus>(["invited", "active", "inactive"]);
-const METHODS = new Set(["check", "cash", "ach_recorded", "other"]);
+const METHODS = new Set(["check", "cash", "ach_recorded", "other", "stripe"]);
 const INVOICE_STATUSES = new Set(["open", "partial", "paid", "void"]);
 
 export function registerAdminRoutes(app: Hono<AppBindings>): void {
@@ -275,6 +277,11 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         admins: activeAdminContacts(owners),
         audit,
         canEdit: canEditAdmin(membership),
+        paymentsStatus: paymentsStatusForView(
+          canEditAdmin(membership),
+          association.slug,
+          (await paymentSettingsView(c.env, c.env.DB, association.id)).status,
+        ),
       }),
     });
   });
@@ -642,13 +649,16 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
     const itemLines = ledger.flatMap((row) =>
       (row.line_items ?? []).map((item) => `${item.description}: ${formatMoney(item.amount_cents)}`),
     );
+    const payments = await paymentSettingsView(c.env, c.env.DB, association.id);
     const body = [
       `${association.name} is writing about the balance on your lots.`,
       ...lines,
       ...(itemLines.length > 0 ? ["Itemized dues:", ...itemLines] : []),
       `Total: ${formatMoney(total)}.`,
       `Mail checks to ${formatAddress(association)}.`,
-      "This portal does not take card or ACH payments.",
+      payments.status === "not enabled"
+        ? "This portal does not take card or ACH payments."
+        : "Open invoices can be paid from your dashboard.",
       "This note is not legal advice.",
     ].join("\n");
     await notify(c.env.DB, {
@@ -1045,6 +1055,11 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
         duesYear: defaultDuesYear(today),
         feeSchedule: await loadFeeScheduleView(c.env.DB, association.id),
         canEdit: canEditAdmin(membership),
+        paymentsStatus: paymentsStatusForView(
+          canEditAdmin(membership),
+          association.slug,
+          (await paymentSettingsView(c.env, c.env.DB, association.id)).status,
+        ),
       }),
     });
   });

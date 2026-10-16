@@ -629,6 +629,8 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
   margin: 0.35rem 0 0.55rem;
 }
 .balance-figure .money { font-variant-numeric: tabular-nums lining-nums; }
+.pay-actions { margin-top: 0.75rem; }
+.pay-actions form { display: inline; }
 .dash-balance .money.settled { color: var(--gulf-dark); }
 .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
 .panel-head h2 { margin: 0; }

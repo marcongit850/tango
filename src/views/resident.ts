@@ -17,8 +17,37 @@ import { assessmentDisplayName } from "../lib/dues";
 import { DOCUMENT_FILE_ACCEPT, isImageContentType } from "../lib/files";
 import { clip, paragraphs, esc } from "../lib/html";
 import { formatMoney } from "../lib/money";
+import type { OwnerPayOffer } from "../lib/online-payments";
 import type { Association } from "../types";
 import { addressLine, addressLocality, confirmDeleteButton, contactPhones, dateCell, dateTimeCell, documentFileLinks, empty, invoiceLinesTable, mailingAddressHtml, methodLabel, moneySpan, propertyAddressHtml, selectField, textField, areaField } from "./bits";
+
+function remainingCents(row: InvoiceRow): number {
+  return Number(row.amount_cents) + Number(row.late_fee_cents) - Number(row.paid_cents);
+}
+
+function canPayInvoice(row: InvoiceRow): boolean {
+  return row.status !== "void" && row.status !== "paid" && remainingCents(row) > 0;
+}
+
+function payControl(slug: string, pay: OwnerPayOffer | undefined, input: { invoiceId?: string; scope?: "balance" }, label: string): string {
+  if (!pay || pay.kind === "off") return "";
+  const action = `/a/${esc(slug)}/pay`;
+  if (pay.kind === "demo") {
+    const query = input.invoiceId ? `invoice=${encodeURIComponent(input.invoiceId)}` : "scope=balance";
+    return `<a class="button" href="${action}?${query}">${esc(label)}</a>`;
+  }
+  const hidden = input.invoiceId
+    ? `<input type="hidden" name="invoice_id" value="${esc(input.invoiceId)}">`
+    : `<input type="hidden" name="scope" value="balance">`;
+  return `<form method="post" action="${action}">${hidden}<button type="submit">${esc(label)}</button></form>`;
+}
+
+function payNote(pay: OwnerPayOffer | undefined): string {
+  if (!pay || pay.kind === "off") return "";
+  if (pay.kind === "demo") return `<p class="muted">Sample checkout. Nothing is charged. Nothing here is real or saved.</p>`;
+  if (pay.mode === "test") return `<p class="muted">Test mode. No real charge.</p>`;
+  return "";
+}
 
 function excerpt(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -54,6 +83,7 @@ export function dashboardPage(options: {
   news?: AnnouncementRow[];
   events?: EventRow[];
   today?: string;
+  pay?: OwnerPayOffer;
 }): string {
   const { association, ledger } = options;
   const total = ledger.reduce((sum, row) => sum + row.balance_cents, 0);
@@ -132,10 +162,12 @@ export function dashboardPage(options: {
       </li>`;
     })
     .join("");
+  const showPay = Boolean(options.pay && options.pay.kind !== "off");
+  const payable = options.invoices.filter(canPayInvoice);
   const invoices = options.invoices
     .slice(0, 6)
     .map(
-      (row) => `<tr><td><a href="${base}/invoices/${esc(row.id)}">${esc(row.invoice_number)}</a></td><td>${invoiceDescriptionCell(row)}</td><td>${dateCell(row.due_on, association.timezone)}</td><td>${moneySpan(row.amount_cents + row.late_fee_cents)}</td><td>${esc(row.status)}</td></tr>`,
+      (row) => `<tr><td><a href="${base}/invoices/${esc(row.id)}">${esc(row.invoice_number)}</a></td><td>${invoiceDescriptionCell(row)}</td><td>${dateCell(row.due_on, association.timezone)}</td><td>${moneySpan(row.amount_cents + row.late_fee_cents)}</td><td>${esc(row.status)}</td>${showPay ? `<td>${canPayInvoice(row) ? payControl(association.slug, options.pay, { invoiceId: row.id }, "Pay now") : ""}</td>` : ""}</tr>`,
     )
     .join("");
   const payments = options.payments
@@ -172,6 +204,7 @@ export function dashboardPage(options: {
         ${ledger.length ? `<p class="balance-figure">${moneySpan(total)}</p>` : ""}
         <p class="muted">${balanceCopy}</p>
         ${late > 0 ? `<p>Outstanding late fees ${moneySpan(late)}</p>` : ""}
+        ${showPay && payable.length > 0 ? `<div class="pay-actions">${payNote(options.pay)}${payControl(association.slug, options.pay, { scope: "balance" }, "Pay full balance")}</div>` : ""}
       </article>
       <article class="panel">
         <h2>Lot dues</h2>
@@ -193,7 +226,7 @@ export function dashboardPage(options: {
     <section class="split">
       <article class="panel">
         <h2>Invoices</h2>
-        ${invoices ? `<table><thead><tr><th>Number</th><th>Description</th><th>Due</th><th>Total</th><th>Status</th></tr></thead><tbody>${invoices}</tbody></table>` : empty("No invoices yet.")}
+        ${invoices ? `<table><thead><tr><th>Number</th><th>Description</th><th>Due</th><th>Total</th><th>Status</th>${showPay ? "<th></th>" : ""}</tr></thead><tbody>${invoices}</tbody></table>` : empty("No invoices yet.")}
         <p><a href="${base}/invoices">Invoice history</a></p>
       </article>
       <article class="panel">
@@ -337,7 +370,8 @@ export function profilePage(options: {
     ${coOwner}`;
 }
 
-export function invoiceListPage(association: Association, invoices: InvoiceRow[]): string {
+export function invoiceListPage(association: Association, invoices: InvoiceRow[], pay?: OwnerPayOffer): string {
+  const showPay = Boolean(pay && pay.kind !== "off");
   const rows = invoices
     .map(
       (row) => `<tr>
@@ -350,15 +384,17 @@ export function invoiceListPage(association: Association, invoices: InvoiceRow[]
         <td>${moneySpan(row.late_fee_cents)}</td>
         <td>${moneySpan(Number(row.paid_cents))}</td>
         <td>${esc(row.status)}</td>
+        ${showPay ? `<td>${canPayInvoice(row) ? payControl(association.slug, pay, { invoiceId: row.id }, "Pay now") : ""}</td>` : ""}
       </tr>`,
     )
     .join("");
   return `<section class="panel"><h1>Invoice history</h1>
-    ${rows ? `<table><thead><tr><th>Number</th><th>Lot</th><th>Description</th><th>Issued</th><th>Due</th><th>Amount</th><th>Late fee</th><th>Paid</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>` : empty("No invoices on your lots.")}
+    ${showPay ? payNote(pay) : ""}
+    ${rows ? `<table><thead><tr><th>Number</th><th>Lot</th><th>Description</th><th>Issued</th><th>Due</th><th>Amount</th><th>Late fee</th><th>Paid</th><th>Status</th>${showPay ? "<th></th>" : ""}</tr></thead><tbody>${rows}</tbody></table>` : empty("No invoices on your lots.")}
   </section>`;
 }
 
-export function invoiceDetailPage(association: Association, invoice: InvoiceRow, today = ""): string {
+export function invoiceDetailPage(association: Association, invoice: InvoiceRow, today = "", pay?: OwnerPayOffer): string {
   const remaining = invoice.amount_cents + invoice.late_fee_cents - Number(invoice.paid_cents);
   const scheduled = Boolean(today) && invoice.issued_on > today;
   const amount = scheduled
@@ -376,7 +412,13 @@ export function invoiceDetailPage(association: Association, invoice: InvoiceRow,
     <p>Amount ${amount} · Late fee ${moneySpan(invoice.late_fee_cents)} · Paid on this invoice ${moneySpan(Number(invoice.paid_cents))}</p>
     ${remainingLine}
     <p><span class="badge">${esc(scheduled ? "scheduled" : invoice.status)}</span></p>
-    <p class="muted">Online payment is not available. Mail a check and the board will record it.</p>
+    ${
+      pay && pay.kind !== "off"
+        ? scheduled || !canPayInvoice(invoice)
+          ? ""
+          : `<div class="pay-actions">${payNote(pay)}${payControl(association.slug, pay, { invoiceId: invoice.id }, "Pay now")}</div>`
+        : `<p class="muted">Online payment is not available. Mail a check and the board will record it.</p>`
+    }
   </section>`;
 }
 
@@ -406,6 +448,75 @@ export function paymentDetailPage(association: Association, payment: PaymentRow)
     <p>${payment.invoice_number ? `Applied to ${esc(payment.invoice_number)}` : "Not tied to one invoice. It still reduces the lot balance."}</p>
     ${payment.notes ? paragraphs(payment.notes) : ""}
     <p class="muted">This is the association's record of a payment. It is not a bank receipt.</p>
+  </section>`;
+}
+
+export function payStartPage(association: Association): string {
+  return `<section class="panel">
+    <h1>Pay an invoice</h1>
+    <p>Choose Pay now on an open invoice, or pay the full balance from your dashboard.</p>
+    <p><a href="/a/${esc(association.slug)}/dashboard">Back to the dashboard</a></p>
+  </section>`;
+}
+
+export function sampleCheckoutPage(options: {
+  association: Association;
+  invoices: { invoiceId: string; lotNumber: string; invoiceNumber: string; amountCents: number }[];
+  successHref: string;
+  cancelHref: string;
+}): string {
+  const total = options.invoices.reduce((sum, invoice) => sum + invoice.amountCents, 0);
+  const rows = options.invoices
+    .map(
+      (invoice) => `<tr><td>Lot ${esc(invoice.lotNumber)}</td><td>${esc(invoice.invoiceNumber)}</td><td>${moneySpan(invoice.amountCents)}</td></tr>`,
+    )
+    .join("");
+  const action = options.invoices.length
+    ? `<p><a class="button" href="${esc(options.successHref)}">Complete sample payment</a> <a class="button secondary" href="${esc(options.cancelHref)}">Cancel</a></p>`
+    : `<p><a href="/a/${esc(options.association.slug)}/dashboard">Back to the dashboard</a></p>`;
+  return `<section class="panel">
+    <p class="kicker">Sample checkout</p>
+    <h1>Sample checkout</h1>
+    <p><strong>Nothing is charged. Nothing here is real or saved.</strong></p>
+    <p>This is not Stripe. Card number, expiration, and CVC are not collected.</p>
+    ${rows ? `<table><thead><tr><th>Lot</th><th>Invoice</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table><p>Total ${moneySpan(total)}</p>` : empty("Nothing is due.")}
+    ${action}
+  </section>`;
+}
+
+export function paySuccessPage(options: {
+  association: Association;
+  sample: { invoices: { lotNumber: string; invoiceNumber: string; amountCents: number }[]; appliedCents: number; reference: string } | null;
+}): string {
+  if (!options.sample) {
+    return `<section class="panel">
+      <h1>Payment submitted</h1>
+      <p>Stripe is confirming this payment. It shows in Payment history when the receipt is recorded. Refresh that page in a moment. Paying again is not required.</p>
+      <p><a href="/a/${esc(options.association.slug)}/payments">Payment history</a></p>
+    </section>`;
+  }
+  const rows = options.sample.invoices
+    .map(
+      (invoice) => `<tr><td>Lot ${esc(invoice.lotNumber)}</td><td>${esc(invoice.invoiceNumber)}</td><td>Online (Stripe)</td><td>${esc(options.sample?.reference ?? "")}</td><td>${moneySpan(invoice.amountCents)}</td></tr>`,
+    )
+    .join("");
+  return `<section class="panel">
+    <p class="kicker">Sample payment</p>
+    <h1>Sample payment applied</h1>
+    <p><strong>Nothing here is real or saved.</strong></p>
+    <p>The dashboard still shows the sample balance because this demo does not save payments.</p>
+    ${rows ? `<table><thead><tr><th>Lot</th><th>Invoice</th><th>Method</th><th>Reference</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>` : empty("Nothing was due.")}
+    <p>Sample payment ${moneySpan(options.sample.appliedCents)}</p>
+    <p><a href="/a/${esc(options.association.slug)}/dashboard">Back to the dashboard</a></p>
+  </section>`;
+}
+
+export function payCancelPage(association: Association, sample: boolean): string {
+  const note = sample ? `<p><strong>Nothing here is real or saved.</strong> No sample payment was applied.</p>` : `<p>No payment was recorded.</p>`;
+  return `<section class="panel">
+    <h1>Payment canceled</h1>
+    ${note}
+    <p><a href="/a/${esc(association.slug)}/dashboard">Back to the dashboard</a></p>
   </section>`;
 }
 

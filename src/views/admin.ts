@@ -7,6 +7,7 @@ import type { FeeScheduleView } from "../lib/fee-schedule-store";
 import { isAdmin, MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE, signInRoleLabel, type UserListGroup } from "../lib/access";
 import { esc, paragraphs } from "../lib/html";
 import { formatDollarsPlain, formatMoney } from "../lib/money";
+import type { PaymentStatusLine } from "../lib/online-payments";
 import type { Association, DocumentCategory } from "../types";
 import { messageWaitingOnBoard, type MessageRow } from "../db";
 import type {
@@ -78,6 +79,12 @@ function adminNav(slug: string, current: string, canEdit = true): string {
       return `<a class="button ${id === current ? "" : "secondary"}" href="${href}">${label}</a>`;
     })
     .join(" ")}</p>${canEdit ? "" : `<p class="muted">View only. Edit access is required to create, edit, or delete.</p>`}`;
+}
+
+function paymentsStatusLine(status: { line: PaymentStatusLine; settingsHref: string | null } | undefined): string {
+  if (!status) return "";
+  const link = status.settingsHref ? ` <a href="${esc(status.settingsHref)}">Payment settings</a>` : "";
+  return `<p>Payments: ${esc(status.line)}.${link}</p>`;
 }
 
 function moneyLink(href: string, cents: number): string {
@@ -159,6 +166,7 @@ export function adminHome(options: {
   admins: { user_id: string; name: string; email: string; is_master?: number }[];
   audit: AuditRow[];
   canEdit?: boolean;
+  paymentsStatus?: { line: PaymentStatusLine; settingsHref: string | null };
 }): string {
   const canEdit = options.canEdit !== false;
   const base = `/a/${esc(options.association.slug)}/admin`;
@@ -169,6 +177,7 @@ export function adminHome(options: {
   return `${adminNav(options.association.slug, "overview", canEdit)}
     <section class="panel">
       <h1>Board admin</h1>
+      ${paymentsStatusLine(options.paymentsStatus)}
       <p class="muted">Board members can view these tools. Edit access can be given to a homeowner or a board member, and it is required to change them.</p>
     </section>
     <section class="grid">
@@ -783,6 +792,7 @@ const PAYMENT_METHODS = [
   { value: "cash", label: "Cash" },
   { value: "ach_recorded", label: "ACH (recorded)" },
   { value: "other", label: "Other" },
+  { value: "stripe", label: "Online (Stripe)" },
 ];
 
 export function paymentInvoiceVisible(selectedLotId: string, propertyId: string): boolean {
@@ -800,6 +810,7 @@ export function ledgerPage(options: {
   duesYear: number;
   feeSchedule?: FeeScheduleView;
   canEdit?: boolean;
+  paymentsStatus?: { line: PaymentStatusLine; settingsHref: string | null };
 }): string {
   const canEdit = options.canEdit !== false;
   const rows = options.ledger
@@ -862,6 +873,7 @@ export function ledgerPage(options: {
   return `${adminNav(options.association.slug, "ledger", canEdit)}
     <section class="panel">
       <h1>Assessments and balances</h1>
+      ${paymentsStatusLine(options.paymentsStatus)}
       <p class="muted">Click a dollar amount to open that lot's invoices. From there you can edit an invoice or delete it. Delete stays blocked when a payment is recorded on that invoice. Delete the payment on the invoice page first.</p>
       <p><a href="/a/${esc(options.association.slug)}/admin/export.csv">Download ledger (CSV)</a></p>
       ${rows ? `<table><thead><tr><th>Lot</th><th>Primary owner</th><th>Charges</th><th>Late fees</th><th>Payments</th><th>Balance</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No lots.")}
@@ -869,6 +881,88 @@ export function ledgerPage(options: {
     ${options.feeSchedule ? feeScheduleSection(options.association, options.feeSchedule, canEdit) : ""}
     ${duesSection(options, canEdit)}
     ${record}`;
+}
+
+export function paymentSettingsPage(options: {
+  association: Association;
+  ready: boolean;
+  encryptionReady: boolean;
+  status: PaymentStatusLine;
+  secretLast4: string;
+  secretMode: "" | "test" | "live";
+  webhookLast4: string;
+  webhookUrl: string;
+  demo: boolean;
+}): string {
+  const base = `/a/${esc(options.association.slug)}/admin/payment-settings`;
+  const warnings = [
+    options.demo ? `<p class="muted">This demo does not save keys or call Stripe. Nothing here is real or saved.</p>` : "",
+    options.ready ? "" : `<p>Apply the online payments migration in D1, then reload. The steps are in the README under Online payments. No key is stored until that is done.</p>`,
+    options.encryptionReady ? "" : `<p>Online payments cannot be saved yet. The encryption secret is not set. No key was stored.</p>`,
+  ].join("");
+  return `${adminNav(options.association.slug, "ledger")}
+    <section class="panel">
+      <p><a href="/a/${esc(options.association.slug)}/admin/ledger">Assessments and balances</a></p>
+      <h1>Payment settings</h1>
+      <p>Payments: ${esc(options.status)}.</p>
+      ${warnings}
+      <p class="muted">Only an admin can change these keys. Keys are encrypted and are not shown again. Activity records that a key was saved, replaced, or removed, not the key itself. Card numbers are not collected on this site. A checkout page expires after 30 minutes.</p>
+      <p class="muted">Card fees (about 2.9% + 30 cents) are absorbed by the association unless the board decides otherwise. No convenience fee is added.</p>
+      <h2>Webhook</h2>
+      <p>In Stripe, open Developers, Webhooks, and add an endpoint. Paste this URL. Select <code>checkout.session.completed</code> and <code>checkout.session.async_payment_succeeded</code>.</p>
+      <p><code>${esc(options.webhookUrl)}</code></p>
+      ${secretField({
+        title: "Stripe secret key",
+        set: Boolean(options.secretLast4),
+        last4: options.secretLast4,
+        mode: options.secretMode === "test" ? "Test mode." : options.secretMode === "live" ? "Live mode." : "",
+        field: "secret_key",
+        saveAction: `${base}/secret`,
+        removeAction: `${base}/secret/remove`,
+        hint: "Starts with sk_test_, sk_live_, rk_test_, or rk_live_.",
+      })}
+      ${secretField({
+        title: "Webhook signing secret",
+        set: Boolean(options.webhookLast4),
+        last4: options.webhookLast4,
+        mode: "",
+        field: "webhook_secret",
+        saveAction: `${base}/webhook`,
+        removeAction: `${base}/webhook/remove`,
+        hint: "Starts with whsec_. Stripe shows it when you add the endpoint.",
+      })}
+      <h2>Accept online payments</h2>
+      <form class="fields" method="post" action="${base}/enabled">
+        <label><input type="checkbox" name="enabled" value="yes"${options.status === "not enabled" ? "" : " checked"}> Owners see Pay now</label>
+        <button type="submit">Save</button>
+      </form>
+    </section>`;
+}
+
+function secretField(options: {
+  title: string;
+  set: boolean;
+  last4: string;
+  mode: string;
+  field: string;
+  saveAction: string;
+  removeAction: string;
+  hint: string;
+}): string {
+  const state = options.set
+    ? `<p>Set, ending in ${esc(options.last4)}.${options.mode ? ` ${esc(options.mode)}` : ""}</p>`
+    : `<p>Not set.</p>`;
+  const remove = options.set
+    ? confirmDeleteButton(options.removeAction, "Remove", "Remove the stored value")
+    : "";
+  return `<h2>${esc(options.title)}</h2>
+    ${state}
+    <p class="muted">${esc(options.hint)}</p>
+    <form class="fields" method="post" action="${esc(options.saveAction)}">
+      <label>${options.set ? "Replace" : "Secret"}<input name="${esc(options.field)}" type="password" value="" autocomplete="off" spellcheck="false"></label>
+      <button type="submit">${options.set ? "Replace" : "Save"}</button>
+    </form>
+    ${remove}`;
 }
 
 export function ledgerLotPage(options: {

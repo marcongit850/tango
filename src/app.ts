@@ -22,6 +22,7 @@ import { registerAdminRoutes } from "./routes/admin";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerPlatformRoutes } from "./routes/platform";
 import { registerPublicRoutes } from "./routes/public";
+import { registerPaymentRoutes } from "./routes/payments";
 import { registerResidentRoutes } from "./routes/resident";
 import { redirectTo } from "./routes/common";
 
@@ -96,6 +97,7 @@ export function createApp(): Hono<AppBindings> {
   registerAuthRoutes(app);
   registerResidentRoutes(app);
   registerAdminRoutes(app);
+  registerPaymentRoutes(app);
   registerPlatformRoutes(app);
 
   app.notFound(async (c) => render(c, { title: "Not found", status: 404, body: "<section class=\"panel\"><h1>Page not found</h1></section>" }));

@@ -1,7 +1,7 @@
 import { canViewAdmin } from "../lib/access";
 import { findAssociationBySlug, findMembership, unreadCount } from "../db";
 import { associationPublicPath, isPlatformAdmin, isProductHost } from "../lib/hosts";
-import { DEMO_BANNER, isDemoAssociation, type DemoRole } from "../lib/demo";
+import { DEMO_BANNER, isDemoAssociation, isDemoSlug, type DemoRole } from "../lib/demo";
 import { esc, htmlResponse, isHttps } from "../lib/html";
 import type { AppBindings, Association, Membership } from "../types";
 import type { Context } from "hono";
@@ -41,6 +41,14 @@ a { color: var(--gulf); }
 .site-header { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; align-items: center; padding: 1rem 0 0.75rem; }
 .brand { display: block; line-height: 0; }
 .brand img { display: block; height: 108px; width: auto; }
+.brand.brand-name {
+  line-height: 1.15;
+  font-family: var(--serif);
+  font-size: 1.65rem;
+  color: var(--ink);
+  text-decoration: none;
+  max-width: 16rem;
+}
 nav { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; }
 nav a { text-decoration: none; color: var(--ink); padding-bottom: 0.15rem; }
 nav a.active { color: var(--gulf); box-shadow: inset 0 -2px 0 var(--gulf); }
@@ -442,6 +450,13 @@ body.landing .shore + .wrap { padding-top: 1.5rem; }
   line-height: 1.3;
 }
 .home-footer-brand img { width: 8.5rem; height: auto; display: block; }
+.home-footer-brand .footer-name {
+  font-family: var(--serif);
+  font-size: 1.05rem;
+  line-height: 1.2;
+  color: #1b2830;
+  text-align: center;
+}
 .home-footer nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.35rem 1.15rem; }
 .home-footer nav a { color: #1a2744; text-decoration: none; }
 .home-footer nav a:hover, .home-footer nav a:focus { text-decoration: underline; }
@@ -1292,27 +1307,55 @@ body.product .product-pitch .pitch-shot {
 
 const HOME_SLUG = "tango-mar";
 const MEMBER_HEADER_PATHS = new Set(["/privacy", "/terms"]);
+const FOOTER_YEAR = 2026;
 
-export function siteFooter(homeHref = "/"): string {
-  const base = `/a/${HOME_SLUG}`;
+type FooterNeighborhood = {
+  slug: string;
+  name: string;
+  legal_name: string;
+  city: string;
+  state: string;
+};
+
+function cityStateLabel(city: string, state: string): string {
+  const trimmed = state.trim();
+  const stateName = trimmed.toUpperCase() === "FL" ? "Florida" : trimmed;
+  return [city.trim(), stateName].filter(Boolean).join(", ");
+}
+
+/** Footer for the current neighborhood. With no neighborhood, this is the Tang-O-Mar footer. */
+export function siteFooter(homeHref = "/", neighborhood?: FooterNeighborhood | null): string {
+  const slug = neighborhood?.slug.trim() || HOME_SLUG;
+  const base = `/a/${slug}`;
+  const marked = !neighborhood || slug === HOME_SLUG;
+  const place = neighborhood ? cityStateLabel(neighborhood.city, neighborhood.state) : "Miramar Beach, Florida";
+  const legal = neighborhood
+    ? neighborhood.legal_name.trim() || neighborhood.name.trim() || "Homeowners Association"
+    : "Tang-O-Mar Property Owners Association";
+  const brand = marked
+    ? `<img src="/tango-mar-mark.webp" alt="Tang-O-Mar" width="1200" height="779">`
+    : `<span class="footer-name">${esc(neighborhood?.name.trim() || legal)}</span>`;
+  const placeLine = place ? `\n        <span>${esc(place)}</span>` : "";
+  const links = [
+    `<a href="${esc(homeHref)}">Home</a>`,
+    `<a href="${base}/dashboard">Dashboard</a>`,
+    `<a href="${base}/documents">Documents</a>`,
+    `<a href="${base}/faq">FAQs</a>`,
+    `<a href="${base}/messages">Contact</a>`,
+  ];
+  if (!isDemoSlug(slug)) links.push(`<a href="${base}/estoppel">Estoppel Requests</a>`);
+  links.push(`<a href="/bring-this-to-your-hoa">Bring This to Your HOA</a>`);
   return `<footer class="home-footer">
     <div class="home-footer-inner">
       <a class="home-footer-brand" href="${esc(homeHref)}">
-        <img src="/tango-mar-mark.webp" alt="Tang-O-Mar" width="1200" height="779">
-        <span>Miramar Beach, Florida</span>
+        ${brand}${placeLine}
       </a>
       <nav aria-label="Footer">
-        <a href="${esc(homeHref)}">Home</a>
-        <a href="${base}/dashboard">Dashboard</a>
-        <a href="${base}/documents">Documents</a>
-        <a href="${base}/faq">FAQs</a>
-        <a href="${base}/messages">Contact</a>
-        <a href="${base}/estoppel">Estoppel Requests</a>
-        <a href="/bring-this-to-your-hoa">Bring This to Your HOA</a>
+        ${links.join("\n        ")}
       </nav>
       <div class="home-footer-end">
         <p><a href="/privacy">Privacy Policy</a> | <a href="/terms">Terms of Use</a></p>
-        <p>© 2026 Tang-O-Mar Property Owners Association</p>
+        <p>© ${FOOTER_YEAR} ${esc(legal)}</p>
       </div>
     </div>
   </footer>`;
@@ -1337,11 +1380,11 @@ async function lookupHomeMembership(
   }
 }
 
-function askPortalWidget(): string {
+function askPortalWidget(name: string): string {
   return `<details class="ask-portal">
     <summary>Ask the portal</summary>
     <div class="ask-panel">
-      <p class="kicker">Tang-O-Mar</p>
+      <p class="kicker">${esc(name)}</p>
       <h2>Ask the portal</h2>
       <p>Questions about covenants, bylaws, and your lot.</p>
       <div class="ask-thread">
@@ -1368,6 +1411,14 @@ function iconLinks(kind: "product" | "tango"): string {
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">`;
 }
 
+function brandLink(href: string, association: Association | null | undefined): string {
+  if (association && association.slug !== HOME_SLUG) {
+    const name = association.name.trim() || association.legal_name.trim() || "Neighborhood";
+    return `<a class="brand brand-name" href="${esc(href)}">${esc(name)}</a>`;
+  }
+  return `<a class="brand" href="${esc(href)}"><img src="/tango-mar-logo.webp" alt="Tang-O-Mar Property Owners Association" width="480" height="312"></a>`;
+}
+
 function shell(options: {
   title: string;
   brandHref: string;
@@ -1380,8 +1431,11 @@ function shell(options: {
   product?: boolean;
   icon?: "product" | "tango";
   footerHome?: string;
+  association?: Association | null;
 }): string {
   const icons = iconLinks(options.icon ?? "tango");
+  const footer = siteFooter(options.footerHome, options.association);
+  const askName = options.association?.name.trim() || "Tang-O-Mar";
   if (options.product) {
     return `<!doctype html>
 <html lang="en">
@@ -1417,7 +1471,7 @@ function shell(options: {
   <a class="skip" href="#content">Skip to content</a>
   ${topbar}
   <main id="content">${options.body}</main>
-  ${siteFooter(options.footerHome)}
+  ${footer}
 </body>
 </html>`;
   }
@@ -1435,13 +1489,13 @@ function shell(options: {
 <body>
   <a class="skip" href="#content">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="${esc(options.brandHref)}"><img src="/tango-mar-logo.webp" alt="Tang-O-Mar Property Owners Association" width="480" height="312"></a>
+    ${brandLink(options.brandHref, options.association)}
     <nav>${options.nav}</nav>
     <div class="account">${options.account}</div>
   </header>
   <main id="content" class="${options.marketing ? "pitch" : "wrap stack"}">${options.body}</main>
-  ${options.askPortal ? askPortalWidget() : ""}
-  ${siteFooter(options.footerHome)}
+  ${options.askPortal ? askPortalWidget(askName) : ""}
+  ${footer}
 </body>
 </html>`;
 }
@@ -1588,6 +1642,7 @@ export async function render(
     product: options.product,
     icon,
     askPortal: resident && !options.product,
+    association,
     body: `${banner}${flashHtml}${options.body}`,
   });
   const publicBase = typeof c.req.header === "function" ? c.req.header("x-hoa-public-base") : null;

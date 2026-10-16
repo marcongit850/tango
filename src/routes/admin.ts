@@ -87,7 +87,7 @@ import {
   userLinkedToLot,
 } from "../lib/fee-schedule-store";
 import { parseOwnersCsv } from "../lib/csv";
-import { OWNER_IMPORT_TEMPLATE } from "../lib/owner-import-template";
+import { ownerImportTemplateFor } from "../lib/owner-import-template";
 import { formatAddress, formatDateTime, isIsoDate, todayIso, utcToDatetimeLocal, zonedLocalToUtc } from "../lib/dates";
 import {
   allowSupportRequest,
@@ -972,7 +972,7 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
 
   app.get("/a/:slug/admin/import/template.csv", (c) => {
     const { association } = requireStaff(c);
-    return new Response(OWNER_IMPORT_TEMPLATE, {
+    return new Response(ownerImportTemplateFor(association), {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${association.slug}-owners-template.csv"`,

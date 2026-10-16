@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
 import { DEMO_BANNER, DEMO_WRITE_MESSAGE } from "../src/lib/demo";
+import { siteFooter } from "../src/views/layout";
 import { sha256Hex } from "../src/lib/tokens";
 import { homePage } from "../src/views/public";
 
@@ -368,6 +369,14 @@ describe("public demo", () => {
     expect(crossedHtml).toContain("Riley Coast");
     expect(crossedHtml).not.toContain("Jordan Lee");
     expect(crossedHtml).not.toContain("jordan.lee@example.com");
+    expect(crossedHtml).not.toContain("Tang-O-Mar");
+    expect(crossedHtml).not.toContain("tango-mar");
+    expect(crossedHtml).not.toContain("Miramar");
+    expect(realHtml).toContain(siteFooter("/a/tango-mar"));
+    expect(realHtml).toContain("© 2026 Tang-O-Mar Property Owners Association");
+    expect(realHtml).toContain("Miramar Beach, Florida");
+    expect(realHtml).toContain('href="/a/tango-mar/estoppel">Estoppel Requests</a>');
+    expect(realHtml).toContain('alt="Tang-O-Mar Property Owners Association"');
 
     const file = await app.request(
       "http://localhost/a/seaside-demo/documents/doc_demo_covenants/file",
@@ -380,5 +389,108 @@ describe("public demo", () => {
     expect(text).not.toContain("Tang O Mar Drive");
     expect(text).not.toContain("\u2014");
     expect(text).not.toContain("\u2013");
+  });
+
+  it("keeps Tang-O-Mar names, links, and Miramar off every demo tab", async () => {
+    const app = createApp();
+    const ownerPages = [
+      "/dashboard",
+      "/documents",
+      "/news",
+      "/news/ann_demo_meeting",
+      "/calendar",
+      "/faq",
+      "/board",
+      "/messages",
+      "/notices",
+      "/profile",
+      "/invoices",
+      "/payments",
+    ];
+    const adminPages = [
+      "/admin",
+      "/admin/owners",
+      "/admin/users",
+      "/admin/import",
+      "/admin/ledger",
+      "/admin/documents",
+      "/admin/news",
+      "/admin/messages",
+      "/admin/join-requests",
+      "/admin/audit",
+      "/admin/support",
+    ];
+    const leaks = ["Tang-O-Mar", "Tango Mar", "Tang O Mar", "tango-mar", "Miramar"];
+    for (const path of ownerPages) {
+      const response = await app.request(`http://localhost/a/seaside-demo${path}`, { headers: { Cookie: "tango_demo=owner" } }, env);
+      expect(response.status, path).toBe(200);
+      const html = await response.text();
+      for (const leak of leaks) expect(html, `${path} ${leak}`).not.toContain(leak);
+      expect(html).toContain('href="/a/seaside-demo/dashboard">Dashboard</a>');
+      expect(html).toContain('href="/a/seaside-demo/documents">Documents</a>');
+      expect(html).toContain('href="/a/seaside-demo/faq">FAQs</a>');
+      expect(html).toContain('href="/a/seaside-demo/messages">Contact</a>');
+      expect(html).not.toContain("Estoppel Requests");
+      expect(html).toContain("© 2026 Seaside Demo Homeowners Association, Inc.");
+      expect(html).toContain("Sample Harbor, Florida");
+      expect(html).toContain('<p class="kicker">Seaside Demo HOA</p>');
+      expect(html).toContain('class="brand brand-name"');
+      expect(html).not.toContain("\u2014");
+      expect(html).not.toContain("\u2013");
+    }
+    for (const path of adminPages) {
+      const response = await app.request(`http://localhost/a/seaside-demo${path}`, { headers: { Cookie: "tango_demo=admin" } }, env);
+      expect(response.status, path).toBe(200);
+      const html = await response.text();
+      for (const leak of leaks) expect(html, `${path} ${leak}`).not.toContain(leak);
+      expect(html).not.toContain("Estoppel Requests");
+    }
+
+    const calendar = await app.request("http://localhost/a/seaside-demo/calendar", { headers: { Cookie: "tango_demo=owner" } }, env);
+    const calendarHtml = await calendar.text();
+    expect(calendarHtml).toContain("November 12, 2026 at 6:00 PM CST");
+    expect(calendarHtml).not.toContain("5:00 PM");
+    const meeting = await app.request("http://localhost/a/seaside-demo/news/ann_demo_meeting", { headers: { Cookie: "tango_demo=owner" } }, env);
+    expect(await meeting.text()).toContain("6:00 p.m. Central Time");
+
+    const template = await app.request(
+      "http://localhost/a/seaside-demo/admin/import/template.csv",
+      { headers: { Cookie: "tango_demo=admin" } },
+      env,
+    );
+    expect(template.status).toBe(200);
+    const csv = await template.text();
+    expect(csv).toContain("12 Dune Lane");
+    expect(csv).toContain("Sample Harbor");
+    for (const leak of leaks) expect(csv, leak).not.toContain(leak);
+
+    const stored = sqlite.prepare("SELECT starts_at, ends_at FROM events WHERE id = 'event_demo_meeting'").get() as {
+      starts_at: string;
+      ends_at: string;
+    };
+    expect(stored).toEqual({ starts_at: "2026-11-13T00:00:00Z", ends_at: "2026-11-13T01:30:00Z" });
+    sqlite.prepare("UPDATE events SET starts_at = '2026-11-12T23:00:00Z', ends_at = '2026-11-13T00:30:00Z' WHERE id = 'event_demo_meeting'").run();
+    sqlite.exec(readFileSync("migrations/0019_demo_meeting_time.sql", "utf8"));
+    const fixed = sqlite.prepare("SELECT starts_at, ends_at FROM events WHERE id = 'event_demo_meeting'").get() as {
+      starts_at: string;
+      ends_at: string;
+    };
+    expect(fixed).toEqual({ starts_at: "2026-11-13T00:00:00Z", ends_at: "2026-11-13T01:30:00Z" });
+    const realMeeting = sqlite.prepare("SELECT starts_at FROM events WHERE id = 'event_meeting'").get() as { starts_at: string };
+    expect(realMeeting.starts_at).toBe("2026-11-08T16:00:00Z");
+
+    sqlite.exec(readFileSync("migrations/0017_neighborhood_codes.sql", "utf8"));
+    const vanity = await app.request("http://localhost/seaside/dashboard", { headers: { Cookie: "tango_demo=owner" } }, env);
+    expect(vanity.status).toBe(200);
+    const vanityHtml = await vanity.text();
+    expect(vanityHtml).toContain('href="/seaside/dashboard">Dashboard</a>');
+    expect(vanityHtml).toContain('href="/seaside/documents">Documents</a>');
+    expect(vanityHtml).toContain('href="/seaside/faq">FAQs</a>');
+    expect(vanityHtml).toContain('href="/seaside/messages">Contact</a>');
+    expect(vanityHtml).toContain('href="/seaside">Home</a>');
+    expect(vanityHtml).not.toContain("/a/tango-mar");
+    expect(vanityHtml).not.toContain("Estoppel Requests");
+    expect(vanityHtml).toContain("November 12, 2026 at 6:00 PM CST");
+    for (const leak of leaks) expect(vanityHtml, leak).not.toContain(leak);
   });
 });

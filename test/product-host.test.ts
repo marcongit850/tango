@@ -378,7 +378,14 @@ describe("MyHOADashboard host", () => {
 
     const other = await app.request(`${PRODUCT}/othershore/login`, {}, env);
     expect(other.status).toBe(200);
-    expect(await other.text()).toContain('<a class="brand" href="/othershore">');
+    const otherHtml = await other.text();
+    expect(otherHtml).toContain('<a class="brand brand-name" href="/othershore">Other Shore</a>');
+    expect(otherHtml).toContain("© 2026 Other Shore HOA");
+    expect(otherHtml).toContain('href="/a/other-shore/dashboard">Dashboard</a>');
+    expect(otherHtml).toContain('href="/a/other-shore/estoppel">Estoppel Requests</a>');
+    expect(otherHtml).not.toContain("Tang-O-Mar");
+    expect(otherHtml).not.toContain("tango-mar");
+    expect(otherHtml).not.toContain("Miramar");
 
     const posted = await post(app, env, "/tangomar/login", { email: "sam.rivera@example.com" });
     const link = (await posted.text()).match(/href="(https:\/\/myhoadashboard\.com\/tangomar\/auth\/verify\?token=[a-f0-9]+)"/);

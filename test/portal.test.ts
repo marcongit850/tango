@@ -319,6 +319,11 @@ describe("dates", () => {
     expect(zonedLocalToUtc("2026-10-18T09:00", "America/Chicago")).toBe("2026-10-18T14:00:00.000Z");
     expect(todayIso("America/Chicago", new Date("2026-10-06T15:00:00Z"))).toBe("2026-10-06");
     expect(utcToDatetimeLocal("2026-11-08T16:00:00.000Z", "America/Chicago")).toBe("2026-11-08T10:00");
+    // November is CST (UTC-6). July is CDT (UTC-5). 6:00 p.m. local is a different UTC instant.
+    expect(zonedLocalToUtc("2026-11-12T18:00", "America/Chicago")).toBe("2026-11-13T00:00:00.000Z");
+    expect(formatDateTime("2026-11-13T00:00:00.000Z", "America/Chicago")).toBe("November 12, 2026 at 6:00 PM CST");
+    expect(zonedLocalToUtc("2026-07-12T18:00", "America/Chicago")).toBe("2026-07-12T23:00:00.000Z");
+    expect(formatDateTime("2026-07-12T23:00:00.000Z", "America/Chicago")).toBe("July 12, 2026 at 6:00 PM CDT");
   });
 });
 

@@ -57,7 +57,7 @@ import {
   invoiceEmailHistoryLine,
   type InvoiceEmailHistoryEntry,
 } from "../lib/invoice-emails";
-import { INVOICE_MAIL_MIGRATION_MESSAGE, mailedCheckAddressHint, type InvoiceMailSettings } from "../lib/invoice-mail";
+import { checksMailedToLine, INVOICE_MAIL_MIGRATION_MESSAGE, type InvoiceMailSettings } from "../lib/invoice-mail";
 import { formatLateFeePercent, type LateFeeSettingsView } from "../lib/late-fees";
 import { CLEAR_STUCK_HELP, CLEAR_STUCK_TOPIC, INVOICE_EMAIL_HELP, INVOICE_EMAIL_TOPIC, LATE_FEE_HELP, LATE_FEE_TOPIC, MAILED_CHECKS_HELP, MAILED_CHECKS_TOPIC, RESEND_INVOICE_HELP, RESEND_INVOICE_TOPIC, ROLE_HELP, ROLE_TOPIC, STRIPE_KEY_HELP, STRIPE_KEY_TOPIC, WEBHOOK_HELP, WEBHOOK_TOPIC, helpTip } from "./help";
 
@@ -1014,20 +1014,22 @@ function mailedChecksSection(association: Association, mail: InvoiceMailSettings
   const base = `/a/${esc(association.slug)}/admin/payment-settings`;
   const heading = `<h2 id="mailed-checks">Mailed checks${helpTip(MAILED_CHECKS_TOPIC, MAILED_CHECKS_HELP)}</h2>`;
   const preview = `<p><a href="${base}/invoice-email-preview" target="_blank" rel="noopener">Preview invoice email</a></p>`;
+  const boardHref = `/a/${esc(association.slug)}/board`;
+  const address = association.address_line1.trim()
+    ? `<p class="muted">${esc(checksMailedToLine(association))}</p><p><a href="${boardHref}">Edit address on the Board page</a></p>`
+    : `<p class="muted"><a href="${boardHref}">${esc(checksMailedToLine(association))}</a></p>`;
   if (!mail.ready) {
     return `${heading}
       <p>${esc(INVOICE_MAIL_MIGRATION_MESSAGE)} Until then, invoice emails leave out the board note. The check box uses the association address.</p>
+      ${address}
       ${preview}`;
   }
-  const addressHint = mailedCheckAddressHint(mail.mailingAddress, association);
   return `${heading}
-    <p class="muted">Shown on invoice emails. Leave the mailing address blank to use the association address. Leave the note blank to hide it. Checks payable to uses the association name when you leave it blank.</p>
+    <p class="muted">Shown on invoice emails. The address comes from the Board page. Leave the note blank to hide it. Checks payable to uses the association name when you leave it blank.</p>
+    ${address}
     ${preview}
     <form class="fields" method="post" action="${base}/mailed-checks">
       ${textField("Checks payable to", "payable_to", { value: mail.payableTo })}
-      ${areaField("Mailing address", "mailing_address", mail.mailingAddress)}
-      ${addressHint ? `<p class="muted">${esc(addressHint)}</p>` : ""}
-      <p class="muted">Up to 5 lines.</p>
       ${areaField("Note from the board on invoice emails", "board_note", mail.boardNote)}
       <p class="muted">Optional. Up to 300 characters.</p>
       <button type="submit">Save mailed checks</button>

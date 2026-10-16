@@ -15,34 +15,24 @@ export const DEMO_INVOICE_BOARD_NOTE =
 export type InvoiceMailSettings = {
   ready: boolean;
   payableTo: string;
-  mailingAddress: string;
   boardNote: string;
 };
 
 export type InvoiceMailSave = { ok: true } | { ok: false; message: string };
 
-const EMPTY_MAIL: InvoiceMailSettings = { ready: false, payableTo: "", mailingAddress: "", boardNote: "" };
-
-export function mailAddressLines(value: string): string[] {
-  return value
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .split("\n")
-    .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
-    .filter(Boolean);
-}
+const EMPTY_MAIL: InvoiceMailSettings = { ready: false, payableTo: "", boardNote: "" };
 
 export async function invoiceMailSettings(db: D1Database, associationId: string): Promise<InvoiceMailSettings> {
   if (!(await tableExists(db, "invoice_mail_settings"))) return EMPTY_MAIL;
+  // mailing_address stays in the table and is not read. Checks use the association address.
   const row = await db
-    .prepare("SELECT payable_to, mailing_address, board_note FROM invoice_mail_settings WHERE association_id = ?")
+    .prepare("SELECT payable_to, board_note FROM invoice_mail_settings WHERE association_id = ?")
     .bind(associationId)
-    .first<{ payable_to: string; mailing_address: string; board_note: string }>();
-  if (!row) return { ready: true, payableTo: "", mailingAddress: "", boardNote: "" };
+    .first<{ payable_to: string; board_note: string }>();
+  if (!row) return { ready: true, payableTo: "", boardNote: "" };
   return {
     ready: true,
     payableTo: row.payable_to ?? "",
-    mailingAddress: row.mailing_address ?? "",
     boardNote: row.board_note ?? "",
   };
 }
@@ -50,26 +40,23 @@ export async function invoiceMailSettings(db: D1Database, associationId: string)
 export async function saveInvoiceMailSettings(
   db: D1Database,
   associationId: string,
-  input: { payableTo: string; mailingAddress: string; boardNote: string },
+  input: { payableTo: string; boardNote: string },
 ): Promise<InvoiceMailSave> {
   if (!(await tableExists(db, "invoice_mail_settings"))) return { ok: false, message: INVOICE_MAIL_MIGRATION_MESSAGE };
   const payableTo = input.payableTo.replace(/[\r\n\t]+/g, " ").replace(/ +/g, " ").trim();
   if (payableTo.length > 120) return { ok: false, message: "Checks payable to must be 120 characters or less." };
-  const lines = mailAddressLines(input.mailingAddress);
-  if (lines.length > 5) return { ok: false, message: "Mailing address can be at most 5 lines." };
-  if (lines.some((line) => line.length > 80)) return { ok: false, message: "Each mailing address line must be 80 characters or less." };
   const boardNote = input.boardNote.replace(/[\r\n\t]+/g, " ").replace(/ +/g, " ").trim();
   if (boardNote.length > 300) return { ok: false, message: "Note from the board must be 300 characters or less." };
+  // mailing_address is not written, so a value already stored on the row is left as it is.
   await db
     .prepare(
-      `INSERT INTO invoice_mail_settings (association_id, payable_to, mailing_address, board_note)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO invoice_mail_settings (association_id, payable_to, board_note)
+       VALUES (?, ?, ?)
        ON CONFLICT(association_id) DO UPDATE SET
          payable_to = excluded.payable_to,
-         mailing_address = excluded.mailing_address,
          board_note = excluded.board_note`,
     )
-    .bind(associationId, payableTo, lines.join("\n"), boardNote)
+    .bind(associationId, payableTo, boardNote)
     .run();
   return { ok: true };
 }
@@ -88,21 +75,16 @@ export function associationCheckMailLines(association: CheckAddressSource): stri
   return [association.name.trim(), "Attn: Board of Directors", formatAddress(association)];
 }
 
-/** Saved mailing address, or the association address when that box is blank. Empty only when both are blank. */
-export function mailLinesForEmail(settings: InvoiceMailSettings, association: CheckAddressSource): string[] {
-  if (settings.ready) {
-    const saved = mailAddressLines(settings.mailingAddress).slice(0, 5);
-    if (saved.length > 0) return saved;
-  }
+/** Check box lines. Always the association address. Hidden only when the street is blank. */
+export function mailLinesForEmail(association: CheckAddressSource): string[] {
   return associationCheckMailLines(association);
 }
 
-/** Muted line under a blank Mailed checks address. Empty when a custom address is saved or the association has no street. */
-export function mailedCheckAddressHint(mailingAddress: string, association: CheckAddressSource): string {
-  if (mailAddressLines(mailingAddress).length > 0) return "";
+/** Read-only line in Payment settings. The lines are the same ones the email shows, joined with commas. */
+export function checksMailedToLine(association: CheckAddressSource): string {
   const lines = associationCheckMailLines(association);
-  if (lines.length === 0) return "";
-  return `Blank uses the association address: ${lines.join(", ")}`;
+  if (lines.length === 0) return "No address yet. Add it on the Board page.";
+  return `Checks are mailed to: ${lines.join(", ")}`;
 }
 
 /** Sample letter for the Payment settings preview. Uses this HOA's saved check details and payment switch. */
@@ -125,7 +107,7 @@ export async function previewInvoiceEmail(db: D1Database, association: Associati
     payOnline,
     feeLine: payOnline ? invoiceBankFeeLine(fee) : "",
     payableTo: mail.payableTo,
-    mailLines: mailLinesForEmail(mail, association),
+    mailLines: mailLinesForEmail(association),
     boardNote: mail.ready ? mail.boardNote : "",
   });
   return { html: letter.html };

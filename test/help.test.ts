@@ -205,7 +205,7 @@ describe("help placements", () => {
       feeCap: "5.00",
       invoiceEmailsReady: true,
       invoiceEmailsEnabled: false,
-      mail: { ready: true, payableTo: "", mailingAddress: "", boardNote: "" },
+      mail: { ready: true, payableTo: "", boardNote: "" },
       processing: [{ id: "intent_stuck", amountCents: 40050, feeCents: 323, lotNumbers: "27", createdAt: "2026-10-01T00:00:00.000Z" }],
     });
     const stripeAt = settings.indexOf("<h2>Stripe secret key");
@@ -219,7 +219,8 @@ describe("help placements", () => {
     expect(settings).toContain('aria-label="Help: Mailed checks"');
     expect(settings).toContain(MAILED_CHECKS_HELP);
     expect(settings).toContain("Preview invoice email");
-    expect(settings).toContain("Blank uses the association address: Tang-O-Mar, Attn: Board of Directors, 31 Tang O Mar Drive, Miramar Beach, FL 32550");
+    expect(settings).toContain("Checks are mailed to: Tang-O-Mar, Attn: Board of Directors, 31 Tang O Mar Drive, Miramar Beach, FL 32550");
+    expect(settings).toContain('href="/a/tango-mar/board">Edit address on the Board page</a>');
     expect(settings).toContain('aria-label="Help: Invoice emails"');
     expect(settings).toContain(INVOICE_EMAIL_HELP);
     expect(settings).toContain("Save invoice emails");

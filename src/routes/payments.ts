@@ -86,7 +86,6 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
     const back = `${settingsPath(association.slug)}#mailed-checks`;
     const saved = await saveInvoiceMailSettings(c.env.DB, association.id, {
       payableTo: textValue(fields, "payable_to", 200),
-      mailingAddress: textValue(fields, "mailing_address", 500),
       boardNote: textValue(fields, "board_note", 400),
     });
     if (!saved.ok) return redirectTo(c, back, saved.message, "warn");

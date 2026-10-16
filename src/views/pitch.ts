@@ -298,7 +298,7 @@ export function hoaPitchPage(options: PitchPageOptions = {}): string {
     ),
     faqItem(
       "Can homeowners pay assessments online?",
-      "Not yet. Homeowners can view balances, invoices, and payments the board has recorded. The portal does not accept card or ACH payments. Online payments are coming soon.",
+      "Homeowners can view balances, invoices, and payments the board has recorded. When the board turns online payments on, owners pay by ACH bank transfer. Credit and debit cards are not accepted.",
     ),
     faqItem(
       "Can multiple board members have administrator access?",

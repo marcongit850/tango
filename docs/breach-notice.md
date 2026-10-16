@@ -2,7 +2,7 @@
 
 This note is for the Tang-O-Mar board and any other neighborhood that uses this portal. It is a plain-language checklist for Florida Statutes section 501.171. It is not legal advice. Ask the association attorney before you send a notice.
 
-A breach here means someone got, or may have got, personal information the portal was not supposed to give them. That can include owner names, email addresses, lot numbers, invoice amounts, and payment history. The portal does not store card numbers. Stripe holds the card data.
+A breach here means someone got, or may have got, personal information the portal was not supposed to give them. That can include owner names, email addresses, lot numbers, invoice amounts, and payment history. The portal does not store bank account numbers. Online payments are ACH bank transfer only. Credit and debit cards are not accepted. Stripe hosts the bank page.
 
 ## Who to notify
 

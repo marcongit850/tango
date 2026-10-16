@@ -119,7 +119,7 @@ export function productPage(state: ProductPageState = {}): string {
     ),
     feature(
       "Dues the board records",
-      "The board records checks, cash, and ACH payments against invoices. Card numbers are not stored. Bank account numbers are not stored. The portal does not charge a card.",
+      "The board records checks and cash. Owners can pay open invoices by ACH bank transfer when the board turns online payments on. Credit and debit cards are not accepted. Bank account numbers are not stored.",
       "ledger",
       "blue",
     ),
@@ -224,7 +224,7 @@ export function productPage(state: ProductPageState = {}): string {
           )}
           ${faqItem(
             "How are dues paid?",
-            "<p>The board records checks, cash, and ACH payments against invoices. Owners can see balances, invoices, and those recorded payments. The portal does not charge a card. Card numbers are not stored. Bank account numbers are not stored.</p>",
+            "<p>The board records checks and cash. Owners can pay open invoices by ACH bank transfer when the board turns online payments on. Credit and debit cards are not accepted. Bank account numbers are not stored.</p>",
           )}
           ${faqItem(
             "Does each HOA keep its own records?",

@@ -657,8 +657,8 @@ export function registerAdminRoutes(app: Hono<AppBindings>): void {
       `Total: ${formatMoney(total)}.`,
       `Mail checks to ${formatAddress(association)}.`,
       payments.status === "not enabled"
-        ? "This portal does not take card or ACH payments."
-        : "Open invoices can be paid from your dashboard.",
+        ? "Online payments are not turned on. Credit and debit cards are not accepted. Mail a check, or ask the board about bank transfer."
+        : "Open invoices can be paid from your dashboard by bank transfer. Credit and debit cards are not accepted.",
       "This note is not legal advice.",
     ].join("\n");
     await notify(c.env.DB, {

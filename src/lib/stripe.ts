@@ -1,16 +1,6 @@
+import { BANK_TRANSFER_FEE_LABEL } from "./bank-fee";
 import { portalUrl } from "./hosts";
 import { fixedTimeEqual } from "./payment-crypto";
-
-/**
- * Card processing fees.
- * TODO: The association absorbs card fees (about 2.9% + 30 cents) unless the board decides otherwise.
- * Do not add a convenience fee while absorbCardFees is true. There is no per-neighborhood override yet.
- */
-export const CARD_FEE_POLICY = {
-  absorbCardFees: true,
-  percent: 0.029,
-  fixedCents: 30,
-} as const;
 
 /** Checkout pages expire after 30 minutes, which is Stripe's shortest allowed session. */
 export const CHECKOUT_TTL_SECONDS = 30 * 60;
@@ -23,13 +13,6 @@ const WEBHOOK_SECRET = /^whsec_[A-Za-z0-9+/=]{8,}$/;
 export type StripeKeyMode = "test" | "live";
 
 export type SignatureFailure = "missing signature" | "stale timestamp" | "signature mismatch" | "unreadable signature";
-
-export function checkoutAmountCents(ledgerCents: number): number {
-  if (ledgerCents <= 0) return 0;
-  if (CARD_FEE_POLICY.absorbCardFees) return ledgerCents;
-  const variable = Math.round(ledgerCents * CARD_FEE_POLICY.percent);
-  return ledgerCents + variable + CARD_FEE_POLICY.fixedCents;
-}
 
 export function stripeSecretMode(secret: string): StripeKeyMode | null {
   const value = secret.trim();
@@ -153,7 +136,10 @@ export type CheckoutLine = {
 
 export type CheckoutRequest = {
   secretKey: string;
+  /** Invoice subtotal in cents. This line is the dues the association keeps. */
   amountCents: number;
+  /** Bank transfer processing fee in cents. Sent as its own line item. Zero omits the line. */
+  feeCents?: number;
   name: string;
   customerEmail: string;
   successUrl: string;
@@ -175,6 +161,9 @@ export async function createCheckoutSession(
 ): Promise<{ ok: true; id: string; url: string; clientReferenceId: string } | { ok: false; status: number }> {
   const body = new URLSearchParams();
   body.set("mode", "payment");
+  body.set("payment_method_types[0]", "us_bank_account");
+  body.set("payment_method_options[us_bank_account][verification_method]", "automatic");
+  body.set("payment_method_options[us_bank_account][financial_connections][permissions][0]", "payment_method");
   body.set("success_url", input.successUrl);
   body.set("cancel_url", input.cancelUrl);
   body.set("customer_email", input.customerEmail);
@@ -184,6 +173,13 @@ export async function createCheckoutSession(
   body.set("line_items[0][price_data][currency]", "usd");
   body.set("line_items[0][price_data][unit_amount]", String(input.amountCents));
   body.set("line_items[0][price_data][product_data][name]", input.name.slice(0, 120));
+  const feeCents = input.feeCents ?? 0;
+  if (feeCents > 0) {
+    body.set("line_items[1][quantity]", "1");
+    body.set("line_items[1][price_data][currency]", "usd");
+    body.set("line_items[1][price_data][unit_amount]", String(feeCents));
+    body.set("line_items[1][price_data][product_data][name]", BANK_TRANSFER_FEE_LABEL);
+  }
   const metadata: Record<string, string> = {
     neighborhood_id: input.metadata.neighborhoodId,
     lot: input.metadata.lot,
@@ -255,9 +251,41 @@ export type ParsedDisputeEvent = {
   neighborhoodId: string;
 };
 
-export type ParsedStripeEvent = { kind: "ignore" } | ParsedCheckoutEvent | ParsedRefundEvent | ParsedDisputeEvent;
+export type ParsedCheckoutProcessingEvent = {
+  kind: "processing";
+  livemode: boolean | null;
+  eventId: string;
+  sessionId: string;
+  amountTotal: number;
+  currency: string;
+  clientReferenceId: string;
+  neighborhoodId: string;
+  invoiceIds: string;
+  userId: string;
+};
 
-/** Reads only the fields we record. Card numbers and payment method details are ignored. */
+export type ParsedCheckoutFailedEvent = {
+  kind: "checkout_failed";
+  livemode: boolean | null;
+  eventId: string;
+  sessionId: string;
+  amountTotal: number;
+  currency: string;
+  clientReferenceId: string;
+  neighborhoodId: string;
+  invoiceIds: string;
+  userId: string;
+};
+
+export type ParsedStripeEvent =
+  | { kind: "ignore" }
+  | ParsedCheckoutEvent
+  | ParsedCheckoutProcessingEvent
+  | ParsedCheckoutFailedEvent
+  | ParsedRefundEvent
+  | ParsedDisputeEvent;
+
+/** Reads only the fields we record. Bank account numbers and payment method details are ignored. */
 export function parseStripeEvent(payload: string): ParsedStripeEvent | null {
   let parsed: unknown;
   try {
@@ -270,7 +298,10 @@ export function parseStripeEvent(payload: string): ParsedStripeEvent | null {
   if (typeof event.id !== "string" || event.id.length < 4 || event.id.length > 255) return null;
   const livemode = typeof event.livemode === "boolean" ? event.livemode : null;
   if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
-    return parseCheckout(event.id, livemode, event.data?.object);
+    return parseCheckout(event.id, livemode, event.type, event.data?.object);
+  }
+  if (event.type === "checkout.session.async_payment_failed") {
+    return parseCheckoutFailed(event.id, livemode, event.data?.object);
   }
   if (event.type === "charge.refunded") return parseRefund(event.id, livemode, event.data?.object);
   if (event.type === "charge.dispute.created" || event.type === "charge.dispute.closed") {
@@ -279,7 +310,68 @@ export function parseStripeEvent(payload: string): ParsedStripeEvent | null {
   return { kind: "ignore" };
 }
 
-function parseCheckout(eventId: string, livemode: boolean | null, session: unknown): ParsedStripeEvent | null {
+function parseCheckout(
+  eventId: string,
+  livemode: boolean | null,
+  eventType: string,
+  session: unknown,
+): ParsedStripeEvent | null {
+  const row = checkoutSessionFields(session);
+  if (!row) return null;
+  const metadata = metadataStrings(row.metadata);
+  const shared = {
+    livemode,
+    eventId,
+    sessionId: row.id,
+    amountTotal: row.amountTotal,
+    currency: "usd" as const,
+    clientReferenceId: row.clientReferenceId,
+    neighborhoodId: metadata.neighborhood_id || metadata.association_id,
+    invoiceIds: metadata.invoice_ids,
+    userId: metadata.user_id,
+  };
+  if (row.paymentStatus === "paid") {
+    return {
+      kind: "checkout",
+      ...shared,
+      paid: true,
+      paymentId: paymentIntentId(row.paymentIntent) || row.id,
+      lot: metadata.lot,
+    };
+  }
+  // ACH stays unpaid on checkout.session.completed until the bank debit settles.
+  if (row.paymentStatus === "unpaid" && eventType === "checkout.session.completed") {
+    return { kind: "processing", ...shared };
+  }
+  return { kind: "ignore" };
+}
+
+function parseCheckoutFailed(eventId: string, livemode: boolean | null, session: unknown): ParsedStripeEvent | null {
+  const row = checkoutSessionFields(session);
+  if (!row) return null;
+  const metadata = metadataStrings(row.metadata);
+  return {
+    kind: "checkout_failed",
+    livemode,
+    eventId,
+    sessionId: row.id,
+    amountTotal: row.amountTotal,
+    currency: "usd",
+    clientReferenceId: row.clientReferenceId,
+    neighborhoodId: metadata.neighborhood_id || metadata.association_id,
+    invoiceIds: metadata.invoice_ids,
+    userId: metadata.user_id,
+  };
+}
+
+function checkoutSessionFields(session: unknown): {
+  id: string;
+  paymentStatus: string;
+  amountTotal: number;
+  clientReferenceId: string;
+  paymentIntent: unknown;
+  metadata: unknown;
+} | null {
   if (!session || typeof session !== "object") return null;
   const row = session as {
     id?: unknown;
@@ -291,26 +383,16 @@ function parseCheckout(eventId: string, livemode: boolean | null, session: unkno
     metadata?: unknown;
   };
   if (typeof row.id !== "string" || !row.id.startsWith("cs_")) return null;
-  if (row.payment_status !== "paid") return { kind: "ignore" };
   if (typeof row.amount_total !== "number" || !Number.isSafeInteger(row.amount_total) || row.amount_total <= 0) return null;
   if (row.currency !== "usd") return null;
-  const paymentId = paymentIntentId(row.payment_intent) || row.id;
   if (typeof row.client_reference_id !== "string" || !row.client_reference_id) return null;
-  const metadata = metadataStrings(row.metadata);
   return {
-    kind: "checkout",
-    livemode,
-    eventId,
-    paid: true,
-    sessionId: row.id,
+    id: row.id,
+    paymentStatus: typeof row.payment_status === "string" ? row.payment_status : "",
     amountTotal: row.amount_total,
-    currency: "usd",
-    paymentId,
     clientReferenceId: row.client_reference_id,
-    neighborhoodId: metadata.neighborhood_id || metadata.association_id,
-    lot: metadata.lot,
-    invoiceIds: metadata.invoice_ids,
-    userId: metadata.user_id,
+    paymentIntent: row.payment_intent,
+    metadata: row.metadata,
   };
 }
 

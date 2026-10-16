@@ -90,7 +90,8 @@ describe("bring this to your HOA", () => {
     expect(html).not.toContain("Do we need to change management companies?");
     expect(html).not.toContain("Can the portal use our existing domain?");
     expect(html).toContain("An administrator can import a CSV file of owners.");
-    expect(html).toContain("The portal does not accept card or ACH payments.");
+    expect(html).toContain("Credit and debit cards are not accepted.");
+    expect(html).toContain("ACH bank transfer");
     expect(html).toContain("Several people can have administrator access at the same time.");
     expect(html).toContain('src="/bring/dashboard-desktop.webp"');
     expect(html).toContain('src="/bring/dashboard-phone.webp"');

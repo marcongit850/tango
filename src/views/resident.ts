@@ -29,7 +29,7 @@ import {
 import { formatMoney } from "../lib/money";
 import type { OwnerPayOffer, ProcessingCheckout } from "../lib/online-payments";
 import type { Association } from "../types";
-import { addressLine, addressLocality, confirmDeleteButton, contactPhones, dateCell, dateTimeCell, documentFileLinks, empty, invoiceLinesTable, mailingAddressHtml, moneySpan, paymentMethodLabel, propertyAddressHtml, selectField, textField, areaField } from "./bits";
+import { addressLine, addressLocality, confirmDeleteButton, contactPhones, dateCell, dateTimeCell, documentFileLinks, empty, invoiceLinesTable, mailingAddressHtml, moneySpan, paymentMethodLabel, plainMoney, propertyAddressHtml, selectField, textField, areaField } from "./bits";
 import {
   BOARD_ONLY_HELP,
   BOARD_ONLY_TOPIC,
@@ -41,6 +41,9 @@ import {
   helpTip,
 } from "./help";
 
+// Same cents Pay now collects: invoice total plus late fees, minus applied
+// payments and credits. A pending or processing bank transfer is not a payment
+// yet, so it is not included in paid_cents.
 function remainingCents(row: InvoiceRow): number {
   return Number(row.amount_cents) + Number(row.late_fee_cents) - Number(row.paid_cents);
 }
@@ -180,7 +183,7 @@ export function dashboardPage(options: {
   const invoices = options.invoices
     .slice(0, 6)
     .map(
-      (row) => `<tr><td><a href="${base}/invoices/${esc(row.id)}">${esc(row.invoice_number)}</a></td><td>${invoiceDescriptionCell(row)}</td><td>${dateCell(row.due_on, association.timezone)}</td><td>${moneySpan(row.amount_cents + row.late_fee_cents)}</td><td>${esc(row.status)}</td>${showPay ? `<td>${canPayInvoice(row) ? payControl(association.slug, options.pay, "Pay now") : ""}</td>` : ""}</tr>`,
+      (row) => `<tr><td><a href="${base}/invoices/${esc(row.id)}">${esc(row.invoice_number)}</a></td><td>${invoiceDescriptionCell(row)}</td><td>${dateCell(row.due_on, association.timezone)}</td><td>${plainMoney(row.amount_cents + row.late_fee_cents)}</td><td>${moneySpan(remainingCents(row))}</td><td>${esc(row.status)}</td>${showPay ? `<td>${canPayInvoice(row) ? payControl(association.slug, options.pay, "Pay now") : ""}</td>` : ""}</tr>`,
     )
     .join("");
   const payments = options.payments
@@ -239,7 +242,7 @@ export function dashboardPage(options: {
     <section class="split">
       <article class="panel">
         <h2>Invoices</h2>
-        ${invoices ? `<table><thead><tr><th>Number</th><th>Description</th><th>Due</th><th>Total</th><th>Status</th>${showPay ? "<th></th>" : ""}</tr></thead><tbody>${invoices}</tbody></table>` : empty("No invoices yet.")}
+        ${invoices ? `<table><thead><tr><th>Number</th><th>Description</th><th>Due</th><th>Total</th><th>Balance</th><th>Status</th>${showPay ? "<th></th>" : ""}</tr></thead><tbody>${invoices}</tbody></table>` : empty("No invoices yet.")}
         <p><a href="${base}/invoices">Invoice history</a></p>
       </article>
       <article class="panel">
@@ -394,9 +397,10 @@ export function invoiceListPage(association: Association, invoices: InvoiceRow[]
         <td>${invoiceDescriptionCell(row)}</td>
         <td>${dateCell(row.issued_on, association.timezone)}</td>
         <td>${dateCell(row.due_on, association.timezone)}</td>
-        <td>${moneySpan(row.amount_cents)}</td>
-        <td>${moneySpan(row.late_fee_cents)}</td>
-        <td>${moneySpan(Number(row.paid_cents))}</td>
+        <td>${plainMoney(row.amount_cents)}</td>
+        <td>${plainMoney(row.late_fee_cents)}</td>
+        <td>${plainMoney(Number(row.paid_cents))}</td>
+        <td>${moneySpan(remainingCents(row))}</td>
         <td>${esc(row.status)}</td>
         ${showPay ? `<td>${canPayInvoice(row) ? payControl(association.slug, pay, "Pay now") : ""}</td>` : ""}
       </tr>`,
@@ -404,27 +408,24 @@ export function invoiceListPage(association: Association, invoices: InvoiceRow[]
     .join("");
   return `<section class="panel"><h1>Invoice history</h1>
     ${showPay ? payNote(pay) : ""}
-    ${rows ? `<table><thead><tr><th>Number</th><th>Lot</th><th>Description</th><th>Issued</th><th>Due</th><th>Amount</th><th>Late fee</th><th>Paid</th><th>Status</th>${showPay ? "<th></th>" : ""}</tr></thead><tbody>${rows}</tbody></table>` : empty("No invoices on your lots.")}
+    ${rows ? `<table><thead><tr><th>Number</th><th>Lot</th><th>Description</th><th>Issued</th><th>Due</th><th>Amount</th><th>Late fee</th><th>Paid</th><th>Balance</th><th>Status</th>${showPay ? "<th></th>" : ""}</tr></thead><tbody>${rows}</tbody></table>` : empty("No invoices on your lots.")}
   </section>`;
 }
 
 export function invoiceDetailPage(association: Association, invoice: InvoiceRow, today = "", pay?: OwnerPayOffer): string {
-  const remaining = invoice.amount_cents + invoice.late_fee_cents - Number(invoice.paid_cents);
+  const remaining = remainingCents(invoice);
   const scheduled = Boolean(today) && invoice.issued_on > today;
-  const amount = scheduled
-    ? `<span class="money">${esc(formatMoney(invoice.amount_cents))}</span>`
-    : moneySpan(invoice.amount_cents);
   const timing = scheduled
     ? `<p class="muted">Scheduled. Not owed until ${dateCell(invoice.issued_on, association.timezone)}.</p>`
     : `<p>Issued ${dateCell(invoice.issued_on, association.timezone)} · Due ${dateCell(invoice.due_on, association.timezone)}</p>`;
-  const remainingLine = scheduled ? "" : `<p>Remaining on this invoice ${moneySpan(remaining)}</p>`;
+  const balanceLine = scheduled ? "" : `<p>Balance ${moneySpan(remaining)}</p>`;
   return `<section class="panel">
     <h1>${esc(invoice.invoice_number)}</h1>
     <p>${esc(assessmentDisplayName(invoice.description))}</p>
-    ${(invoice.lines ?? []).length > 0 ? invoiceLinesTable(invoice.lines ?? []) : `<p>Lot ${esc(invoice.lot_number)}</p>`}
+    ${(invoice.lines ?? []).length > 0 ? invoiceLinesTable(invoice.lines ?? [], { plain: true }) : `<p>Lot ${esc(invoice.lot_number)}</p>`}
     ${timing}
-    <p>Amount ${amount} · Late fee ${moneySpan(invoice.late_fee_cents)} · Paid on this invoice ${moneySpan(Number(invoice.paid_cents))}</p>
-    ${remainingLine}
+    <p>Amount ${plainMoney(invoice.amount_cents)} · Late fee ${plainMoney(invoice.late_fee_cents)} · Paid on this invoice ${plainMoney(Number(invoice.paid_cents))}</p>
+    ${balanceLine}
     <p><span class="badge">${esc(scheduled ? "scheduled" : invoice.status)}</span></p>
     ${
       pay && pay.kind !== "off"

@@ -4,19 +4,28 @@ import { isBrowserViewable } from "../lib/files";
 import { esc } from "../lib/html";
 import { formatMoney } from "../lib/money";
 
-export function invoiceLinesTable(lines: readonly { description: string; amount_cents: number }[]): string {
+export function invoiceLinesTable(
+  lines: readonly { description: string; amount_cents: number }[],
+  options?: { plain?: boolean },
+): string {
   if (lines.length === 0) return "";
+  const amount = options?.plain ? plainMoney : moneySpan;
   const body = lines
-    .map((line) => `<tr><td>${esc(line.description)}</td><td>${moneySpan(line.amount_cents)}</td></tr>`)
+    .map((line) => `<tr><td>${esc(line.description)}</td><td>${amount(line.amount_cents)}</td></tr>`)
     .join("");
   const total = lines.reduce((sum, line) => sum + Number(line.amount_cents), 0);
-  return `<table><thead><tr><th>Line</th><th>Amount</th></tr></thead><tbody>${body}<tr><td>Total</td><td>${moneySpan(total)}</td></tr></tbody></table>`;
+  return `<table><thead><tr><th>Line</th><th>Amount</th></tr></thead><tbody>${body}<tr><td>Total</td><td>${amount(total)}</td></tr></tbody></table>`;
 }
 
 export function moneySpan(cents: number): string {
   const tone = cents > 0 ? "owe" : cents < 0 ? "credit" : "settled";
   const label = cents < 0 ? `${formatMoney(cents)} credit` : formatMoney(cents);
   return `<span class="money ${tone}">${esc(label)}</span>`;
+}
+
+/** Amount with no owe, credit, or settled color. Used for invoice totals. */
+export function plainMoney(cents: number): string {
+  return `<span class="money">${esc(formatMoney(cents))}</span>`;
 }
 
 export function dateCell(iso: string, timeZone: string): string {

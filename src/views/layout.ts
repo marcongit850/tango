@@ -92,7 +92,7 @@ h1 { font-size: 2rem; }
 .flash { padding: 0.75rem 1rem; border-radius: 0; background: #e7f4ee; color: var(--ok); }
 .flash.warn { background: #fff4e5; color: var(--warn); }
 .emergency { background: var(--emergency); border: 1px solid #efc6c0; border-radius: 0; padding: 0.8rem 1rem; }
-.money { font-variant-numeric: tabular-nums; font-weight: 650; }
+.money { font-variant-numeric: tabular-nums; font-weight: 650; white-space: nowrap; }
 .money.owe { color: var(--late); }
 .money.credit { color: var(--ok); }
 .figure { font-size: 2rem; margin: 0.2rem 0; }

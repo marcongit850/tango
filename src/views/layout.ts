@@ -144,6 +144,9 @@ input, select, textarea {
 input[type="checkbox"] { width: auto; justify-self: start; }
 textarea { min-height: 7rem; }
 form.fields { display: grid; gap: 0.75rem; }
+label.pay-invoice { display: flex; flex-direction: row; align-items: flex-start; gap: 0.55rem; }
+label.pay-invoice > span { flex: 1 1 auto; min-width: 0; }
+label.pay-invoice input[type="checkbox"] { flex: 0 0 auto; margin: 0.2rem 0 0; }
 form.email-prefs h2 { margin: 0.75rem 0 0; font-size: 1.05rem; }
 .mailing-edit { margin-top: 0.75rem; }
 .mailing-edit > summary {

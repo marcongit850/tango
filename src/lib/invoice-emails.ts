@@ -1,12 +1,14 @@
-import { invoiceById, listAssociations, notify, writeAudit } from "../db";
+import { invoiceById, invoiceNetPaidSql, listAssociations, notify, paymentReversalsReady, paymentTestReady, writeAudit } from "../db";
 import type { Association } from "../types";
 import { formatCentralDateTime, todayIso } from "./dates";
 import { isDemoAssociationId } from "./demo";
 import { assessmentDisplayName } from "./dues";
-import { invoiceOwnerEmail, resendApiKey, sendResendEmail, uniqueLoginEmails } from "./email";
+import { invoiceAmountDueCents, invoiceOwnerEmail, resendApiKey, sendResendEmail, uniqueLoginEmails } from "./email";
 import { tableExists } from "./fee-schedule-store";
 import { canonicalPortalUrl } from "./hosts";
+import { feeLineForEmail, invoiceMailSettings, mailLinesForEmail } from "./invoice-mail";
 import { logError, logInfo } from "./log";
+import { bankFeeConfig, onlinePaymentsOn } from "./online-payments";
 
 export type InvoiceEmailSettings = {
   ready: boolean;
@@ -115,10 +117,12 @@ export type InvoiceEmailRun = {
 type DueInvoice = {
   id: string;
   property_id: string;
+  lot_number: string;
   invoice_number: string;
   description: string;
   amount_cents: number;
   late_fee_cents: number;
+  paid_cents: number;
   due_on: string;
   billed_user_id: string | null;
 };
@@ -266,15 +270,26 @@ async function deliverInvoiceLetter(
   const db = env.DB;
   const description = assessmentDisplayName(invoice.description);
   const payUrl = canonicalPortalUrl(association, `/invoices/${invoice.id}`);
+  const [mail, payOnline, fee] = await Promise.all([
+    invoiceMailSettings(db, association.id),
+    onlinePaymentsOn(db, association.id),
+    bankFeeConfig(db, association.id),
+  ]);
   const letter = invoiceOwnerEmail({
     associationName: association.name,
     invoiceNumber: invoice.invoice_number,
     description,
-    amountCents: Number(invoice.amount_cents),
+    lotNumber: invoice.lot_number,
+    amountDueCents: invoiceAmountDueCents(Number(invoice.amount_cents), Number(invoice.late_fee_cents), Number(invoice.paid_cents)),
     lateFeeCents: Number(invoice.late_fee_cents),
     dueOn: invoice.due_on,
     timeZone: association.timezone,
     payUrl,
+    payOnline,
+    feeLine: feeLineForEmail(payOnline, fee),
+    payableTo: mail.payableTo,
+    mailLines: mailLinesForEmail(mail),
+    boardNote: mail.ready ? mail.boardNote : "",
   });
   const addressOk = new Map<string, boolean>();
   const addresses: string[] = [];
@@ -472,10 +487,12 @@ export async function resendInvoiceEmail(
   const due: DueInvoice = {
     id: invoice.id,
     property_id: invoice.property_id,
+    lot_number: invoice.lot_number,
     invoice_number: invoice.invoice_number,
     description: invoice.description,
     amount_cents: Number(invoice.amount_cents),
     late_fee_cents: Number(invoice.late_fee_cents),
+    paid_cents: Number(invoice.paid_cents),
     due_on: invoice.due_on,
     billed_user_id: billed,
   };
@@ -549,10 +566,14 @@ async function billedUserId(db: D1Database, associationId: string, invoiceId: st
 
 async function unsentInvoices(db: D1Database, associationId: string, today: string, enabledOn: string): Promise<DueInvoice[]> {
   const billed = (await columnReady(db, "invoices", "billed_user_id")) ? "i.billed_user_id" : "NULL AS billed_user_id";
+  const reversals = await paymentReversalsReady(db);
+  const excludeTest = await paymentTestReady(db);
   const { results } = await db
     .prepare(
-      `SELECT i.id, i.property_id, i.invoice_number, i.description, i.amount_cents, i.late_fee_cents, i.due_on, ${billed}
+      `SELECT i.id, i.property_id, p.lot_number, i.invoice_number, i.description, i.amount_cents, i.late_fee_cents, i.due_on, ${billed},
+              ${invoiceNetPaidSql(reversals, excludeTest)} AS paid_cents
        FROM invoices i
+       JOIN properties p ON p.id = i.property_id AND p.association_id = i.association_id
        WHERE i.association_id = ?
          AND i.status != 'void'
          AND i.issued_on <= ?

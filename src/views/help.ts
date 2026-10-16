@@ -11,6 +11,7 @@ export const CLEAR_STUCK_TOPIC = "Clear stuck transfer";
 export const INVOICE_EMAIL_TOPIC = "Invoice emails";
 export const LATE_FEE_TOPIC = "Late fees";
 export const RESEND_INVOICE_TOPIC = "Email this invoice";
+export const MAILED_CHECKS_TOPIC = "Mailed checks";
 
 export const PROCESSING_HELP =
   "Bank transfers usually take about 4 business days to clear. Your balance will update automatically once your payment goes through. You don't need to do anything.";
@@ -41,6 +42,9 @@ export const LATE_FEE_HELP =
 
 export const RESEND_INVOICE_HELP =
   "Sends this invoice to the owners of this lot, with a link to view and pay. You can send it again once a minute.";
+
+export const MAILED_CHECKS_HELP =
+  "These lines appear on invoice emails so an owner can mail a check. Leave the mailing address blank to hide that box. The note is optional and stays off the email when it is blank. Checks payable to uses the association name when you leave it blank.";
 
 /** One help control. className is an extra class on the wrapper, such as help-desktop or help-mobile. */
 export function helpTip(topic: string, text: string, className = ""): string {

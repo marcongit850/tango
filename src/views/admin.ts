@@ -57,8 +57,9 @@ import {
   invoiceEmailHistoryLine,
   type InvoiceEmailHistoryEntry,
 } from "../lib/invoice-emails";
+import { INVOICE_MAIL_MIGRATION_MESSAGE, type InvoiceMailSettings } from "../lib/invoice-mail";
 import { formatLateFeePercent, type LateFeeSettingsView } from "../lib/late-fees";
-import { CLEAR_STUCK_HELP, CLEAR_STUCK_TOPIC, INVOICE_EMAIL_HELP, INVOICE_EMAIL_TOPIC, LATE_FEE_HELP, LATE_FEE_TOPIC, RESEND_INVOICE_HELP, RESEND_INVOICE_TOPIC, ROLE_HELP, ROLE_TOPIC, STRIPE_KEY_HELP, STRIPE_KEY_TOPIC, WEBHOOK_HELP, WEBHOOK_TOPIC, helpTip } from "./help";
+import { CLEAR_STUCK_HELP, CLEAR_STUCK_TOPIC, INVOICE_EMAIL_HELP, INVOICE_EMAIL_TOPIC, LATE_FEE_HELP, LATE_FEE_TOPIC, MAILED_CHECKS_HELP, MAILED_CHECKS_TOPIC, RESEND_INVOICE_HELP, RESEND_INVOICE_TOPIC, ROLE_HELP, ROLE_TOPIC, STRIPE_KEY_HELP, STRIPE_KEY_TOPIC, WEBHOOK_HELP, WEBHOOK_TOPIC, helpTip } from "./help";
 
 function adminNav(slug: string, current: string, canEdit = true): string {
   const links = [
@@ -911,6 +912,7 @@ export function paymentSettingsPage(options: {
   invoiceEmailsReady: boolean;
   invoiceEmailsEnabled: boolean;
   invoiceEmailsEnabledOn?: string | null;
+  mail: InvoiceMailSettings;
   processing?: StuckProcessingCheckout[];
   lateFees?: LateFeeSettingsView;
 }): string {
@@ -930,6 +932,7 @@ export function paymentSettingsPage(options: {
       <p class="muted">Only an admin can change these keys. Officers and people with the admin flag share that access. There is no separate treasurer role. Keys are encrypted and are not shown again. Activity records that a key was saved, replaced, or removed, not the key itself. Online payments are ACH bank transfer only. Credit and debit cards are not accepted. Bank account numbers are not collected on this site. Stripe hosts the bank page. A checkout page expires after 30 minutes. A bank transfer usually takes 4 business days to settle, and the invoice is credited only after it succeeds.</p>
       <p class="muted">Test mode shows Pay now only to an admin. Owners see Pay now after a live key is saved. A test-mode payment is saved as Test payment, not applied. It does not change the invoice or the balance. A live event is recorded only when the saved key is live.</p>
       ${invoiceEmailSection(options)}
+      ${mailedChecksSection(options.association, options.mail)}
       <h2>Bank transfer processing fee</h2>
       <p class="muted">Homeowners who pay online cover the bank transfer processing fee. Mailing a check stays fee-free. The fee is grossed up, rounded up to the next cent, and capped so the association receives the full invoice amount. It is not applied to invoices or balances.</p>
       ${options.ready && !options.feeReady ? `<p>Apply migrations/0022_bank_transfer_fee.sql in D1, then reload, before this fee can be saved. Until then, online payments do not add a fee.</p>` : ""}
@@ -1004,6 +1007,28 @@ function invoiceEmailSection(options: {
     <form class="fields" method="post" action="${base}/invoice-emails">
       <label><input type="checkbox" name="invoice_emails" value="yes"${options.invoiceEmailsEnabled ? " checked" : ""}> Email each owner their invoice on the issue date</label>
       <button type="submit">Save invoice emails</button>
+    </form>`;
+}
+
+function mailedChecksSection(association: Association, mail: InvoiceMailSettings): string {
+  const base = `/a/${esc(association.slug)}/admin/payment-settings`;
+  const heading = `<h2 id="mailed-checks">Mailed checks${helpTip(MAILED_CHECKS_TOPIC, MAILED_CHECKS_HELP)}</h2>`;
+  const preview = `<p><a href="${base}/invoice-email-preview" target="_blank" rel="noopener">Preview invoice email</a></p>`;
+  if (!mail.ready) {
+    return `${heading}
+      <p>${esc(INVOICE_MAIL_MIGRATION_MESSAGE)} Until then, invoice emails leave out the check box and the board note.</p>
+      ${preview}`;
+  }
+  return `${heading}
+    <p class="muted">Shown on invoice emails. Leave the mailing address blank to hide the check box. Leave the note blank to hide it. Checks payable to uses the association name when you leave it blank.</p>
+    ${preview}
+    <form class="fields" method="post" action="${base}/mailed-checks">
+      ${textField("Checks payable to", "payable_to", { value: mail.payableTo })}
+      ${areaField("Mailing address", "mailing_address", mail.mailingAddress)}
+      <p class="muted">Up to 5 lines.</p>
+      ${areaField("Note from the board on invoice emails", "board_note", mail.boardNote)}
+      <p class="muted">Optional. Up to 300 characters.</p>
+      <button type="submit">Save mailed checks</button>
     </form>`;
 }
 

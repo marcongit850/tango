@@ -99,6 +99,17 @@ const TEST_NOTE = "Test payment, not applied";
 const CHECKOUT_START_LIMIT = 10;
 const CHECKOUT_START_WINDOW_MS = 10 * 60 * 1000;
 
+/** True when Pay now is switched on and a Stripe secret key is stored. */
+export async function onlinePaymentsOn(db: D1Database, associationId: string): Promise<boolean> {
+  try {
+    const row = await settingsRow(db, associationId);
+    return Boolean(row && Number(row.enabled) === 1 && row.secret_key_ciphertext);
+  } catch (error) {
+    if (isMissingTable(error)) return false;
+    throw error;
+  }
+}
+
 export async function payOfferFor(db: D1Database, association: Association, canEdit: boolean): Promise<OwnerPayOffer> {
   if (isDemoAssociation(association)) return { kind: "demo" };
   try {

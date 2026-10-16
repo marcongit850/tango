@@ -462,7 +462,7 @@ export function paySelectPage(options: {
   const boxes = options.invoices
     .map((invoice) => {
       const label = invoice.description?.trim() ? `${invoice.invoiceNumber}, ${invoice.description}` : invoice.invoiceNumber;
-      return `<label><input type="checkbox" name="invoice_id" value="${esc(invoice.invoiceId)}" data-cents="${invoice.amountCents}" checked> Lot ${esc(invoice.lotNumber)}, ${esc(label)}, ${esc(formatMoney(invoice.amountCents))}</label>`;
+      return `<label class="pay-invoice"><input type="checkbox" name="invoice_id" value="${esc(invoice.invoiceId)}" data-cents="${invoice.amountCents}" checked><span>Lot ${esc(invoice.lotNumber)}, ${esc(label)}, ${esc(formatMoney(invoice.amountCents))}</span></label>`;
     })
     .join("");
   const form = options.invoices.length

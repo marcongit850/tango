@@ -799,8 +799,13 @@ describe("online payments", () => {
     expect(chooserHtml).toContain("invoice_demo_riley");
     expect(chooserHtml).toContain('type="checkbox"');
     expect(chooserHtml).toContain("checked");
+    expect(chooserHtml).toMatch(
+      /<label class="pay-invoice"><input type="checkbox" name="invoice_id" value="invoice_demo_riley" data-cents="\d+" checked><span>Lot [^<]+<\/span><\/label>/,
+    );
+    expect(chooserHtml).toContain("label.pay-invoice { display: flex; flex-direction: row;");
     expect(chooserHtml).toContain("pay-select.js");
     expect(chooserHtml).not.toContain("\u2014");
+    expect(chooserHtml).not.toContain("\u2013");
 
     const checkout = await app.request("http://localhost/a/seaside-demo/pay/sample?invoice_id=invoice_demo_riley", { headers: { Cookie: "tango_demo=owner" } }, env);
     const checkoutHtml = await checkout.text();

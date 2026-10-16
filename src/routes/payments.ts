@@ -4,8 +4,10 @@ import { isDemoAssociation } from "../lib/demo";
 import { isMissingTable } from "../lib/errors";
 import { canonicalPortalUrl } from "../lib/hosts";
 import { todayIso } from "../lib/dates";
-import { bankTransferFeeCents } from "../lib/bank-fee";
+import { BANK_TRANSFER_FEE_UPDATED, bankTransferFeeCents, parseDisplayedFeeCents } from "../lib/bank-fee";
+import { formatMoney } from "../lib/money";
 import {
+  abandonProcessingCheckout,
   applyStripeAdjustment,
   applyStripeCheckout,
   bankFeeConfig,
@@ -17,6 +19,7 @@ import {
   payableInvoicesForUser,
   paymentSettingsView,
   paymentsReady,
+  processingCheckoutsForAssociation,
   payOfferFor,
   reencryptPaymentSecrets,
   receiptRecipients,
@@ -53,6 +56,7 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
         ...view,
         webhookUrl: canonicalPortalUrl(association, "/webhooks/stripe"),
         demo: isDemoAssociation(association),
+        processing: await processingCheckoutsForAssociation(c.env.DB, association.id),
       }),
     });
   });
@@ -177,10 +181,27 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
         action: "payment_settings_fee",
         entityType: "payment_settings",
         entityId: association.id,
-        detail: `Bank transfer processing fee ${saved.enabled ? "on" : "off"}. ${saved.percent}% capped at $${saved.cap}.`,
+        detail: `Bank transfer processing fee changed from ${saved.previousEnabled ? "on" : "off"}, ${saved.previousPercent}% capped at $${saved.previousCap} to ${saved.enabled ? "on" : "off"}, ${saved.percent}% capped at $${saved.cap}.`,
       });
     }
     return redirectTo(c, back, saved.changed ? "Bank transfer processing fee saved." : "Payment settings saved.");
+  });
+
+  app.post("/a/:slug/admin/payment-settings/processing/:intentId/abandon", async (c) => {
+    const { association, user } = requireEditor(c);
+    await readForm(c);
+    const back = settingsPath(association.slug);
+    const cleared = await abandonProcessingCheckout(c.env.DB, association.id, c.req.param("intentId"));
+    if (!cleared.ok) return redirectTo(c, back, cleared.message, "warn");
+    await writeAudit(c.env.DB, {
+      associationId: association.id,
+      actorUserId: user.id,
+      action: "payment_processing_abandoned",
+      entityType: "checkout_intent",
+      entityId: c.req.param("intentId"),
+      detail: `Bank transfer marked abandoned. Nothing was applied to an invoice. Lot ${cleared.lotNumbers}. ${formatMoney(cleared.amountCents)}. ${c.req.param("intentId")}.`,
+    });
+    return redirectTo(c, back, "Stuck bank transfer cleared. Nothing was applied to an invoice.");
   });
 
   app.post("/a/:slug/admin/payment-settings/reencrypt", async (c) => {
@@ -238,7 +259,8 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
     params.set("sample", "1");
     for (const invoice of invoices) params.append("invoice_id", invoice.invoiceId);
     const subtotal = invoices.reduce((sum, invoice) => sum + invoice.amountCents, 0);
-    const feeCents = bankTransferFeeCents(subtotal, await bankFeeConfig(c.env.DB, association.id)) ?? 0;
+    const fee = await bankFeeConfig(c.env.DB, association.id);
+    const feeCents = bankTransferFeeCents(subtotal, fee) ?? 0;
     return render(c, {
       title: "Sample checkout",
       active: "dashboard",
@@ -248,6 +270,7 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
         successHref: `/a/${association.slug}/pay/success?${params.toString()}`,
         cancelHref: `/a/${association.slug}/pay/cancel?sample=1`,
         feeCents,
+        fee,
       }),
     });
   });
@@ -265,6 +288,27 @@ export function registerPaymentRoutes(app: Hono<AppBindings>): void {
     const requested = new Set(textList(fields, "invoice_id", 80));
     const selected = open.filter((invoice) => requested.has(invoice.invoiceId));
     if (requested.size === 0 || selected.length === 0) return redirectTo(c, back, "Choose at least one invoice.", "warn");
+    const fee = await bankFeeConfig(c.env.DB, association.id);
+    const subtotal = selected.reduce((sum, invoice) => sum + invoice.amountCents, 0);
+    const recomputed = bankTransferFeeCents(subtotal, fee);
+    if (recomputed === null) {
+      return redirectTo(c, back, "The bank transfer processing fee settings need to be corrected in Payment settings.", "warn");
+    }
+    const displayed = parseDisplayedFeeCents(textValue(fields, "fee_cents", 12));
+    if (displayed === null || displayed !== recomputed) {
+      return render(c, {
+        title: "Pay now",
+        active: "dashboard",
+        body: paySelectPage({
+          association,
+          invoices: open,
+          offer,
+          message: BANK_TRANSFER_FEE_UPDATED,
+          fee,
+          checkedIds: selected.map((invoice) => invoice.invoiceId),
+        }),
+      });
+    }
     const started = await startCheckout({
       env: c.env,
       db: c.env.DB,

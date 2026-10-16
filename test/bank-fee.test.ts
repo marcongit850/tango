@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   bankTransferFeeCents,
+  bankTransferFeeRateNote,
   formatFeeCap,
   formatFeePercent,
   invoiceCreditReversalCents,
+  parseDisplayedFeeCents,
   parseFeePercentBps,
 } from "../src/lib/bank-fee";
 
@@ -44,5 +46,18 @@ describe("bank transfer processing fee", () => {
     expect(invoiceCreditReversalCents(40_373, 0, 40_050)).toBe(40_050);
     expect(invoiceCreditReversalCents(10_000, 0, 40_050)).toBe(10_000);
     expect(invoiceCreditReversalCents(40_373, 40_050, 40_050)).toBe(0);
+  });
+
+  it("applies refunds fee-first so a fee-only refund reverses nothing", () => {
+    expect(invoiceCreditReversalCents(323, 0, 40_050, 323)).toBe(0);
+    expect(invoiceCreditReversalCents(500, 0, 40_050, 323)).toBe(177);
+    expect(invoiceCreditReversalCents(40_373, 177, 40_050, 323)).toBe(39_873);
+    expect(invoiceCreditReversalCents(40_373, 0, 40_050, 323)).toBe(40_050);
+    expect(parseDisplayedFeeCents("323")).toBe(323);
+    expect(parseDisplayedFeeCents("")).toBeNull();
+    expect(parseDisplayedFeeCents("3.23")).toBeNull();
+    expect(bankTransferFeeRateNote(standard)).toBe(
+      "About 0.8%, at most $5.00. This fee covers bank transfer processing. To avoid it, mail a check to the association.",
+    );
   });
 });

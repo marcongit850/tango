@@ -21,6 +21,7 @@ import {
   BANK_TRANSFER_FEE_NOTE,
   BANK_TRANSFER_PROCESSING_STATUS,
   bankTransferFeeCents,
+  bankTransferFeeRateNote,
   type BankFeeConfig,
 } from "../lib/bank-fee";
 import { formatMoney } from "../lib/money";
@@ -487,9 +488,11 @@ export function paySelectPage(options: {
   offer: OwnerPayOffer;
   message: string;
   fee?: BankFeeConfig;
+  checkedIds?: string[];
 }): string {
-  const subtotal = options.invoices.reduce((sum, invoice) => sum + invoice.amountCents, 0);
   const fee = options.fee ?? { enabled: false, percentBps: 0, capCents: 0 };
+  const checked = new Set(options.checkedIds ?? options.invoices.map((invoice) => invoice.invoiceId));
+  const subtotal = options.invoices.reduce((sum, invoice) => sum + (checked.has(invoice.invoiceId) ? invoice.amountCents : 0), 0);
   const feeCents = bankTransferFeeCents(subtotal, fee) ?? 0;
   const showFee = fee.enabled && fee.percentBps > 0 && fee.capCents > 0;
   const demo = options.offer.kind === "demo";
@@ -498,17 +501,19 @@ export function paySelectPage(options: {
   const boxes = options.invoices
     .map((invoice) => {
       const label = invoice.description?.trim() ? `${invoice.invoiceNumber}, ${invoice.description}` : invoice.invoiceNumber;
-      return `<label class="pay-invoice"><input type="checkbox" name="invoice_id" value="${esc(invoice.invoiceId)}" data-cents="${invoice.amountCents}" checked><span>Lot ${esc(invoice.lotNumber)}, ${esc(label)}, ${esc(formatMoney(invoice.amountCents))}</span></label>`;
+      const mark = checked.has(invoice.invoiceId) ? " checked" : "";
+      return `<label class="pay-invoice"><input type="checkbox" name="invoice_id" value="${esc(invoice.invoiceId)}" data-cents="${invoice.amountCents}"${mark}><span>Lot ${esc(invoice.lotNumber)}, ${esc(label)}, ${esc(formatMoney(invoice.amountCents))}</span></label>`;
     })
     .join("");
   const feeLine = showFee
     ? `<p>Invoices <strong data-pay-subtotal>${esc(formatMoney(subtotal))}</strong></p>
        <p>${esc(BANK_TRANSFER_FEE_LABEL)} <strong data-pay-fee>${esc(formatMoney(feeCents))}</strong></p>
-       <p class="muted">${esc(BANK_TRANSFER_FEE_NOTE)}</p>`
+       <p class="muted">${esc(bankTransferFeeRateNote(fee))}</p>`
     : "";
   const form = options.invoices.length
     ? `<form class="fields" method="${method}" action="${action}" data-pay-select data-fee-enabled="${showFee ? "1" : "0"}" data-fee-bps="${fee.percentBps}" data-fee-cap-cents="${fee.capCents}">
         ${boxes}
+        <input type="hidden" name="fee_cents" value="${feeCents}">
         ${feeLine}
         <p>Total <strong data-pay-total>${esc(formatMoney(subtotal + feeCents))}</strong></p>
         <p class="muted">Uncheck an invoice to leave it for later. The amount is the total of the invoices still checked.</p>
@@ -541,6 +546,7 @@ export function sampleCheckoutPage(options: {
   successHref: string;
   cancelHref: string;
   feeCents?: number;
+  fee?: BankFeeConfig;
 }): string {
   const subtotal = options.invoices.reduce((sum, invoice) => sum + invoice.amountCents, 0);
   const feeCents = options.feeCents ?? 0;
@@ -555,7 +561,7 @@ export function sampleCheckoutPage(options: {
   const action = options.invoices.length
     ? `<p><a class="button" href="${esc(options.successHref)}">Complete sample payment</a> <a class="button secondary" href="${esc(options.cancelHref)}">Cancel</a></p>`
     : `<p><a href="/a/${esc(options.association.slug)}/dashboard">Back to the dashboard</a></p>`;
-  const note = feeCents > 0 ? `<p class="muted">${esc(BANK_TRANSFER_FEE_NOTE)}</p>` : "";
+  const note = feeCents > 0 ? `<p class="muted">${esc(options.fee ? bankTransferFeeRateNote(options.fee) : BANK_TRANSFER_FEE_NOTE)}</p>` : "";
   return `<section class="panel">
     <p class="kicker">Sample checkout</p>
     <h1>Sample checkout</h1>

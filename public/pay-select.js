@@ -4,6 +4,7 @@
   var subtotalNode = form.querySelector("[data-pay-subtotal]");
   var feeNode = form.querySelector("[data-pay-fee]");
   var total = form.querySelector("[data-pay-total]");
+  var feeInput = form.querySelector('input[name="fee_cents"]');
   var enabled = form.getAttribute("data-fee-enabled") === "1";
   var bps = Number(form.getAttribute("data-fee-bps") || 0);
   var cap = Number(form.getAttribute("data-fee-cap-cents") || 0);
@@ -34,6 +35,7 @@
     var fee = feeCents(cents);
     if (subtotalNode) subtotalNode.textContent = money(cents);
     if (feeNode) feeNode.textContent = money(fee);
+    if (feeInput) feeInput.value = String(fee);
     if (total) total.textContent = money(cents + fee);
   }
   form.addEventListener("change", render);

@@ -7,7 +7,7 @@ import type { FeeScheduleView } from "../lib/fee-schedule-store";
 import { isAdmin, MASTER_ADMIN_DELETE_MESSAGE, MASTER_ADMIN_EDIT_MESSAGE, signInRoleLabel, type UserListGroup } from "../lib/access";
 import { esc, paragraphs } from "../lib/html";
 import { formatDollarsPlain, formatMoney } from "../lib/money";
-import type { PaymentStatusLine } from "../lib/online-payments";
+import type { PaymentStatusLine, StuckProcessingCheckout } from "../lib/online-payments";
 import type { Association, DocumentCategory } from "../types";
 import { messageWaitingOnBoard, type MessageRow } from "../db";
 import type {
@@ -896,6 +896,7 @@ export function paymentSettingsPage(options: {
   feeEnabled: boolean;
   feePercent: string;
   feeCap: string;
+  processing?: StuckProcessingCheckout[];
 }): string {
   const base = `/a/${esc(options.association.slug)}/admin/payment-settings`;
   const warnings = [
@@ -922,6 +923,7 @@ export function paymentSettingsPage(options: {
         <p class="muted">Cap from 0.00 to 25.00, such as 5.00.</p>
         <button type="submit">Save fee</button>
       </form>
+      ${processingTransfers(options.association, options.processing ?? [])}
       <p class="muted">If two online payments for the same invoice finish at the same moment, the extra amount is recorded as unapplied credit on the lot.</p>
       <h2>Webhook</h2>
       <p>In Stripe, open Developers, Webhooks, and add an endpoint. Paste this URL. Select <code>checkout.session.completed</code>, <code>checkout.session.async_payment_succeeded</code>, <code>checkout.session.async_payment_failed</code>, <code>charge.refunded</code>, <code>charge.dispute.created</code>, and <code>charge.dispute.closed</code>.</p>
@@ -957,6 +959,32 @@ export function paymentSettingsPage(options: {
            <form method="post" action="${base}/reencrypt"><button type="submit">Re-encrypt stored keys</button></form>`
         : ""}
     </section>`;
+}
+
+function processingTransfers(association: Association, rows: StuckProcessingCheckout[]): string {
+  if (rows.length === 0) return "";
+  const base = `/a/${esc(association.slug)}/admin/payment-settings`;
+  const body = rows
+    .map(
+      (row) => `<tr>
+        <td>Lot ${esc(row.lotNumbers)}</td>
+        <td>${esc(formatMoney(row.amountCents))}</td>
+        <td>${esc(formatMoney(row.feeCents))}</td>
+        <td>${dateTimeCell(row.createdAt, association.timezone)}</td>
+        <td>
+          <form method="post" action="${base}/processing/${esc(row.id)}/abandon">
+            <button type="submit">Clear stuck transfer</button>
+          </form>
+        </td>
+      </tr>`,
+    )
+    .join("");
+  return `<h2>Bank transfers still processing</h2>
+    <p class="muted">A transfer older than 14 days no longer blocks Pay now. Clear removes a stuck transfer from this list. Clearing does not credit the invoice.</p>
+    <table>
+      <thead><tr><th>Lot</th><th>Invoices</th><th>Fee</th><th>Started</th><th></th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>`;
 }
 
 function secretField(options: {

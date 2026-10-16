@@ -14,6 +14,7 @@ import {
   BANK_TRANSFER_FEE_LABEL,
   BANK_TRANSFER_PROCESSING_BLOCK,
   BANK_TRANSFER_PROCESSING_STATUS,
+  PROCESSING_BLOCK_MS,
   bankTransferFeeCents,
   DEFAULT_BANK_FEE,
   formatFeeCap,
@@ -306,7 +307,16 @@ export async function saveBankTransferFee(
   percentInput: string,
   capInput: string,
 ): Promise<
-  | { ok: true; changed: boolean; enabled: boolean; percent: string; cap: string }
+  | {
+      ok: true;
+      changed: boolean;
+      enabled: boolean;
+      percent: string;
+      cap: string;
+      previousEnabled: boolean;
+      previousPercent: string;
+      previousCap: string;
+    }
   | { ok: false; message: string }
 > {
   if (!(await paymentsReady(db))) return { ok: false, message: migrationMessage() };
@@ -328,7 +338,14 @@ export async function saveBankTransferFee(
   const unchanged = previous.processing_fee_enabled === (enabled ? 1 : 0)
     && previous.processing_fee_bps === bps
     && previous.processing_fee_cap_cents === cap;
-  const summary = { enabled, percent: formatFeePercent(bps), cap: formatFeeCap(cap) };
+  const summary = {
+    enabled,
+    percent: formatFeePercent(bps),
+    cap: formatFeeCap(cap),
+    previousEnabled: previous.processing_fee_enabled === 1,
+    previousPercent: formatFeePercent(previous.processing_fee_bps),
+    previousCap: formatFeeCap(previous.processing_fee_cap_cents),
+  };
   if (unchanged && (current || (enabled && bps === DEFAULT_BANK_FEE.percentBps && cap === DEFAULT_BANK_FEE.capCents))) {
     return { ok: true, changed: false, ...summary };
   }
@@ -786,10 +803,10 @@ export async function processingCheckoutsForUser(
     .prepare(
       `SELECT id, amount_cents, ${feeSelect}, lot_numbers, created_at
        FROM checkout_intents
-       WHERE association_id = ? AND user_id = ? AND status = 'processing'
+       WHERE association_id = ? AND user_id = ? AND status = 'processing' AND created_at >= ?
        ORDER BY created_at DESC`,
     )
-    .bind(associationId, userId)
+    .bind(associationId, userId, processingBlockCutoff())
     .all<{ id: string; amount_cents: number; fee_cents: number; lot_numbers: string; created_at: string }>();
   return results.map((row) => ({
     id: row.id,
@@ -798,6 +815,62 @@ export async function processingCheckoutsForUser(
     lotNumbers: row.lot_numbers,
     createdAt: row.created_at,
   }));
+}
+
+export type StuckProcessingCheckout = ProcessingCheckout;
+
+/** Every processing bank transfer, including ones older than 14 days, so the board can clear a stuck one. */
+export async function processingCheckoutsForAssociation(
+  db: D1Database,
+  associationId: string,
+): Promise<StuckProcessingCheckout[]> {
+  if (!(await checkoutStatusReady(db))) return [];
+  const feeSelect = (await checkoutFeeReady(db)) ? "fee_cents" : "0 AS fee_cents";
+  const { results } = await db
+    .prepare(
+      `SELECT id, amount_cents, ${feeSelect}, lot_numbers, created_at
+       FROM checkout_intents
+       WHERE association_id = ? AND status = 'processing'
+       ORDER BY created_at`,
+    )
+    .bind(associationId)
+    .all<{ id: string; amount_cents: number; fee_cents: number; lot_numbers: string; created_at: string }>();
+  return results.map((row) => ({
+    id: row.id,
+    amountCents: Number(row.amount_cents),
+    feeCents: Number(row.fee_cents) || 0,
+    lotNumbers: row.lot_numbers,
+    createdAt: row.created_at,
+  }));
+}
+
+/** Marks a processing checkout abandoned. Does not insert a payment and does not credit an invoice. */
+export async function abandonProcessingCheckout(
+  db: D1Database,
+  associationId: string,
+  intentId: string,
+): Promise<{ ok: true; lotNumbers: string; amountCents: number } | { ok: false; message: string }> {
+  if (!(await checkoutStatusReady(db))) {
+    return { ok: false, message: "Apply migrations/0022_bank_transfer_fee.sql in D1, then try again." };
+  }
+  const intent = await db
+    .prepare(
+      `SELECT id, status, lot_numbers, amount_cents FROM checkout_intents WHERE association_id = ? AND id = ?`,
+    )
+    .bind(associationId, intentId)
+    .first<{ id: string; status: string; lot_numbers: string; amount_cents: number }>();
+  if (!intent) return { ok: false, message: "That bank transfer was not found." };
+  if (intent.status === "abandoned") return { ok: false, message: "That bank transfer is already cleared." };
+  if (intent.status !== "processing") return { ok: false, message: "Only a processing bank transfer can be cleared." };
+  const saved = await db
+    .prepare(
+      `UPDATE checkout_intents SET status = 'abandoned'
+       WHERE association_id = ? AND id = ? AND status = 'processing'`,
+    )
+    .bind(associationId, intentId)
+    .run();
+  if (Number(saved.meta.changes) === 0) return { ok: false, message: "That bank transfer was not cleared. Try again." };
+  return { ok: true, lotNumbers: intent.lot_numbers, amountCents: Number(intent.amount_cents) };
 }
 
 export async function checkoutReturnState(
@@ -815,7 +888,7 @@ export async function checkoutReturnState(
     .bind(associationId, userId, sessionId)
     .first<{ status: string }>();
   if (row?.status === "succeeded") return "succeeded";
-  if (row?.status === "failed") return "failed";
+  if (row?.status === "failed" || row?.status === "abandoned") return "failed";
   return "processing";
 }
 
@@ -906,6 +979,7 @@ async function markCheckoutLifecycle(
       statusSql: null,
     });
   }
+  if (intent.status === "abandoned") return { ok: true };
   if (intent.status === next) return { ok: true };
   if (next === "processing" && intent.status === "failed") return { ok: true };
   const copy = next === "processing"
@@ -1397,17 +1471,25 @@ async function postRefund(
   }
   const already = await reversedCents(db, association.id, event.paymentId, "refund");
   const ledgerSubtotal = ledger.reduce((sum, payment) => sum + Number(payment.amount_cents), 0);
-  // A full Stripe refund includes the bank transfer processing fee. Only the subtotal was invoice credit.
-  const delta = invoiceCreditReversalCents(event.amountRefunded, already, ledgerSubtotal);
+  const feeCents = ledger.reduce((sum, payment) => sum + Number(payment.fee_cents), 0);
+  // Refunds are fee-first. A refund of only the processing fee does not reverse invoice credit.
+  const delta = invoiceCreditReversalCents(event.amountRefunded, already, ledgerSubtotal, feeCents);
   if (delta <= 0) {
+    const feeOnly = feeCents > 0 && event.amountRefunded <= feeCents;
+    const body = feeOnly
+      ? `The Stripe refund was the bank transfer processing fee and was not applied to the invoice. ${event.paymentId}.`
+      : `Stripe reported a refund that was already on the ledger. ${event.paymentId}.`;
+    const detail = feeOnly
+      ? `Fee-only refund was not applied to the invoice. ${event.paymentId}. ${event.chargeId}.`
+      : `Refund already recorded. ${event.paymentId}.`;
     await finishAdjustment(db, association, {
       eventId: event.eventId,
       kind: "refund",
       stripePaymentId: event.paymentId,
       title: "Online refund",
-      body: `Stripe reported a refund that was already on the ledger. ${event.paymentId}.`,
+      body,
       action: "payment_refund",
-      detail: `Refund already recorded. ${event.paymentId}.`,
+      detail,
       statements: [],
     });
     return { ok: true, duplicate: false };
@@ -1429,9 +1511,9 @@ async function postRefund(
     statements.push(await invoiceStatusUpdate(db, association.id, invoiceId, change));
   }
   const applied = slices.reduce((sum, slice) => sum + slice.amountCents, 0);
-  const feePortion = Math.max(0, event.amountRefunded - ledgerSubtotal);
-  const feeSentence = feePortion > 0
-    ? ` ${formatMoney(feePortion)} of the Stripe refund was the bank transfer processing fee and was not applied to the invoice.`
+  const feeCovered = Math.min(feeCents, Math.max(0, event.amountRefunded));
+  const feeSentence = feeCovered > 0
+    ? ` ${formatMoney(feeCovered)} of the Stripe refund was the bank transfer processing fee and was not applied to the invoice.`
     : "";
   await finishAdjustment(db, association, {
     eventId: event.eventId,
@@ -1652,7 +1734,7 @@ async function finishAdjustment(
   }
 }
 
-type StripeLedgerPayment = { id: string; property_id: string; invoice_id: string | null; amount_cents: number; is_test: number };
+type StripeLedgerPayment = { id: string; property_id: string; invoice_id: string | null; amount_cents: number; fee_cents: number; is_test: number };
 
 function ledgerPayments(payments: StripeLedgerPayment[]): StripeLedgerPayment[] {
   return payments.filter((payment) => Number(payment.is_test) !== 1);
@@ -1661,9 +1743,10 @@ function ledgerPayments(payments: StripeLedgerPayment[]): StripeLedgerPayment[] 
 async function stripePayments(db: D1Database, associationId: string, paymentId: string): Promise<StripeLedgerPayment[]> {
   if (!paymentId) return [];
   const testColumn = (await paymentTestReady(db)) ? "is_test" : "0 AS is_test";
+  const feeColumn = (await paymentFeeReady(db)) ? "fee_cents" : "0 AS fee_cents";
   const { results } = await db
     .prepare(
-      `SELECT id, property_id, invoice_id, amount_cents, ${testColumn}
+      `SELECT id, property_id, invoice_id, amount_cents, ${feeColumn}, ${testColumn}
        FROM payments
        WHERE association_id = ? AND method = 'stripe' AND reference = ?
        ORDER BY created_at`,
@@ -2048,6 +2131,10 @@ async function checkoutStatusReady(db: D1Database): Promise<boolean> {
   return hasColumn(db, "checkout_intents", "status");
 }
 
+function processingBlockCutoff(now = Date.now()): string {
+  return new Date(now - PROCESSING_BLOCK_MS).toISOString();
+}
+
 async function processingCoversInvoices(
   db: D1Database,
   associationId: string,
@@ -2057,9 +2144,9 @@ async function processingCoversInvoices(
   const { results } = await db
     .prepare(
       `SELECT allocation_json FROM checkout_intents
-       WHERE association_id = ? AND status = 'processing'`,
+       WHERE association_id = ? AND status = 'processing' AND created_at >= ?`,
     )
-    .bind(associationId)
+    .bind(associationId, processingBlockCutoff())
     .all<{ allocation_json: string }>();
   const wanted = new Set(invoiceIds);
   for (const row of results) {

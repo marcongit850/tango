@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
 import { DEFAULT_BANK_FEE, invoiceBankFeeLine } from "../src/lib/bank-fee";
 import { invoiceAmountDueCents, invoiceOwnerEmail, sampleInvoiceOwnerEmail } from "../src/lib/email";
-import { DEMO_INVOICE_BOARD_NOTE, invoiceMailSettings } from "../src/lib/invoice-mail";
+import { associationCheckMailLines, DEMO_INVOICE_BOARD_NOTE, invoiceMailSettings, mailedCheckAddressHint, mailLinesForEmail } from "../src/lib/invoice-mail";
 import { MAILED_CHECKS_HELP } from "../src/views/help";
 import { sha256Hex } from "../src/lib/tokens";
 
@@ -236,6 +236,7 @@ describe("mailed check settings", () => {
     expect(demoHtml).toContain("PO Box 123");
     expect(demoHtml).toContain("Sample Harbor, FL 32550");
     expect(demoHtml).toContain(DEMO_INVOICE_BOARD_NOTE);
+    expect(demoHtml).not.toContain("Blank uses the association address");
     expect(demoHtml).not.toContain("\u2014");
     expect(demoHtml).not.toContain("\u2013");
 
@@ -327,8 +328,80 @@ describe("mailed check settings", () => {
       headers: { Cookie: `tango_session=${jordan}` },
     }, env);
     const previewHtml = await preview.text();
-    expect(previewHtml).not.toContain("Prefer to mail a check?");
+    expect(previewHtml).toContain("Attn: Board of Directors");
+    expect(previewHtml).toContain("31 Tang O Mar Drive, Miramar Beach, FL 32550");
     expect(previewHtml).not.toContain("A note from the board:");
     expect(previewHtml).toContain(">View invoice</a>");
+  });
+
+  it("falls back to the association address when the mailed check address is blank", async () => {
+    const opened = openPortal();
+    sqlite = opened.sqlite;
+    db = opened.db;
+    env = { DB: db, APP_ENV: "production" } as unknown as Env;
+    jordan = await signIn("user_jordan");
+    const tango = {
+      name: "Tang-O-Mar",
+      address_line1: "31 Tang O Mar Drive",
+      city: "Miramar Beach",
+      state: "FL",
+      postal_code: "32550",
+    };
+    const empty = { ready: true, payableTo: "", mailingAddress: "", boardNote: "" };
+    expect(mailLinesForEmail(empty, tango)).toEqual([
+      "Tang-O-Mar",
+      "Attn: Board of Directors",
+      "31 Tang O Mar Drive, Miramar Beach, FL 32550",
+    ]);
+    expect(mailedCheckAddressHint("PO Box 9", tango)).toBe("");
+    expect(mailLinesForEmail({ ...empty, mailingAddress: "PO Box 9" }, tango)).toEqual(["PO Box 9"]);
+    expect(associationCheckMailLines({ name: "Fish & Chips", address_line1: "TBD", city: "", state: "", postal_code: "" })).toEqual([
+      "Fish & Chips",
+      "Attn: Board of Directors",
+      "TBD",
+    ]);
+    expect(mailLinesForEmail(empty, { ...tango, address_line1: " " })).toEqual([]);
+    expect(mailLinesForEmail({ ...empty, ready: false }, tango)).toEqual(mailLinesForEmail(empty, tango));
+    expect(mailedCheckAddressHint("", { ...tango, address_line1: "" })).toBe("");
+
+    const app = createApp();
+    const page = await app.request("http://localhost/a/tango-mar/admin/payment-settings", {
+      headers: { Cookie: `tango_session=${jordan}` },
+    }, env);
+    const html = await page.text();
+    const hint = "Blank uses the association address: Tang-O-Mar, Attn: Board of Directors, 31 Tang O Mar Drive, Miramar Beach, FL 32550";
+    expect(html).toContain(hint);
+    expect(html).not.toContain("\u2014");
+    expect(html).not.toContain("\u2013");
+
+    const preview = await app.request("http://localhost/a/tango-mar/admin/payment-settings/invoice-email-preview", {
+      headers: { Cookie: `tango_session=${jordan}` },
+    }, env);
+    const previewHtml = await preview.text();
+    expect(previewHtml).toContain("Attn: Board of Directors");
+    expect(previewHtml).toContain("31 Tang O Mar Drive, Miramar Beach, FL 32550");
+    expect(previewHtml).toContain("payable to <strong>Tang-O-Mar</strong>");
+
+    sqlite.prepare("UPDATE associations SET address_line1 = 'TBD', city = '', state = '', postal_code = '' WHERE id = 'assoc_tango_mar'").run();
+    const tbdPage = await app.request("http://localhost/a/tango-mar/admin/payment-settings", {
+      headers: { Cookie: `tango_session=${jordan}` },
+    }, env);
+    expect(await tbdPage.text()).toContain("Blank uses the association address: Tang-O-Mar, Attn: Board of Directors, TBD");
+    const tbdPreview = await app.request("http://localhost/a/tango-mar/admin/payment-settings/invoice-email-preview", {
+      headers: { Cookie: `tango_session=${jordan}` },
+    }, env);
+    const tbdHtml = await tbdPreview.text();
+    expect(tbdHtml).toContain(">TBD<");
+    expect(tbdHtml).toContain("Attn: Board of Directors");
+
+    sqlite.prepare("UPDATE associations SET address_line1 = '' WHERE id = 'assoc_tango_mar'").run();
+    const barePage = await app.request("http://localhost/a/tango-mar/admin/payment-settings", {
+      headers: { Cookie: `tango_session=${jordan}` },
+    }, env);
+    expect(await barePage.text()).not.toContain("Blank uses the association address");
+    const barePreview = await app.request("http://localhost/a/tango-mar/admin/payment-settings/invoice-email-preview", {
+      headers: { Cookie: `tango_session=${jordan}` },
+    }, env);
+    expect(await barePreview.text()).not.toContain("Prefer to mail a check?");
   });
 });

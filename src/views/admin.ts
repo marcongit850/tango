@@ -57,7 +57,7 @@ import {
   invoiceEmailHistoryLine,
   type InvoiceEmailHistoryEntry,
 } from "../lib/invoice-emails";
-import { INVOICE_MAIL_MIGRATION_MESSAGE, type InvoiceMailSettings } from "../lib/invoice-mail";
+import { INVOICE_MAIL_MIGRATION_MESSAGE, mailedCheckAddressHint, type InvoiceMailSettings } from "../lib/invoice-mail";
 import { formatLateFeePercent, type LateFeeSettingsView } from "../lib/late-fees";
 import { CLEAR_STUCK_HELP, CLEAR_STUCK_TOPIC, INVOICE_EMAIL_HELP, INVOICE_EMAIL_TOPIC, LATE_FEE_HELP, LATE_FEE_TOPIC, MAILED_CHECKS_HELP, MAILED_CHECKS_TOPIC, RESEND_INVOICE_HELP, RESEND_INVOICE_TOPIC, ROLE_HELP, ROLE_TOPIC, STRIPE_KEY_HELP, STRIPE_KEY_TOPIC, WEBHOOK_HELP, WEBHOOK_TOPIC, helpTip } from "./help";
 
@@ -1016,15 +1016,17 @@ function mailedChecksSection(association: Association, mail: InvoiceMailSettings
   const preview = `<p><a href="${base}/invoice-email-preview" target="_blank" rel="noopener">Preview invoice email</a></p>`;
   if (!mail.ready) {
     return `${heading}
-      <p>${esc(INVOICE_MAIL_MIGRATION_MESSAGE)} Until then, invoice emails leave out the check box and the board note.</p>
+      <p>${esc(INVOICE_MAIL_MIGRATION_MESSAGE)} Until then, invoice emails leave out the board note. The check box uses the association address.</p>
       ${preview}`;
   }
+  const addressHint = mailedCheckAddressHint(mail.mailingAddress, association);
   return `${heading}
-    <p class="muted">Shown on invoice emails. Leave the mailing address blank to hide the check box. Leave the note blank to hide it. Checks payable to uses the association name when you leave it blank.</p>
+    <p class="muted">Shown on invoice emails. Leave the mailing address blank to use the association address. Leave the note blank to hide it. Checks payable to uses the association name when you leave it blank.</p>
     ${preview}
     <form class="fields" method="post" action="${base}/mailed-checks">
       ${textField("Checks payable to", "payable_to", { value: mail.payableTo })}
       ${areaField("Mailing address", "mailing_address", mail.mailingAddress)}
+      ${addressHint ? `<p class="muted">${esc(addressHint)}</p>` : ""}
       <p class="muted">Up to 5 lines.</p>
       ${areaField("Note from the board on invoice emails", "board_note", mail.boardNote)}
       <p class="muted">Optional. Up to 300 characters.</p>

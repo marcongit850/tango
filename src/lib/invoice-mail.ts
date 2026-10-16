@@ -1,5 +1,6 @@
 import type { Association } from "../types";
 import { invoiceBankFeeLine, type BankFeeConfig } from "./bank-fee";
+import { formatAddress } from "./dates";
 import { invoiceOwnerEmail } from "./email";
 import { tableExists } from "./fee-schedule-store";
 import { canonicalPortalUrl } from "./hosts";
@@ -73,9 +74,35 @@ export async function saveInvoiceMailSettings(
   return { ok: true };
 }
 
-export function mailLinesForEmail(settings: InvoiceMailSettings): string[] {
-  if (!settings.ready) return [];
-  return mailAddressLines(settings.mailingAddress).slice(0, 5);
+type CheckAddressSource = {
+  name: string;
+  address_line1: string;
+  city: string;
+  state: string;
+  postal_code: string;
+};
+
+/** Same lines the public Estoppel page shows. A street of TBD is kept as written. */
+export function associationCheckMailLines(association: CheckAddressSource): string[] {
+  if (!association.address_line1.trim()) return [];
+  return [association.name.trim(), "Attn: Board of Directors", formatAddress(association)];
+}
+
+/** Saved mailing address, or the association address when that box is blank. Empty only when both are blank. */
+export function mailLinesForEmail(settings: InvoiceMailSettings, association: CheckAddressSource): string[] {
+  if (settings.ready) {
+    const saved = mailAddressLines(settings.mailingAddress).slice(0, 5);
+    if (saved.length > 0) return saved;
+  }
+  return associationCheckMailLines(association);
+}
+
+/** Muted line under a blank Mailed checks address. Empty when a custom address is saved or the association has no street. */
+export function mailedCheckAddressHint(mailingAddress: string, association: CheckAddressSource): string {
+  if (mailAddressLines(mailingAddress).length > 0) return "";
+  const lines = associationCheckMailLines(association);
+  if (lines.length === 0) return "";
+  return `Blank uses the association address: ${lines.join(", ")}`;
 }
 
 /** Sample letter for the Payment settings preview. Uses this HOA's saved check details and payment switch. */
@@ -98,7 +125,7 @@ export async function previewInvoiceEmail(db: D1Database, association: Associati
     payOnline,
     feeLine: payOnline ? invoiceBankFeeLine(fee) : "",
     payableTo: mail.payableTo,
-    mailLines: mailLinesForEmail(mail),
+    mailLines: mailLinesForEmail(mail, association),
     boardNote: mail.ready ? mail.boardNote : "",
   });
   return { html: letter.html };

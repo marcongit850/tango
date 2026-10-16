@@ -31,5 +31,5 @@ SELECT
 Attn: Treasurer
 PO Box 123
 Sample Harbor, FL 32550',
-  'Thank you. Paying by the due date helps the board keep this sample neighborhood running.'
+  'Thank you for keeping our neighborhood beautiful. Dues are unchanged for 2027.'
 WHERE NOT EXISTS (SELECT 1 FROM invoice_mail_settings WHERE association_id = 'assoc_seaside_demo');

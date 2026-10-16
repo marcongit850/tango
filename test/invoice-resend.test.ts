@@ -198,7 +198,7 @@ describe("email this invoice", () => {
     expect(calls[0]?.to).toEqual(["casey.nguyen@example.com"]);
     expect(calls[0]?.subject).toBe("Tang-O-Mar: Opening balance (CSV import) invoice");
     expect(calls[0]?.text).toContain("View invoice: " + PAY_URL);
-    expect(calls[0]?.text).toContain("Lot: 27");
+    expect(calls[0]?.text).toContain("Lot: Lot 27");
     expect(calls[0]?.text).toContain("Late fee: $25.00");
     expect(calls[0]?.text).toContain("Amount due: $400.50");
     expect(calls[0]?.html).toContain(`href="${PAY_URL}"`);

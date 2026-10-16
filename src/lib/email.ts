@@ -143,8 +143,39 @@ export function invoiceAmountDueCents(amountCents: number, lateFeeCents: number,
   return Math.round(due);
 }
 
-const EMAIL_FONT = "Segoe UI, Helvetica, Arial, sans-serif";
-const EMAIL_SERIF = "Georgia, 'Times New Roman', serif";
+const EMAIL_FONT = "Arial, Helvetica, sans-serif";
+const EMAIL_BLUE = "#1d4e89";
+const EMAIL_INK = "#1f2933";
+const EMAIL_LABEL = "#616e7c";
+const EMAIL_LINE = "#eef1f4";
+const EMAIL_BORDER = "#e1e5ea";
+
+/** Shows a stored lot number as "Lot 12". A value that already starts with Lot is left as written. */
+export function invoiceLotLabel(lotNumber: string): string {
+  const value = oneLine(lotNumber);
+  if (!value) return "Lot";
+  if (/^lot\b/i.test(value)) return value;
+  return `Lot ${value}`;
+}
+
+/** Approved sample letter. `npx tsx scripts/render-invoice-email.ts` prints this as JSON. */
+export function sampleInvoiceOwnerEmail(): { subject: string; text: string; html: string } {
+  return invoiceOwnerEmail({
+    associationName: "Seaside Demo HOA",
+    invoiceNumber: "2027-ANNUAL-014",
+    description: "2027 Annual Assessment",
+    lotNumber: "12",
+    amountDueCents: 62500,
+    dueOn: "2027-01-31",
+    timeZone: "America/Chicago",
+    payUrl: "https://myhoadashboard.com/seaside/invoices/sample",
+    payOnline: true,
+    feeLine: "Pay securely online by bank transfer. A bank fee of 0.8% (up to $5) is added.",
+    payableTo: "Seaside Demo HOA",
+    mailLines: ["Seaside Demo HOA", "Attn: Treasurer", "PO Box 123", "Sample Harbor, FL 32550"],
+    boardNote: "Thank you for keeping our neighborhood beautiful. Dues are unchanged for 2027.",
+  });
+}
 
 /** Branded invoice letter. Sent on issued_on, and again when an admin chooses Email this invoice. */
 export function invoiceOwnerEmail(input: {
@@ -166,7 +197,7 @@ export function invoiceOwnerEmail(input: {
   const associationName = oneLine(input.associationName) || "Your association";
   const description = oneLine(input.description) || "Invoice";
   const invoiceNumber = oneLine(input.invoiceNumber) || "Invoice";
-  const lotNumber = oneLine(input.lotNumber) || "Lot";
+  const lotLabel = invoiceLotLabel(input.lotNumber);
   const due = formatDate(input.dueOn, input.timeZone);
   const lateFeeCents = input.lateFeeCents ?? 0;
   const amountDue = formatMoney(invoiceAmountDueCents(input.amountDueCents, 0, 0));
@@ -179,18 +210,20 @@ export function invoiceOwnerEmail(input: {
   const boardNote = oneLine(input.boardNote ?? "");
   const subject = `${associationName}: ${description} invoice`;
   const intro = `Your ${description} invoice is ready.`;
-  const lines = [associationName, "", intro, "", `Invoice number: ${invoiceNumber}`, `Lot: ${lotNumber}`, `Due date: ${due}`];
+  const lines = [associationName, "", intro, "", `Invoice: ${invoiceNumber}`, `Lot: ${lotLabel}`, `Due: ${due}`];
   if (lateFee) lines.push(`Late fee: ${lateFee}`);
   lines.push(`Amount due: ${amountDue}`, "", `${button}: ${input.payUrl}`);
   if (feeLine) lines.push(feeLine);
   if (mailLines.length > 0) {
     lines.push(
       "",
-      `Prefer to mail a check? No fee for checks. Make it payable to ${payableTo} and write your lot number on it. Mail to:`,
+      "Prefer to mail a check? No fee for checks.",
+      `Make it payable to ${payableTo} and write your lot number on it.`,
+      "Mail to:",
       ...mailLines,
     );
   }
-  if (boardNote) lines.push("", "A note from the board:", boardNote);
+  if (boardNote) lines.push("", `A note from the board: ${boardNote}`);
   lines.push(
     "",
     "Questions? Use the Support tab in your portal. This mailbox is not monitored.",
@@ -201,7 +234,7 @@ export function invoiceOwnerEmail(input: {
     associationName,
     intro,
     invoiceNumber,
-    lotNumber,
+    lotLabel,
     due,
     lateFee,
     amountDue,
@@ -219,7 +252,7 @@ function invoiceEmailHtml(input: {
   associationName: string;
   intro: string;
   invoiceNumber: string;
-  lotNumber: string;
+  lotLabel: string;
   due: string;
   lateFee: string;
   amountDue: string;
@@ -230,71 +263,49 @@ function invoiceEmailHtml(input: {
   mailLines: string[];
   boardNote: string;
 }): string {
-  const detailRows = [
-    detailRow("Invoice number", input.invoiceNumber),
-    detailRow("Lot", input.lotNumber),
-    detailRow("Due date", input.due),
+  const rows = [
+    detailRow("Invoice", input.invoiceNumber, true),
+    detailRow("Lot", input.lotLabel),
+    detailRow("Due", input.due),
     input.lateFee ? detailRow("Late fee", input.lateFee) : "",
-    detailRow("Amount due", input.amountDue, true),
+    detailRow("Amount due", input.amountDue, false, true),
   ].join("");
+  const buttonPad = input.feeLine ? "22px 28px 8px" : "22px 28px 18px";
   const fee = input.feeLine
-    ? `<tr><td style="padding:14px 28px 0;font-family:${EMAIL_FONT};font-size:14px;line-height:1.5;color:#5d6c74;">${esc(input.feeLine)}</td></tr>`
+    ? `<tr><td align="center" style="padding:0 28px 18px;font-family:${EMAIL_FONT};font-size:13px;color:${EMAIL_LABEL};">${esc(input.feeLine)}</td></tr>`
     : "";
   const check = input.mailLines.length
-    ? `<tr><td style="padding:18px 28px 0;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e4d9c8;background:#f7f3ea;">
-          <tr><td style="padding:14px 16px;font-family:${EMAIL_FONT};font-size:15px;line-height:1.5;color:#1b2830;">
-            Prefer to mail a check? No fee for checks. Make it payable to ${esc(input.payableTo)} and write your lot number on it. Mail to:<br>${input.mailLines.map((line) => esc(line)).join("<br>")}
-          </td></tr>
-        </table>
-      </td></tr>`
+    ? `<tr><td style="padding:0 28px${input.boardNote ? "" : " 18px"};font-family:${EMAIL_FONT};"><div style="background:#f7f9fb;border-left:4px solid ${EMAIL_BLUE};padding:14px 16px;font-size:14px;line-height:1.5;color:${EMAIL_INK};"><strong>Prefer to mail a check?</strong> No fee for checks.<br>Make it payable to <strong>${esc(input.payableTo)}</strong> and write your lot number on it.<br>Mail to:<br>${input.mailLines.map((line) => esc(line)).join("<br>")}</div></td></tr>`
     : "";
   const note = input.boardNote
-    ? `<tr><td style="padding:18px 28px 0;font-family:${EMAIL_FONT};font-size:15px;line-height:1.5;color:#1b2830;"><strong>A note from the board:</strong> ${esc(input.boardNote)}</td></tr>`
+    ? `<tr><td style="padding:18px 28px;font-family:${EMAIL_FONT};font-size:14px;line-height:1.5;color:${EMAIL_INK};"><em>A note from the board:</em> ${esc(input.boardNote)}</td></tr>`
     : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(input.subject)}</title></head>
-<body style="margin:0;padding:0;background:#f4efe6;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4efe6;">
-  <tr><td align="center" style="padding:24px 12px;">
-    <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:560px;max-width:560px;background:#fffdf8;">
-      <tr><td style="padding:22px 28px;background:#0e5e5b;font-family:${EMAIL_SERIF};font-size:24px;line-height:1.3;color:#ffffff;">${esc(input.associationName)}</td></tr>
-      <tr><td style="padding:24px 28px 0;font-family:${EMAIL_FONT};font-size:16px;line-height:1.5;color:#1b2830;">${esc(input.intro)}</td></tr>
-      <tr><td style="padding:16px 28px 0;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e4d9c8;">
-          ${detailRows}
-        </table>
-      </td></tr>
-      <tr><td style="padding:20px 28px 0;">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
-          <tr><td bgcolor="#0e5e5b" style="background:#0e5e5b;">
-            <a href="${esc(input.payUrl)}" style="display:inline-block;padding:12px 22px;font-family:${EMAIL_FONT};font-size:16px;font-weight:700;line-height:1.2;color:#ffffff;text-decoration:none;">${esc(input.button)}</a>
-          </td></tr>
-        </table>
-      </td></tr>
-      ${fee}
-      ${check}
-      ${note}
-      <tr><td style="padding:22px 28px 24px;font-family:${EMAIL_FONT};font-size:13px;line-height:1.5;color:#5d6c74;">
-        Questions? Use the Support tab in your portal. This mailbox is not monitored.<br>
-        Sent by ${esc(input.associationName)} through My HOA Dashboard.
-      </td></tr>
-    </table>
-  </td></tr>
-</table>
+<body style="margin:0;background:#f3f5f7;font-family:${EMAIL_FONT};color:${EMAIL_INK};">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f5f7;padding:28px 0;font-family:${EMAIL_FONT};color:${EMAIL_INK};"><tr><td align="center">
+<table width="560" cellpadding="0" cellspacing="0" style="width:560px;max-width:560px;background:#fff;border-radius:8px;overflow:hidden;border:1px solid ${EMAIL_BORDER};font-family:${EMAIL_FONT};color:${EMAIL_INK};">
+<tr><td style="background:${EMAIL_BLUE};color:#fff;padding:22px 28px;font-family:${EMAIL_FONT};font-size:20px;font-weight:bold;">${esc(input.associationName)}</td></tr>
+<tr><td style="padding:26px 28px 6px;font-family:${EMAIL_FONT};font-size:16px;color:${EMAIL_INK};">${esc(input.intro)}</td></tr>
+<tr><td style="padding:10px 28px;">
+<table width="100%" cellpadding="8" cellspacing="0" style="font-family:${EMAIL_FONT};font-size:15px;border:1px solid ${EMAIL_BORDER};border-radius:6px;color:${EMAIL_INK};">
+${rows}
+</table></td></tr>
+<tr><td align="center" style="padding:${buttonPad};"><a href="${esc(input.payUrl)}" style="background:${EMAIL_BLUE};color:#fff;text-decoration:none;padding:14px 34px;border-radius:6px;font-weight:bold;font-size:16px;display:inline-block;font-family:${EMAIL_FONT};">${esc(input.button)}</a></td></tr>
+${fee}${check}${note}
+<tr><td style="padding:16px 28px 22px;font-family:${EMAIL_FONT};font-size:12px;color:#8a96a3;border-top:1px solid ${EMAIL_LINE};">Questions? Use the Support tab in your portal. This mailbox is not monitored.<br>Sent by ${esc(input.associationName)} through My HOA Dashboard.</td></tr>
+</table></td></tr></table>
 </body>
 </html>`;
 }
 
-function detailRow(label: string, value: string, emphasize = false): string {
-  const valueStyle = emphasize
-    ? `font-family:${EMAIL_FONT};font-size:22px;line-height:1.3;font-weight:700;color:#1b2830;`
-    : `font-family:${EMAIL_FONT};font-size:15px;line-height:1.4;color:#1b2830;`;
-  return `<tr>
-    <td style="padding:10px 14px;width:148px;font-family:${EMAIL_FONT};font-size:14px;line-height:1.4;color:#5d6c74;vertical-align:top;">${esc(label)}</td>
-    <td style="padding:10px 14px;${valueStyle}vertical-align:top;">${esc(value)}</td>
-  </tr>`;
+function detailRow(label: string, value: string, first = false, emphasize = false): string {
+  const border = first ? "" : `border-top:1px solid ${EMAIL_LINE};`;
+  if (emphasize) {
+    return `<tr><td style="${border}font-family:${EMAIL_FONT};font-weight:bold;color:${EMAIL_INK};">${esc(label)}</td><td align="right" style="${border}font-family:${EMAIL_FONT};font-weight:bold;font-size:18px;color:${EMAIL_INK};">${esc(value)}</td></tr>`;
+  }
+  return `<tr><td style="${border}font-family:${EMAIL_FONT};color:${EMAIL_LABEL};">${esc(label)}</td><td align="right" style="${border}font-family:${EMAIL_FONT};color:${EMAIL_INK};">${esc(value)}</td></tr>`;
 }
 
 function ownerNoticeHref(slug: string, kind: OwnerNoticeKind, itemId?: string, canonicalBase?: string): string {

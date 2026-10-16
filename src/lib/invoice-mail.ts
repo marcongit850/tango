@@ -9,7 +9,7 @@ export const INVOICE_MAIL_MIGRATION_MESSAGE =
   "Apply migrations/0027_invoice_mail.sql in D1, then reload, before mailed check details can be saved.";
 
 export const DEMO_INVOICE_BOARD_NOTE =
-  "Thank you. Paying by the due date helps the board keep this sample neighborhood running.";
+  "Thank you for keeping our neighborhood beautiful. Dues are unchanged for 2027.";
 
 export type InvoiceMailSettings = {
   ready: boolean;
@@ -87,12 +87,12 @@ export async function previewInvoiceEmail(db: D1Database, association: Associati
   ]);
   const letter = invoiceOwnerEmail({
     associationName: association.name,
-    invoiceNumber: "SAMPLE-100",
-    description: "annual assessment",
+    invoiceNumber: "2027-ANNUAL-014",
+    description: "2027 Annual Assessment",
     lotNumber: "12",
-    amountDueCents: 125000,
+    amountDueCents: 62500,
     lateFeeCents: 0,
-    dueOn: "2027-03-01",
+    dueOn: "2027-01-31",
     timeZone: association.timezone,
     payUrl: canonicalPortalUrl(association, "/invoices/sample"),
     payOnline,

@@ -180,13 +180,13 @@ describe("invoice letter", () => {
     });
     expect(letter.subject).toBe("Tang-O-Mar: 2027 annual assessment invoice");
     expect(letter.text).toContain("Your 2027 annual assessment invoice is ready.");
-    expect(letter.text).toContain("Invoice number: 2027-14-ANNUAL");
-    expect(letter.text).toContain("Lot: 14");
+    expect(letter.text).toContain("Invoice: 2027-14-ANNUAL");
+    expect(letter.text).toContain("Lot: Lot 14");
     expect(letter.text).toContain("Amount due: $1,250.00");
-    expect(letter.text).toContain("Due date: March 1, 2027");
+    expect(letter.text).toContain("Due: March 1, 2027");
     expect(letter.text).toContain("View invoice: https://myhoadashboard.com/tangomar/invoices/invoice_future");
     expect(letter.html).toContain('>View invoice</a>');
-    expect(letter.html).toContain("Invoice number");
+    expect(letter.html).toContain(">Invoice</td>");
     for (const part of [letter.subject, letter.text, letter.html]) {
       expect(part).not.toContain("\u2014");
       expect(part).not.toContain("\u2013");
@@ -260,7 +260,7 @@ describe("invoice emails", () => {
     expect(calls[0]?.to).toEqual(["sam.rivera@example.com"]);
     expect(calls[0]?.subject).toBe("Tang-O-Mar: 2027 annual assessment invoice");
     expect(calls[0]?.text).toContain("View invoice: https://myhoadashboard.com/tangomar/invoices/invoice_future");
-    expect(calls[0]?.text).toContain("Lot: 14");
+    expect(calls[0]?.text).toContain("Lot: Lot 14");
     expect(calls[0]?.text).toContain("Amount due: $1,250.00");
     expect(calls[0]?.html).toContain("https://myhoadashboard.com/tangomar/invoices/invoice_future");
     expect(count(sqlite, "SELECT COUNT(*) AS n FROM invoice_email_events WHERE invoice_id = ?", "invoice_future")).toBe(1);
@@ -281,7 +281,7 @@ describe("invoice emails", () => {
     const first = await runDueInvoiceEmails(env, new Date("2026-10-16T18:00:00.000Z"), fetchImpl());
     expect(first).toEqual({ sent: 1, failed: 0 });
     expect(calls.map((call) => call.subject)).toEqual(["Tang-O-Mar: 2027 annual assessment invoice"]);
-    expect(calls[0]?.text).toContain("Invoice number: 2026-14-DAY");
+    expect(calls[0]?.text).toContain("Invoice: 2026-14-DAY");
     expect(sqlite.prepare("SELECT emailed_at FROM invoices WHERE id = 'invoice_old'").get()).toEqual({ emailed_at: null });
 
     await saveInvoiceEmailSetting(db, "assoc_tango_mar", false, "2026-12-20");
@@ -291,7 +291,7 @@ describe("invoice emails", () => {
     calls.length = 0;
     const later = await runDueInvoiceEmails(env, new Date("2027-02-01T18:00:00.000Z"), fetchImpl());
     expect(later).toEqual({ sent: 1, failed: 0 });
-    expect(calls[0]?.text).toContain("Invoice number: 2027-14-NEXT");
+    expect(calls[0]?.text).toContain("Invoice: 2027-14-NEXT");
     expect(sqlite.prepare("SELECT emailed_at FROM invoices WHERE id = 'invoice_gap'").get()).toEqual({ emailed_at: null });
   });
 
@@ -330,7 +330,7 @@ describe("invoice emails", () => {
     await enable("2027-01-01");
     const sent = await runDueInvoiceEmails(env, new Date("2027-01-01T18:00:00.000Z"), fetchImpl());
     expect(sent).toEqual({ sent: 1, failed: 0 });
-    expect(calls[0]?.text).toContain("Invoice number: 2027-14-OPEN");
+    expect(calls[0]?.text).toContain("Invoice: 2027-14-OPEN");
     expect(sqlite.prepare("SELECT emailed_at FROM invoices WHERE id = 'invoice_void'").get()).toEqual({ emailed_at: null });
   });
 
@@ -422,7 +422,7 @@ describe("invoice emails", () => {
     const result = await runDueInvoiceEmails(env, new Date(), fetchImpl());
     expect(result.sent).toBe(1);
     expect(calls[0]?.subject).toBe("Tang-O-Mar: Special assessment invoice");
-    expect(calls[0]?.text).toContain(`Invoice number: ${row.invoice_number}`);
+    expect(calls[0]?.text).toContain(`Invoice: ${row.invoice_number}`);
     expect(calls[0]?.text).toContain(`https://myhoadashboard.com/tangomar/invoices/${row.id}`);
     expect(count(sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'invoice_email' AND entity_id = ?", row.id)).toBe(1);
   });

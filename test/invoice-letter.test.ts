@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
 import { DEFAULT_BANK_FEE, invoiceBankFeeLine } from "../src/lib/bank-fee";
-import { invoiceAmountDueCents, invoiceOwnerEmail } from "../src/lib/email";
+import { invoiceAmountDueCents, invoiceOwnerEmail, sampleInvoiceOwnerEmail } from "../src/lib/email";
 import { DEMO_INVOICE_BOARD_NOTE, invoiceMailSettings } from "../src/lib/invoice-mail";
 import { MAILED_CHECKS_HELP } from "../src/views/help";
 import { sha256Hex } from "../src/lib/tokens";
@@ -129,6 +129,8 @@ describe("branded invoice email", () => {
     expect(late.text).toContain("Amount due: $85.00");
     expect(late.html).toContain("Late fee");
     expect(late.html).toContain("$85.00");
+    expect(late.html).toContain('>Late fee</td><td align="right"');
+    expect(late.html).toContain('font-size:18px');
   });
 
   it("shows Pay now and the fee line only when online payments are on", () => {
@@ -155,11 +157,23 @@ describe("branded invoice email", () => {
       mailLines: ["Tang-O-Mar", "Attn: Treasurer", "PO Box <123>", "Sample Harbor, FL 32550"],
       boardNote: "Fish & chips <note>",
     });
-    expect(full.text).toContain("Prefer to mail a check? No fee for checks. Make it payable to Tang-O-Mar and write your lot number on it. Mail to:");
+    expect(full.text).toContain("Prefer to mail a check? No fee for checks.");
+    expect(full.text).toContain("Make it payable to Tang-O-Mar and write your lot number on it.");
+    expect(full.text).toContain("Mail to:");
     expect(full.text).toContain("PO Box <123>");
     expect(full.text).toContain("A note from the board:");
     expect(full.text).toContain("Fish & chips <note>");
-    expect(full.html).toContain("payable to Tang-O-Mar");
+    expect(full.html).toContain("payable to <strong>Tang-O-Mar</strong>");
+    expect(full.html).toContain("<strong>Prefer to mail a check?</strong>");
+    expect(full.html).toContain("<em>A note from the board:</em>");
+    expect(full.html).toContain("#1d4e89");
+    expect(full.html).toContain("#f3f5f7");
+    expect(full.html).toContain("Arial, Helvetica, sans-serif");
+    expect(full.html).toContain('align="right"');
+    expect(full.html).toContain("border-left:4px solid #1d4e89");
+    expect(full.html).not.toContain("Georgia");
+    expect(full.html).not.toContain("#0e5e5b");
+    expect(full.html).toContain(">Lot 14</td>");
     expect(full.html).toContain("PO Box &lt;123&gt;");
     expect(full.html).toContain("Fish &amp; chips &lt;note&gt;");
     expect(full.html).not.toContain("<note>");
@@ -170,6 +184,20 @@ describe("branded invoice email", () => {
     expect(full.text).not.toContain("\u2013");
     expect(full.html).not.toContain("\u2014");
     expect(full.html).not.toContain("\u2013");
+  });
+
+  it("renders the approved sample letter", () => {
+    const sample = sampleInvoiceOwnerEmail();
+    expect(sample.subject).toBe("Seaside Demo HOA: 2027 Annual Assessment invoice");
+    expect(sample.text).toContain("Your 2027 Annual Assessment invoice is ready.");
+    expect(sample.text).toContain("Invoice: 2027-ANNUAL-014");
+    expect(sample.text).toContain("Lot: Lot 12");
+    expect(sample.text).toContain("Due: January 31, 2027");
+    expect(sample.text).toContain("Amount due: $625.00");
+    expect(sample.text).toContain("Pay now: https://myhoadashboard.com/seaside/invoices/sample");
+    expect(sample.html).toContain(">Pay now</a>");
+    expect(sample.html).toContain("Thank you for keeping our neighborhood beautiful. Dues are unchanged for 2027.");
+    expect(sample.html).toContain('align="center"');
   });
 });
 
@@ -221,7 +249,9 @@ describe("mailed check settings", () => {
     expect(preview.status).toBe(200);
     expect(previewHtml).toContain(">View invoice</a>");
     expect(previewHtml).not.toContain(FEE_LINE);
-    expect(previewHtml).toContain("payable to Seaside Demo HOA");
+    expect(previewHtml).toContain("payable to <strong>Seaside Demo HOA</strong>");
+    expect(previewHtml).toContain("Your 2027 Annual Assessment invoice is ready.");
+    expect(previewHtml).toContain("#1d4e89");
     expect(previewHtml).toContain(DEMO_INVOICE_BOARD_NOTE);
     expect(previewHtml).toContain('width="560"');
 
